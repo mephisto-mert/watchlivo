@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261119_v220';
-import { api, qs, isEdgeUnavailable, humanApiError } from '../api.js?v=20261119_v220';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261119_v220';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261119_v220';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261119_v220';
-import { profileSetup } from '../profile.js?v=20261119_v220';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v220';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261119_v221';
+import { api, qs, isEdgeUnavailable, humanApiError } from '../api.js?v=20261119_v221';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261119_v221';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261119_v221';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261119_v221';
+import { profileSetup } from '../profile.js?v=20261119_v221';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v221';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261119_v220';
+} from '../store.js?v=20261119_v221';
 
 const _resolveMemCache = new Map();
 
@@ -918,6 +918,16 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
       currentItems = [...allCatalogItems];
     }
     renderCategoryView();
+    if (currentQuery && catId !== 'favs') {
+      const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, q: currentQuery, category: catId, page: 1 })}`, { timeout: 10000 }).catch(() => null);
+      if (myCatReq !== catSeq || activeCat !== catId) return;
+      if (catData && Array.isArray(catData.items)) {
+        currentItems = catData.items;
+        hasMorePages = catData.hasMore !== false;
+        renderCategoryView();
+      }
+      return;
+    }
     if (catId !== 'all' && catId !== 'favs' && !currentQuery) {
       const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, category: catId, page: 1 })}`, { timeout: 10000 }).catch(() => null);
       if (myCatReq !== catSeq || activeCat !== catId) return;
@@ -1077,7 +1087,8 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     }
     contentArea.replaceChildren(spinner());
     const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, q: raw, page: 1, category: activeCat === 'favs' ? 'all' : activeCat })}`, { timeout: 14000 }).catch(() => ({ items: [] }));
-    if (mine !== seq || input.value.trim() !== raw) return;
+    const liveVal = input.value.trim();
+    if (mine !== seq || (raw ? liveVal !== raw : liveVal.length >= 2)) return;
     currentItems = catData.items || [];
     if (activeCat === 'all' && !raw) {
       allCatalogItems = [...currentItems];

@@ -3054,7 +3054,7 @@ header.navbar.top-nav-capsule {
 .lobby-tab.on {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
   border-color: rgba(255, 255, 255, 0.2) !important;
-  color: #ffffff !important;
+  color: var(--accent-ink, #041014) !important;
   box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 32%, transparent) !important;
 }
 
@@ -3311,7 +3311,7 @@ header.navbar.top-nav-capsule {
 .hero-mini-card:hover .hero-mini-play {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
   border-color: transparent !important;
-  color: #ffffff !important;
+  color: var(--accent-ink, #041014) !important;
 }
 
 /* --- Catalog Cards (.poster.catalog-card) & Action Buttons --- */
@@ -3342,7 +3342,7 @@ header.navbar.top-nav-capsule {
 .poster-cta:hover {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
   border-color: transparent !important;
-  color: #ffffff !important;
+  color: var(--accent-ink, #041014) !important;
   box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent) !important;
 }
 
@@ -5730,22 +5730,23 @@ html.is-native-apk .wl-btn-apk-dl,
 }
 .wl-continue-rm {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 18px;
-  height: 18px;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  border: none;
-  background: rgba(8, 12, 20, .86);
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(8, 12, 20, .88);
   color: #cbd5e1;
-  font-size: .62rem;
+  font-size: .72rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.wl-continue-rm:hover { background: #ef4444; color: #fff; }
-.wl-continue-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.wl-continue-rm:hover { background: #ef4444; color: #fff; border-color: #ef4444; }
+.wl-continue-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding-right: 28px; }
 .wl-continue-title { font-size: .78rem; font-weight: 800; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wl-continue-sub { font-size: .68rem; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wl-continue-prog { width: 100%; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, .14); overflow: hidden; margin-top: 2px; }
@@ -6527,7 +6528,6 @@ body,
     max-height: calc(var(--app-height, 100dvh) - 52px - var(--top-safe-offset, 0px)) !important;
     overflow: hidden !important;
     position: relative !important;
-    z-index: 1 !important;
   }
 
   .home-scroll.glass-home-shell {
@@ -6556,7 +6556,7 @@ body,
   .home-rail {
     --dock-mobile-h: calc(52px + var(--bottom-safe-offset, 8px));
     position: fixed !important;
-    top: calc(var(--app-height, 100dvh) - var(--dock-mobile-h, 60px)) !important;
+    top: auto !important;
     bottom: 0 !important;
     left: 0 !important;
     right: 0 !important;
@@ -6791,7 +6791,7 @@ body.tv-nav-active .dock-item:focus {
     display: flex !important;
     align-items: center !important;
     gap: 6px !important;
-    flex-wrap: nowrap !important;
+    flex-wrap: wrap !important;
   }
   .wl-continue-heading {
     font-size: 0.81rem !important;
@@ -7601,7 +7601,7 @@ body:has(#popup-root:not(:empty)) .wl-cookie-banner,
   }
 }
 
-@media (max-width: 960px), ((orientation: landscape) and (max-height: 560px)) {
+@media (max-width: 960px), (orientation: landscape) and (max-height: 560px) {
   .top-nav-capsule,
   .top-nav-capsule.navbar,
   header.navbar.top-nav-capsule {
@@ -7978,5 +7978,58 @@ body:has(#popup-root:not(:empty)) .wl-cookie-banner,
     min-width: 36px !important;
     padding: 0 !important;
     justify-content: center !important;
+  }
+}
+
+/* v221: Mobile dock portal visibility, episode feedback, contrast & responsive polish */
+.wl-continue-card {
+  position: relative;
+}
+.episode-card.is-unavailable {
+  border-color: rgba(245, 158, 11, 0.6) !important;
+}
+.episode-card.is-unavailable .episode-play {
+  background: rgba(245, 158, 11, 0.92) !important;
+  color: #1c1002 !important;
+}
+.popup-options .btn,
+.wl-footer-cta-btn {
+  white-space: normal !important;
+  text-align: center;
+  line-height: 1.25;
+}
+.provider-corner-tag {
+  display: block !important;
+}
+body.in-room:not(.mesh-minimized) #home-root > .floating-dock,
+body.in-room:not(.mesh-minimized) #app > .floating-dock,
+body.in-room:not(.mesh-minimized) .floating-dock {
+  display: none !important;
+}
+@media (max-width: 960px), (orientation: landscape) and (max-height: 560px) {
+  body:not(.in-room) #home-root > .floating-dock,
+  body.mesh-minimized #home-root > .floating-dock {
+    display: grid !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: fixed !important;
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 950 !important;
+  }
+}
+@media (max-width: 520px) {
+  .home-search input::placeholder {
+    font-size: 0.78rem !important;
+  }
+  .provider-cat-bar {
+    gap: 6px !important;
+  }
+  .provider-cat-pill {
+    padding: 6px 10px !important;
+    font-size: 0.74rem !important;
+    min-height: 36px !important;
   }
 }

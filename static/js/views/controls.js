@@ -1,15 +1,15 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261119_v220';
-import { api, qs as buildQs } from '../api.js?v=20261119_v220';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261119_v220';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v220';
-import { getProvider } from '../providers.js?v=20261119_v220';
-import { expectedPosition } from '../sync.js?v=20261119_v220';
-import { thumbFor } from './lobby.js?v=20261119_v220';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261119_v220';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261119_v220';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261119_v220';
-import { avatar } from '../profile.js?v=20261119_v220';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261119_v221';
+import { api, qs as buildQs } from '../api.js?v=20261119_v221';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261119_v221';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v221';
+import { getProvider } from '../providers.js?v=20261119_v221';
+import { expectedPosition } from '../sync.js?v=20261119_v221';
+import { thumbFor } from './lobby.js?v=20261119_v221';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261119_v221';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261119_v221';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261119_v221';
+import { avatar } from '../profile.js?v=20261119_v221';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -388,7 +388,7 @@ export function buildControls(frame, ctx) {
   }, seekPreview, h('div', { class: 'track' }, buf, cur, knob));
   const time = h('span', { class: 'ctl-time' }, '0:00 / 0:00');
   const isIosDevice = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-  const isIosFixedVol = Boolean(isIosDevice && !host.canControlVolume?.());
+  const isIosFixedVol = () => Boolean(isIosDevice && !host.canControlVolume?.());
   const volRange = h('input', { type: 'range', min: '0', max: '200', step: '1', value: String(Math.min(200, Math.max(0, Number(host.volume ?? 80)))), 'aria-label': 'Ses', oninput: (e) => { setRealVolume(e.target.value, { showHud: true }); } });
   const volBtn = h('button', { class: 'ctl-action', id: 'ctl-vol', 'aria-label': 'Sessiz', ...tapProps(() => { if (isActuallyMuted()) doUnlockAudio(); else { host.setMuted(true, true); update(); } }) });
   const skipBtn = h('button', { class: 'ctl-action', id: 'ctl-skip', 'data-tip': 'Atla oyu', 'aria-label': 'Atla', ...tapProps(() => actions.skip()) }, ico('skip'));
@@ -583,7 +583,7 @@ export function buildControls(frame, ctx) {
     frame.dataset.brightness = String(b);
     const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
     const spec = VIDEO_FILTERS[curFilter] || VIDEO_FILTERS.normal;
-    const useVeilOnlyDim = Boolean(isIosFixedVol || (host.adapter && !host.adapter.caps?.overlayClicks));
+    const useVeilOnlyDim = Boolean(isIosFixedVol() || (host.adapter && !host.adapter.caps?.overlayClicks));
     const fVal = (b === 100 || useVeilOnlyDim)
       ? spec.css
       : (spec.css === 'none'
@@ -1234,8 +1234,9 @@ export function buildControls(frame, ctx) {
       'aria-label': `Tepki ${em}`,
       ...tapProps(() => actions.reaction(em)),
     }, em)));
+  const volWrap = h('div', { class: `vol-wrap ${isIosFixedVol() ? 'is-fixed-vol' : ''}`.trim() }, volBtn, volRange);
   const barRow = h('div', { class: 'ctl-bar-row' },
-    h('div', { class: 'ctl-cluster-left' }, playBtn, back10Btn, fwd10Btn, h('div', { class: `vol-wrap ${isIosFixedVol ? 'is-fixed-vol' : ''}`.trim() }, volBtn, volRange), time),
+    h('div', { class: 'ctl-cluster-left' }, playBtn, back10Btn, fwd10Btn, volWrap, time),
     h('div', { class: 'ctl-spacer' }),
     h('div', { class: 'ctl-cluster-right' }, fsReactions, skipBtn, speedBtn, subBtn, snapBtn, gearBtn, castBtn, fitBtn, pipBtn, theaterBtn, fsBtn));
   const controls = h('div', { class: 'controls' },
@@ -1403,6 +1404,7 @@ export function buildControls(frame, ctx) {
     if (!duration()) return;
     e.stopPropagation();
     scrubbing = true;
+    frame.classList.add('scrubbing');
     try { timeline.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     seekFromEvent(e, false);
   });
@@ -1439,6 +1441,8 @@ export function buildControls(frame, ctx) {
   const endScrub = (e) => {
     if (!scrubbing) return;
     scrubbing = false;
+    frame.classList.remove('scrubbing');
+    seekPreview.classList.add('hidden');
     lastScrubEndedAt = Date.now();
     try { timeline.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     seekFromEvent(e, true);
@@ -2914,7 +2918,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261119_v220',
+            v: '20261119_v221',
           });
           api(`/api/rave/seasons?${q.toString()}`, { timeout: 8000 })
             .then((inf) => {
@@ -3079,6 +3083,7 @@ export function buildControls(frame, ctx) {
       volBtn.dataset.sig = volIconName;
       volBtn.replaceChildren(ico(volIconName));
     }
+    volWrap.classList.toggle('is-fixed-vol', isIosFixedVol());
     volRange.value = String(isActuallyMuted() ? 0 : Math.max(0, Math.min(200, Number(host.volume ?? 80))));
     const voiceActiveNow = Boolean(ctx.voice?.inCall || ctx.voice?.micOn || ctx.voice?.camOn || ctx.voice?.screenOn);
     miniMicBtn.classList.toggle('hidden', !voiceActiveNow);
@@ -3295,7 +3300,8 @@ export function buildControls(frame, ctx) {
           h('div', { class: 'dim' }, arg || ''),
           h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '6px' } },
             canRefresh ? h('button', { class: 'btn primary', onclick: () => refreshCurrentStreamSources() }, '🔄 Yayını Yenile') : null,
-            canSelectVideo() ? h('button', { class: 'btn', onclick: () => { setView('left', 'Search'); ctx.layout.update(); } }, 'Başka video seç') : null,
+            canSelectVideo() ? h('button', { class: 'btn', onclick: () => { if (isFullscreenActive()) toggleFullscreen(); setView('left', 'Search'); ctx.layout.update(); } }, 'Başka video seç') : null,
+            isFullscreenActive() ? h('button', { class: 'btn', onclick: () => toggleFullscreen() }, '⛶ Tam Ekrandan Çık') : null,
           ),
         );
         errorBox.classList.remove('hidden');

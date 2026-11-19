@@ -139,22 +139,51 @@ function timingSafeEqualStr(a, b) {
 }
 
 const _hmacKeyCache = new Map();
-async function getEdgeProxyCryptoKey(env, usage = "sign") {
-  const secret = String(env?.PROXY_SECRET || env?.VORTEX_SECRET || "").trim();
-  if (!secret) return null;
-  const cacheKey = `${secret}:${usage}`;
+async function importEdgeHmacKey(secretStr, usage = "sign") {
+  const s = String(secretStr || "").trim();
+  if (!s) return null;
+  const cacheKey = `${s}:${usage}`;
   if (_hmacKeyCache.has(cacheKey)) return _hmacKeyCache.get(cacheKey);
-  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [usage]);
-  if (_hmacKeyCache.size >= 8) _hmacKeyCache.clear();
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(s), { name: "HMAC", hash: "SHA-256" }, false, [usage]);
+  if (_hmacKeyCache.size >= 16) _hmacKeyCache.clear();
   _hmacKeyCache.set(cacheKey, k);
   return k;
 }
 
+async function deriveEdgeFallbackProxySecret(env) {
+  for (const k of ["VORTEX_SECRET", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_TOKEN", "REDIS_URL"]) {
+    const cand = String(env?.[k] || "").trim();
+    if (cand.length >= 24) {
+      const key = await importEdgeHmacKey(cand, "sign");
+      if (!key) continue;
+      const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("watchlivo-shared-secret-v4:PROXY_SECRET"));
+      return Array.from(new Uint8Array(mac)).slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+  }
+  return "";
+}
+
+async function getEdgeProxyCryptoKeys(env) {
+  const secrets = [];
+  const explicit = String(env?.PROXY_SECRET || "").trim();
+  if (explicit.length >= 16) secrets.push(explicit);
+  const derived = await deriveEdgeFallbackProxySecret(env);
+  if (derived && !secrets.includes(derived)) secrets.push(derived);
+  const rawFallback = String(env?.PROXY_SECRET || env?.VORTEX_SECRET || "").trim();
+  if (rawFallback && !secrets.includes(rawFallback)) secrets.push(rawFallback);
+  const keys = [];
+  for (const s of secrets) {
+    const k = await importEdgeHmacKey(s, "sign");
+    if (k) keys.push(k);
+  }
+  return keys;
+}
+
 export async function signProxySig(targetUrl, ref, env) {
-  const key = await getEdgeProxyCryptoKey(env, "sign");
-  if (!key) return "";
+  const keys = await getEdgeProxyCryptoKeys(env);
+  if (!keys.length) return "";
   const exp = Math.floor(Date.now() / 1000) + 21600;
-  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${targetUrl}|${ref || ""}|${exp}`));
+  const mac = await crypto.subtle.sign("HMAC", keys[0], new TextEncoder().encode(`${targetUrl}|${ref || ""}|${exp}`));
   const hex = Array.from(new Uint8Array(mac)).slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
   return `${hex}.${exp}`;
 }
@@ -166,11 +195,15 @@ export async function verifyProxySig(targetUrl, ref, sig, env) {
   const [hex, expRaw] = parts;
   if (!/^[a-f0-9]{24}$/.test(hex) || !/^\d{9,12}$/.test(expRaw)) return false;
   if (parseInt(expRaw, 10) < Math.floor(Date.now() / 1000)) return false;
-  const key = await getEdgeProxyCryptoKey(env, "sign");
-  if (!key) return false;
-  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${targetUrl}|${ref || ""}|${expRaw}`));
-  const expectedHex = Array.from(new Uint8Array(mac)).slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
-  return timingSafeEqualStr(hex, expectedHex);
+  const keys = await getEdgeProxyCryptoKeys(env);
+  if (!keys.length) return false;
+  const msg = new TextEncoder().encode(`${targetUrl}|${ref || ""}|${expRaw}`);
+  for (const key of keys) {
+    const mac = await crypto.subtle.sign("HMAC", key, msg);
+    const expectedHex = Array.from(new Uint8Array(mac)).slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
+    if (timingSafeEqualStr(hex, expectedHex)) return true;
+  }
+  return false;
 }
 
 async function fetchPublicWithRedirects(initialUrl, headers, maxHops = 4, timeoutMs = 15000, cfOpts = undefined, headersOnlyTimeout = false, method = "GET") {
@@ -224,7 +257,7 @@ const OFFLOAD_BYPASS_HOSTS = [
   "radyotvonline.com", "radyotvonline.net", "nexa.mov", "dplayer", "playmix.",
   "makesomthingup.", "cdnimages.", "ercdn.net", "daioncdn.net",
   "dragonballzfans", "molystream.org", "irtau1.", "tau-video.", "niko-", "lightspeed.st",
-  "pilavyerplay.", "ddizimag.", "imgsapi.pro", "ytenconline.xyz", "filmmodu.",
+  "pilavyer", "ddizimag.", "imgsapi.pro", "ytenconline.xyz", "filmmodu.",
   "bright67.", "centralodsseyproud", "5d06cffcf9563c", "gamma.",
 ];
 
@@ -700,14 +733,15 @@ export async function handleEdgeHlsManifest(url, env) {
   if (!isDirectEmbed && !isPublicHttpUrl(target)) {
     return new Response("Blocked target URL", { status: 403, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
   }
-  let ref = inferStreamReferer(target);
+  let ref = "";
   const rawRefParam = (url.searchParams.get("ref") || "").trim();
-  if (!ref && rawRefParam) {
+  if (rawRefParam) {
     try {
-      const decRef = b64UrlDecode(rawRefParam).trim();
+      const decRef = rawRefParam.startsWith("https://") ? rawRefParam : b64UrlDecode(rawRefParam).trim();
       if (decRef.startsWith("https://") && isPublicHttpUrl(decRef)) ref = decRef;
     } catch {}
   }
+  if (!ref) ref = inferStreamReferer(target);
   if (isDirectEmbed) {
     const unwrapped = await resolveEmbedHtmlToHls(target, fetchPublicWithRedirects).catch(() => null);
     if (!unwrapped?.url || !isPublicHttpUrl(unwrapped.url)) {
@@ -1020,7 +1054,9 @@ function normalizeSubtitleToVtt(raw) {
       if (parts.length < 10) continue;
       const start = assTimeToVtt(parts[1]);
       const end = assTimeToVtt(parts[2]);
-      const body = parts.slice(9).join(",").replace(/\{\\[^}]*\}/g, "").replace(/\\N/gi, "\n").replace(/\\n/gi, "\n").trim();
+      const rawBody = parts.slice(9).join(",");
+      if (/\{\\[^}]*\\p[1-9]\b/i.test(rawBody)) continue;
+      const body = rawBody.replace(/\{\\[^}]*\}/g, "").replace(/\\N/gi, "\n").replace(/\\n/gi, "\n").replace(/\\h/gi, " ").trim();
       if (start && end && body) cues.push(`${start} --> ${end}\n${body}`);
     }
     return "WEBVTT\n\n" + cues.join("\n\n");
@@ -1044,7 +1080,15 @@ export async function handleEdgeSubtitle(url, env) {
       headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*", "X-Content-Type-Options": "nosniff" },
     });
   }
-  const ref = inferStreamReferer(target);
+  let ref = "";
+  const rawSubRef = (url.searchParams.get("ref") || "").trim();
+  if (rawSubRef) {
+    try {
+      const decSubRef = rawSubRef.startsWith("https://") ? rawSubRef : b64UrlDecode(rawSubRef).trim();
+      if (decSubRef.startsWith("https://") && isPublicHttpUrl(decSubRef)) ref = decSubRef;
+    } catch {}
+  }
+  if (!ref) ref = inferStreamReferer(target);
   const hdrs = { "User-Agent": UA_CHROME, Accept: "text/vtt,text/plain,*/*" };
   if (ref) hdrs.Referer = ref;
   try {
@@ -1058,21 +1102,27 @@ export async function handleEdgeSubtitle(url, env) {
       return new Response("Upstream subtitle error", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
     }
     const buf = await r.arrayBuffer();
+    const u8 = new Uint8Array(buf);
     let raw = "";
-    try {
-      raw = new TextDecoder("utf-8", { fatal: true }).decode(buf);
-    } catch {
+    if (u8.length >= 2 && u8[0] === 0xff && u8[1] === 0xfe) {
+      raw = new TextDecoder("utf-16le", { fatal: false }).decode(buf);
+    } else if (u8.length >= 2 && u8[0] === 0xfe && u8[1] === 0xff) {
+      raw = new TextDecoder("utf-16be", { fatal: false }).decode(buf);
+    } else {
       try {
-        raw = new TextDecoder("windows-1254", { fatal: false }).decode(buf);
+        raw = new TextDecoder("utf-8", { fatal: true }).decode(buf);
       } catch {
-        const bytes = new Uint8Array(buf);
-        const trMap = { 0xd0: "\u011e", 0xdd: "\u0130", 0xde: "\u015e", 0xf0: "\u011f", 0xfd: "\u0131", 0xfe: "\u015f" };
-        let s = "";
-        for (let i = 0; i < bytes.length; i++) {
-          const b = bytes[i];
-          s += trMap[b] || String.fromCharCode(b);
+        try {
+          raw = new TextDecoder("windows-1254", { fatal: false }).decode(buf);
+        } catch {
+          const trMap = { 0xd0: "\u011e", 0xdd: "\u0130", 0xde: "\u015e", 0xf0: "\u011f", 0xfd: "\u0131", 0xfe: "\u015f" };
+          let s = "";
+          for (let i = 0; i < u8.length; i++) {
+            const b = u8[i];
+            s += trMap[b] || String.fromCharCode(b);
+          }
+          raw = s;
         }
-        raw = s;
       }
     }
     const vtt = normalizeSubtitleToVtt(raw);

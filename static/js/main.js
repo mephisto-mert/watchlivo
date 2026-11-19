@@ -1,12 +1,12 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261119_v220';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261119_v220';
-import { renderHome, destroyHome } from './views/home.js?v=20261119_v220';
-import { api, getEdgeToken, humanApiError } from './api.js?v=20261119_v220';
-import { h, toast } from './ui.js?v=20261119_v220';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261119_v221';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261119_v221';
+import { renderHome, destroyHome } from './views/home.js?v=20261119_v221';
+import { api, getEdgeToken, humanApiError } from './api.js?v=20261119_v221';
+import { h, toast } from './ui.js?v=20261119_v221';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261119_v220'; } catch (_) { return '20261119_v220'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261119_v221'; } catch (_) { return '20261119_v221'; }
 })();
 
 let _meshMod = null;
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261119_v220')
+    _meshModPromise = import('./views/mesh.js?v=20261119_v221')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -256,7 +256,7 @@ async function boot() {
     const portraitScreenH = Math.max(screenH, screenW);
     const statusDiff = portraitScreenH - rawH;
     const isMobilePortrait = w <= 900 && rawH >= rawW;
-    const isIosFullBleed = isIos && (isStandalone || insets.top >= 20);
+    const isIosFullBleed = isIos && isStandalone;
     const isIosWebClipShort = isIosFullBleed && !kbOpen && isMobilePortrait && statusDiff >= 20 && statusDiff <= 80;
     const fullH = isIosWebClipShort ? portraitScreenH : rawH;
     const h = Math.max(kbOpen ? 120 : 240, kbOpen ? Math.min(rawH, vvH || rawH) : fullH);
@@ -264,15 +264,15 @@ async function boot() {
     let bottomSafeOffset = insets.bottom;
     if (isMobilePortrait) {
       if (isIosFullBleed) {
-        const minTop = portraitScreenH >= 812 ? 52 : 28;
-        topSafeOffset = Math.max(insets.top, minTop) + 10;
+        const minTop = portraitScreenH >= 812 ? 47 : 20;
+        topSafeOffset = Math.max(insets.top, minTop);
         bottomSafeOffset = Math.max(insets.bottom, 10);
       } else if (isIos) {
-        topSafeOffset = insets.top > 0 ? insets.top + 6 : 8;
+        topSafeOffset = insets.top;
         bottomSafeOffset = Math.max(insets.bottom, 6);
       } else {
-        topSafeOffset = insets.top > 0 ? insets.top + 4 : 6;
-        bottomSafeOffset = Math.min(Math.max(insets.bottom, 6), 12);
+        topSafeOffset = insets.top;
+        bottomSafeOffset = Math.max(insets.bottom, 6);
       }
     }
     root.style.setProperty('--app-width', `${w}px`);
@@ -373,6 +373,7 @@ async function boot() {
       const gHdrs = { 'Content-Type': 'application/json' };
       const edgeTok = getEdgeToken();
       if (edgeTok) gHdrs['X-Watchlivo-Token'] = edgeTok;
+      if (initialProfile.guestToken) gHdrs.Authorization = `Bearer ${initialProfile.guestToken}`;
       fetch('/api/rave/social/guest', {
         method: 'POST',
         credentials: 'same-origin',
@@ -424,6 +425,7 @@ async function boot() {
       const gHdrs = { 'Content-Type': 'application/json' };
       const edgeTok = getEdgeToken();
       if (edgeTok) gHdrs['X-Watchlivo-Token'] = edgeTok;
+      if (guestFallback.guestToken) gHdrs.Authorization = `Bearer ${guestFallback.guestToken}`;
       fetch('/api/rave/social/guest', {
         method: 'POST',
         credentials: 'same-origin',

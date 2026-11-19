@@ -1,10 +1,10 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261119_v220';
-import { api } from '../api.js?v=20261119_v220';
-import { expectedPosition } from '../sync.js?v=20261119_v220';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261119_v220';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261119_v220';
-import { ensureHlsJs } from './hls-loader.js?v=20261119_v220';
+import { SubtitleDubController } from './subtitles.js?v=20261119_v221';
+import { api } from '../api.js?v=20261119_v221';
+import { expectedPosition } from '../sync.js?v=20261119_v221';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261119_v221';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261119_v221';
+import { ensureHlsJs } from './hls-loader.js?v=20261119_v221';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -687,10 +687,10 @@ export class Html5Adapter {
     } else if (hasHlsCandidate && !window.Hls && !isIosWebKit()) {
       ensureHlsJs(2800).catch(() => {});
     }
-    const canHlsJs = Boolean(window.Hls && window.Hls.isSupported());
+    const canHlsJsNow = () => Boolean(window.Hls && window.Hls.isSupported());
     const canNativeHls = Boolean(v.canPlayType('application/vnd.apple.mpegurl') || v.canPlayType('application/x-mpegURL'));
     const isApple = isIosWebKit() || (/Apple/i.test(navigator.vendor || '') && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)));
-    let useNativeHls = isHls && canNativeHls && (isApple || !canHlsJs);
+    let useNativeHls = isHls && canNativeHls && (isApple || !canHlsJsNow());
     this._isApple = isApple;
     this._canAppleMseHls = false;
     this.useNativeHls = useNativeHls;
@@ -758,6 +758,48 @@ export class Html5Adapter {
       doneCb?.();
     };
 
+    const clearInitSeekListeners = () => {
+      this.initialSeekPending = 0;
+      if (v._wlInitSeekFn) {
+        ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
+          v.removeEventListener(evName, v._wlInitSeekFn);
+        });
+        v._wlInitSeekFn = null;
+      }
+      v._wlInitSeekBound = false;
+    };
+    const enforceInitialSeek = () => {
+      if (this.video !== v || !(this.initialSeekPending >= 0.5) || Date.now() - (this.loadedAtMs || 0) > 16000) {
+        clearInitSeekListeners();
+        return;
+      }
+      if (v.seeking || v.readyState < 1) return;
+      if (this.useNativeHls && v.seekable && v.seekable.length === 0) return;
+      const targetPos = this.initialSeekPending;
+      const curT = Number(v.currentTime || 0);
+      if (curT >= targetPos - 1.5) {
+        clearInitSeekListeners();
+        return;
+      }
+      try {
+        v.currentTime = targetPos;
+        if (Number(v.currentTime || 0) >= targetPos - 1.5) {
+          clearInitSeekListeners();
+        }
+      } catch (e) { /* ignore */ }
+    };
+    const bindInitSeekIfNeeded = () => {
+      if (this.initialSeekPending >= 0.5 && !v._wlInitSeekBound) {
+        v._wlInitSeekBound = true;
+        v._wlInitSeekFn = enforceInitialSeek;
+        ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
+          v.addEventListener(evName, enforceInitialSeek);
+        });
+      }
+    };
+    this._enforceInitialSeekFn = enforceInitialSeek;
+    this._bindInitSeekIfNeeded = bindInitSeekIfNeeded;
+
     const loadCandidateUrl = (nextUrl, doneCb) => {
       if (!nextUrl || this._destroyed || this.video !== v) return;
       if (!String(nextUrl).includes('proxy_segs=1')) this._switchedToProxySegs = false;
@@ -782,55 +824,14 @@ export class Html5Adapter {
           this._ensureIosPipStandby?.(nextUrl);
         }
       }
-      const clearInitSeekListeners = () => {
-        this.initialSeekPending = 0;
-        if (v._wlInitSeekFn) {
-          ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
-            v.removeEventListener(evName, v._wlInitSeekFn);
-          });
-          v._wlInitSeekFn = null;
-        }
-        v._wlInitSeekBound = false;
-      };
-      const enforceInitialSeek = () => {
-        if (this.video !== v || !(this.initialSeekPending >= 0.5) || Date.now() - (this.loadedAtMs || 0) > 16000) {
-          clearInitSeekListeners();
-          return;
-        }
-        if (v.seeking || v.readyState < 1) return;
-        if (this.useNativeHls && v.seekable && v.seekable.length === 0) return;
-        const targetPos = this.initialSeekPending;
-        const curT = Number(v.currentTime || 0);
-        if (curT >= targetPos - 1.5) {
-          clearInitSeekListeners();
-          return;
-        }
-        try {
-          v.currentTime = targetPos;
-          if (Number(v.currentTime || 0) >= targetPos - 1.5) {
-            clearInitSeekListeners();
-          }
-        } catch (e) { /* ignore */ }
-      };
-      this._enforceInitialSeekFn = enforceInitialSeek;
-      const bindInitSeekIfNeeded = () => {
-        if (this.initialSeekPending >= 0.5 && !v._wlInitSeekBound) {
-          v._wlInitSeekBound = true;
-          v._wlInitSeekFn = enforceInitialSeek;
-          ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
-            v.addEventListener(evName, enforceInitialSeek);
-          });
-        }
-      };
       bindInitSeekIfNeeded();
-      this._bindInitSeekIfNeeded = bindInitSeekIfNeeded;
       const restorePosOnLoad = () => {
         if (this.video !== v) return;
         enforceInitialSeek();
         doneCb?.();
       };
       if (isUrlHls(nextUrl)) {
-        const allowHlsJsHere = canHlsJs && !useNativeHls && (!isApple || Boolean(this._canAppleMseHls) || Boolean(this._forceIosMseInline));
+        const allowHlsJsHere = canHlsJsNow() && !useNativeHls && (!isApple || Boolean(this._canAppleMseHls) || Boolean(this._forceIosMseInline));
         if (allowHlsJsHere) {
           if (isApple) this._ensureIosPipStandby?.(nextUrl);
           attachHlsJs(nextUrl, doneCb, resumePos);
@@ -1173,7 +1174,7 @@ export class Html5Adapter {
         loadCandidateUrl(alts[nativeAltIdx++]);
         return;
       }
-      if (isUrlHls(this.currentUrl) && canHlsJs && !triedHlsFallback) {
+      if (isUrlHls(this.currentUrl) && canHlsJsNow() && !triedHlsFallback) {
         triedHlsFallback = true;
         v.removeAttribute('src');
         attachHlsJs(this.currentUrl);
@@ -1218,25 +1219,11 @@ export class Html5Adapter {
       v.addEventListener('canplay', onFrameReady);
       v.addEventListener('playing', onFrameReady);
       this.loadReadyTimer = setTimeout(done, 1800);
-      if (validStart >= 0.5 && !v._wlInitSeekBound) {
-        v._wlInitSeekBound = true;
-        const enforcePrimaryInitialSeek = () => {
-          if (this.video !== v || !(this.initialSeekPending >= 0.5) || v.seeking || v.readyState < 1) return;
-          if (this.useNativeHls && v.seekable && v.seekable.length === 0) return;
-          const targetPos = this.initialSeekPending;
-          if (Math.abs((v.currentTime || 0) - targetPos) > 1.5) {
-            try { v.currentTime = targetPos; } catch (_) {}
-          } else if (v.readyState >= 2) {
-            this.initialSeekPending = 0;
-          }
-        };
-        v._wlInitSeekFn = enforcePrimaryInitialSeek;
-        ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
-          v.addEventListener(evName, enforcePrimaryInitialSeek);
-        });
+      if (validStart >= 0.5) {
+        bindInitSeekIfNeeded();
       }
       syncVideoCors(url);
-      if (isHls && canHlsJs && !useNativeHls) {
+      if (isHls && canHlsJsNow() && !useNativeHls) {
         attachHlsJs(url, onFrameReady);
       } else {
         v.src = url;
@@ -1352,7 +1339,7 @@ export class Html5Adapter {
         } else if (nativeAltIdx < alts.length) {
           loadCandidateUrl(alts[nativeAltIdx++]);
           this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
-        } else if (isHls && canHlsJs && !this.hls && !triedHlsFallback) {
+        } else if (isHls && canHlsJsNow() && !this.hls && !triedHlsFallback) {
           triedHlsFallback = true;
           v.removeAttribute('src');
           attachHlsJs(this.currentUrl || url);
@@ -1365,6 +1352,8 @@ export class Html5Adapter {
         } else {
           handleExhaustedCandidates(this.currentUrl);
         }
+      } else if (isStuck) {
+        handleExhaustedCandidates(this.currentUrl);
       }
     };
     this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);

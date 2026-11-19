@@ -4067,7 +4067,7 @@ def _extract_dizilife_sync(mtype: str, s: int, e: int, title: str, disp_title: s
             except Exception:
                 if mtype == "tv" and "/sezon/" not in item_url and mode != "__SLUG__":
                     s_html = urllib.request.urlopen(urllib.request.Request(item_url, headers={"User-Agent": UA137, "Referer": base_dom + "/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
-                    alt_ep = re.search(rf'href=["\']((?:https?://[^"\'\s/]+)?/dizi/[a-z0-9-]+/sezon/\d+/bolum/{e})["\']', s_html)
+                    alt_ep = re.search(rf'href=["\']((?:https?://[^"\'\s/]+)?/dizi/[a-z0-9-]+/sezon/{s}/bolum/{e})["\']', s_html)
                     if not alt_ep:
                         continue
                     ep_url = alt_ep.group(1) if alt_ep.group(1).startswith("http") else (base_dom + alt_ep.group(1))

@@ -1576,7 +1576,7 @@ function mergeResolvedResults(resultList) {
     if (/dbx\.molystream\.org/.test(u)) return 1;
     if (/sprintcdn|r66nv9ed|owphbf24|filemoon|byse/.test(u)) return 1;
     if (/tau-video|irtau1/.test(u)) return 2;
-    if (/imgsapi\.pro|pilavyerplay\.top/.test(u)) return 3;
+    if (/imgsapi\.pro|pilavyer/.test(u)) return 3;
     if (/dragonballzfans/.test(u)) return 4;
     if (!isVmpxOrVidmolyUrl(u)) return 4;
     return isCfPoisonedVmpxUrl(u) ? 6 : 5;
@@ -2083,55 +2083,76 @@ export async function resolveTurkishCatalogStream({ title, displayTitle, origina
       if (hdfcRes?.url) return hdfcRes;
     }
 
+    const settleWithFastClean = async (promises, graceMs = 1500) => {
+      const results = new Array(promises.length).fill(null);
+      let remaining = promises.length;
+      if (!remaining) return results;
+      return await new Promise((resolve) => {
+        let done = false;
+        let graceTimer = null;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          if (graceTimer !== null) clearTimeout(graceTimer);
+          resolve(results);
+        };
+        promises.forEach((p, idx) => {
+          Promise.resolve(p)
+            .then((val) => {
+              results[idx] = val || null;
+              if (!done && val?.url) {
+                const list = Array.isArray(val.streams) && val.streams.length ? val.streams : [{ url: val.url }];
+                const hasClean = list.some((st) => st?.url && !isVmpxOrVidmolyUrl(st.url));
+                if (hasClean && graceTimer === null) {
+                  graceTimer = setTimeout(finish, graceMs);
+                }
+              }
+            })
+            .catch(() => {})
+            .finally(() => {
+              remaining -= 1;
+              if (remaining <= 0) finish();
+            });
+        });
+      });
+    };
+
     if (mtype === "movie") {
       const wtRes = await extractWebteizleMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn);
       const wtHasNonVmpx = Boolean(wtRes?.streams?.some((st) => !isVmpxOrVidmolyUrl(st?.url)));
       if (wtRes?.url && wtHasNonVmpx) return wtRes;
 
-      const [fmRes, dlRes, hxRes] = await Promise.allSettled([
+      const [fmVal, dlVal, hxVal] = await settleWithFastClean([
         extractFilmmoduMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn),
         extractDizilife({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "movie", s, e }, fetchPublicFn),
         extractHexa({ tmdbId, mtype: "movie", s, e }, fetchPublicFn),
-      ]);
-      const firstMerged = mergeResolvedResults([
-        wtRes,
-        fmRes.status === "fulfilled" ? fmRes.value : null,
-        dlRes.status === "fulfilled" ? dlRes.value : null,
-        hxRes.status === "fulfilled" ? hxRes.value : null,
-      ]);
+      ], 1400);
+      const firstMerged = mergeResolvedResults([wtRes, fmVal, dlVal, hxVal]);
       const hasCleanStream = Boolean(firstMerged?.streams?.some((st) => !isVmpxOrVidmolyUrl(st?.url)));
       if (firstMerged?.url && hasCleanStream) return firstMerged;
 
-      const [dmRes, acRes] = await Promise.allSettled([
+      const [dmVal, acVal] = await settleWithFastClean([
         extractDdizimag({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "movie", s, e }, fetchPublicFn),
         extractAnimecix({ title, displayTitle, originalTitle, tmdbId, year, mtype: "movie", s, e }, fetchPublicFn),
-      ]);
-      const secondMerged = mergeResolvedResults([
-        firstMerged,
-        dmRes.status === "fulfilled" ? dmRes.value : null,
-        acRes.status === "fulfilled" ? acRes.value : null,
-      ]);
+      ], 1200);
+      const secondMerged = mergeResolvedResults([firstMerged, dmVal, acVal]);
       if (secondMerged?.url) return secondMerged;
       if (wtRes?.url) return wtRes;
     } else if (mtype === "tv") {
-      const [dlRes, dbxRes] = await Promise.allSettled([
+      const [dlVal, dbxVal, dmVal] = await settleWithFastClean([
         extractDizilife({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "tv", s, e }, fetchPublicFn),
         extractDiziboxEpisode({ title, displayTitle, originalTitle, sourceUrl: src, year, s, e }, fetchPublicFn),
-      ]);
-      const firstMerged = mergeResolvedResults([
-        dlRes.status === "fulfilled" ? dlRes.value : null,
-        dbxRes.status === "fulfilled" ? dbxRes.value : null,
-      ]);
+        extractDdizimag({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "tv", s, e }, fetchPublicFn),
+      ], 1600);
+      const firstMerged = mergeResolvedResults([dlVal, dbxVal, dmVal]);
       const hasCleanTv = Boolean(firstMerged?.streams?.some((st) => !isVmpxOrVidmolyUrl(st?.url)));
       if (firstMerged?.url && hasCleanTv) return firstMerged;
 
-      const [dmRes, acRes] = await Promise.allSettled([
-        extractDdizimag({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "tv", s, e }, fetchPublicFn),
+      const [acRes] = await Promise.allSettled([
         extractAnimecix({ title, displayTitle, originalTitle, tmdbId, year, mtype: "tv", s, e }, fetchPublicFn),
       ]);
       const secondMerged = mergeResolvedResults([
         firstMerged,
-        dmRes.status === "fulfilled" ? dmRes.value : null,
         acRes.status === "fulfilled" ? acRes.value : null,
       ]);
       if (secondMerged?.url) return secondMerged;

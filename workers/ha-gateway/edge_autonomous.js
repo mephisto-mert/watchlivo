@@ -175,7 +175,7 @@ async function getBootstrap(env) {
     } catch {}
   }
   _curatedMap = new Map(DEFAULT_CURATED_LIVE_ROOMS.map((rm) => [rm.id, rm]));
-  return { version: "20261119_v220", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
+  return { version: "20261119_v221", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
 }
 
 function makeNonce() {
@@ -654,7 +654,7 @@ const DISCOVER_GENRES = {
   animasyon: ["16", "16"], animation: ["16", "16"],
   komedi: ["35", "35"], comedy: ["35", "35"],
   suc: ["80", "80"], crime: ["80", "80"],
-  belgesel: ["99", "99"], documentary: ["99", "99"],
+  belgesel: ["99", "99"], documentary: ["99", "99"], doc: ["99,36", "99,36"],
   dram: ["18", "18"], drama: ["18", "18"],
   aile: ["10751", "10751"], family: ["10751", "10751"],
   fantastik: ["10765", "14"], fantasy: ["10765", "14"],
@@ -1838,7 +1838,11 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
         display: "standalone",
         background_color: "#090c15",
         theme_color: "#090c15",
-        icons: [{ src: "/static/watchlivo-icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }],
+        icons: [
+          { src: "/static/watchlivo-icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "/static/watchlivo-icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
+          { src: "/static/watchlivo-logo.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+        ],
       }, 200, { "Content-Type": "application/manifest+json; charset=utf-8" });
     }
     return new Response("Not Found", {
@@ -2507,8 +2511,15 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
         });
         if (gResp.ok) {
           const gInfo = await gResp.json().catch(() => ({}));
-          const aud = String(gInfo?.aud || "");
-          const audOk = aud === "watchlivo-38ab6" || aud.endsWith(".apps.googleusercontent.com");
+          const aud = String(gInfo?.aud || "").trim();
+          const extraAuds = String(env?.GOOGLE_OAUTH_CLIENT_IDS || "")
+            .split(",")
+            .map((x) => x.trim())
+            .filter(Boolean);
+          const audOk =
+            aud === "watchlivo-38ab6" ||
+            (aud.startsWith("1034129375158-") && aud.endsWith(".apps.googleusercontent.com")) ||
+            extraAuds.includes(aud);
           if (audOk && gInfo?.email && (gInfo.email_verified === true || String(gInfo.email_verified).toLowerCase() === "true")) {
             fbEmail = String(gInfo.email).trim().toLowerCase();
             fbName = String(gInfo.name || gInfo.given_name || "").trim().slice(0, 40);
@@ -2975,12 +2986,13 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   if (safePath === "/api/rave/social/guest" && request.method === "POST") {
     const b = await request.json().catch(() => ({}));
     const caller = await resolveSocialCaller(request, env, b?.uid || b?.id, b);
-    let uid = caller.authenticated ? caller.uid : cleanStr(b?.uid || b?.id, 64);
+    const reuseCallerGuest = Boolean(caller.authenticated && caller.isGuest === true);
+    let uid = reuseCallerGuest ? caller.uid : cleanStr(b?.uid || b?.id, 64);
     if (
       !uid ||
       uid === "guest_default" ||
       uid === "guest_local" ||
-      (!caller.authenticated && (!GUEST_UID_RE.test(uid) || (await isGuestUidClaimed(env, uid))))
+      (!reuseCallerGuest && (!GUEST_UID_RE.test(uid) || (await isGuestUidClaimed(env, uid))))
     ) {
       uid = makeGuestUid();
     }

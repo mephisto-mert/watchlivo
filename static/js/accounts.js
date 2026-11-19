@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261119_v220';
-import { api, qs } from './api.js?v=20261119_v220';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261119_v220';
+import { h, toast, popup } from './ui.js?v=20261119_v221';
+import { api, qs } from './api.js?v=20261119_v221';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261119_v221';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -1461,7 +1461,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261119_v220',
+        v: '20261119_v221',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;
@@ -1509,6 +1509,8 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
     const playEp = async (s, e, epName = '', btnEl = null, resumeAtSec = 0, forceFromStart = false) => {
       if (busyPlay) return;
       busyPlay = true;
+      const cardEl = btnEl?.closest?.('.episode-card') || null;
+      if (cardEl) cardEl.classList.remove('is-unavailable');
       const origTxt = btnEl ? btnEl.textContent : '';
       if (btnEl) {
         btnEl.disabled = true;
@@ -1518,9 +1520,11 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
       toast(startSec > 3
         ? `⏩ ${title}${effMtype === 'tv' ? ` (${s}. Sezon ${e}. Bölüm)` : ''} · ${fmtClock(startSec)} anından devam ediliyor...`
         : `🎬 ${title}${effMtype === 'tv' ? ` (${s}. Sezon ${e}. Bölüm)` : ''} hazırlanıyor...`);
+      let resolvedOk = false;
       try {
         const media = await resolveFn({ ...item, tmdbId: tid, imdbId, title, originalTitle: origTitle, year, poster: backdrop || poster, mediaType: effMtype }, prov, s, e, epName, { applySavedResume: !forceFromStart });
         if (media) {
+          resolvedOk = true;
           if (forceFromStart) {
             media.currentTime = 0;
             media.meshStatePosition = 0;
@@ -1530,11 +1534,16 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
           }
           await onPick(media);
         }
+      } catch (_) {
+        resolvedOk = false;
       } finally {
         busyPlay = false;
         if (btnEl && btnEl.isConnected) {
           btnEl.disabled = false;
-          btnEl.textContent = origTxt;
+          btnEl.textContent = resolvedOk ? origTxt : '⚠️ Kaynak Bulunamadı · Tekrar Dene';
+        }
+        if (!resolvedOk && cardEl && cardEl.isConnected) {
+          cardEl.classList.add('is-unavailable');
         }
       }
     };
@@ -1565,28 +1574,12 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
       onclick: (ev) => playEp(curSeason, 1, episodes[0]?.name || '', ev.currentTarget, 0, Boolean(resumeHeroBtn)),
     }, effMtype === 'tv' ? `▶ ${curSeason}. Sezon 1. Bölümü ${resumeHeroBtn ? 'Baştan ' : ''}Başlat` : `▶ Tam Filmi ${resumeHeroBtn ? 'Baştan ' : 'Odada '}Başlat (1080p)`);
 
-    const heroSeasonPicker = (effMtype === 'tv' && seasons.length > 1) ? h('div', {
-      class: 'hero-season-picker',
-      style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', margin: '8px 0 10px' },
-    },
-    h('span', { style: { fontSize: '.78rem', fontWeight: '700', color: '#a5b4fc', marginRight: '2px' } }, '📚 Sezon Seç:'),
-    ...seasons.slice(0, 8).map((s) => h('button', {
-      type: 'button',
-      class: `btn sm season-pill ${s.season === curSeason ? 'primary' : ''}`,
-      style: { padding: '5px 10px', fontSize: '.78rem', borderRadius: '999px' },
-      onclick: (ev) => switchSeason(s.season, ev.currentTarget),
-    }, `${s.season}. Sezon${s.count ? ` (${s.count})` : ''}`)),
-    seasons.length > 8 ? h('select', {
-      class: 'season-select-dropdown',
-      style: { background: 'rgba(15,23,42,.9)', color: '#f8fafc', border: '1px solid rgba(99,102,241,.45)', borderRadius: '999px', padding: '5px 10px', fontSize: '.78rem', fontWeight: '600' },
-      onchange: (ev) => switchSeason(ev.target.value),
-    }, ...seasons.map((s) => h('option', { value: String(s.season), selected: s.season === curSeason ? 'selected' : undefined }, `${s.name || `${s.season}. Sezon`}${s.count ? ` (${s.count} Bölüm)` : ''}`))) : null) : null;
-
+    const inPopup = Boolean(container.closest?.('.popup'));
     const safeBackdropCss = String(backdrop || '').replace(/["'()\\\r\n]/g, '');
     const detail = h('div', { class: 'series-detail fade-in' },
       h('div', { class: 'series-hero', style: { backgroundImage: `linear-gradient(180deg, rgba(11,10,18,.45), rgba(11,10,18,.96)), url("${safeBackdropCss}")` } },
         h('div', { class: 'series-top-row' },
-          h('button', { class: 'btn', onclick: onBack }, '← Kataloğa Dön'),
+          !inPopup ? h('button', { class: 'btn', onclick: onBack }, '← Kataloğa Dön') : null,
           h('span', { class: 'series-badge' }, `${effMtype === 'tv' ? `📺 DİZİ • ${seasons.length} Sezon` : '🎬 FİLM'}${year ? ` • ${year}` : ''}${rating ? ` • ⭐ ${rating}` : ''}`)),
         h('div', { class: 'series-hero-body' },
           h('img', {
@@ -1606,7 +1599,6 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
           h('div', { class: 'series-meta' },
             h('h2', {}, title),
             h('p', { class: 'series-overview' }, overview),
-            heroSeasonPicker,
             h('div', { class: 'series-cta-row', style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, resumeHeroBtn, primaryPlayBtn)))));
 
     if (effMtype === 'tv') {
@@ -1664,16 +1656,20 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
       detail.append(
         h('div', { class: 'section-head', style: { padding: '.8em 4px .3em', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' } },
           h('h2', {}, `📺 ${curSeason}. Sezon Bölümleri (${episodes.length} Bölüm)`),
-          seasons.length > 1 ? h('select', {
+          seasons.length > 8 ? h('select', {
             class: 'season-select-dropdown',
             'aria-label': 'Sezon Seçin',
             style: { background: 'rgba(15,23,42,.92)', color: '#f8fafc', border: '1px solid rgba(99,102,241,.55)', borderRadius: '10px', padding: '6px 12px', fontSize: '.82rem', fontWeight: '700', cursor: 'pointer' },
             onchange: (ev) => switchSeason(ev.target.value),
-          }, ...seasons.map((s) => h('option', { value: String(s.season), selected: s.season === curSeason ? 'selected' : undefined }, `${s.name || `${s.season}. Sezon`}${s.count ? ` (${s.count} Bölüm)` : ''}`))) : h('span', { class: 'dim' }, `${seasons.length} sezon · ${episodes.length} bölüm hazır`)),
-        seasonBar,
+          }, ...seasons.map((s) => h('option', { value: String(s.season), selected: s.season === curSeason ? 'selected' : undefined }, `${s.name || `${s.season}. Sezon`}${s.count ? ` (${s.count} Bölüm)` : ''}`))) : h('span', { class: 'dim' }, `${seasons.length} sezon · ${episodes.length} bölüm`)),
+        seasons.length > 1 && seasons.length <= 8 ? seasonBar : null,
         epGrid);
     }
     container.replaceChildren(detail);
+    try {
+      const pop = container.closest?.('.popup');
+      if (pop) pop.scrollTop = 0;
+    } catch (_) {}
   };
 
   await loadSeason(initSeason);

@@ -378,10 +378,15 @@ function buildMediaOut(rm) {
   };
 }
 
-function pruneStaleParticipants(rm) {
-  const cutoff = nowSec() - 45;
+function pruneStaleParticipants(rm, activeCids = null) {
+  const tNow = nowSec();
+  const cutoff = tNow - 45;
   let pruned = false;
   for (const [pid, p] of Object.entries(rm.participants || {})) {
+    if (activeCids && activeCids.has(pid)) {
+      p.lastSeen = tNow;
+      continue;
+    }
     if ((p.lastSeen || 0) < cutoff) {
       delete rm.participants[pid];
       pruned = true;
@@ -461,6 +466,7 @@ async function serializeEdgeRoom(rm, viewerCid = "", env = null) {
 }
 
 function serializePublicSummary(roomOut) {
+  const maskMediaUrls = Boolean(!roomOut.curated && (roomOut.hasPassword || roomOut.privacy !== "public"));
   return {
     id: roomOut.id,
     name: roomOut.name,
@@ -480,9 +486,9 @@ function serializePublicSummary(roomOut) {
       thumbnail: roomOut.media.thumbnail || "",
       mediaType: roomOut.media.mediaType || "movie",
       isMusic: Boolean(roomOut.media.isMusic),
-      url: roomOut.media.url || "",
-      streamType: roomOut.media.streamType || "",
-      altUrls: Array.isArray(roomOut.media.altUrls) ? roomOut.media.altUrls : [],
+      url: maskMediaUrls ? "" : (roomOut.media.url || ""),
+      streamType: maskMediaUrls ? "" : (roomOut.media.streamType || ""),
+      altUrls: maskMediaUrls ? [] : (Array.isArray(roomOut.media.altUrls) ? roomOut.media.altUrls : []),
       playing: Boolean(roomOut.media.playing),
       live: Boolean(roomOut.media.live),
     } : {},
@@ -513,6 +519,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
   let dirty = Boolean(opts.initialDirty);
   let roomClosed = false;
   let forbiddenError = "";
+  let pendingPassword;
 
   if (act === "batch" && Array.isArray(body.items)) {
     for (const item of body.items) {
@@ -522,8 +529,9 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       privateSignals.push(...sub.privateSignals);
       if (sub.roomClosed) roomClosed = true;
       if (sub.forbiddenError) forbiddenError = sub.forbiddenError;
+      if (sub.pendingPassword !== undefined) pendingPassword = sub.pendingPassword;
     }
-    return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError };
+    return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError, pendingPassword };
   }
 
   const tokenVerified = Boolean(opts.tokenVerified);
@@ -697,9 +705,36 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     }
     const subAct = String(body.subAction || body.action || "");
     const targetCid = String(body.targetId || body.targetCid || "");
-    if (subAct === "set_play_mode" && (body.playMode === "leader" || body.playMode === "cohost")) {
+    if (subAct === "set_play_mode" && ["leader", "cohost", "vote", "free"].includes(body.playMode)) {
       rm.playMode = body.playMode;
       pushEv({ type: "host_action", subAction: subAct, playMode: rm.playMode }, { attachRoom: true });
+    } else if (subAct === "set_privacy" && !rm.curated) {
+      let changed = false;
+      if (["public", "friends", "private"].includes(body.privacy)) {
+        rm.privacy = body.privacy;
+        changed = true;
+      }
+      if (["leader", "cohost", "vote", "free"].includes(body.playMode)) {
+        rm.playMode = body.playMode;
+        changed = true;
+      }
+      if (["all", "stage", "off", "on"].includes(body.voipMode)) {
+        rm.voipMode = body.voipMode === "on" ? "all" : body.voipMode;
+        changed = true;
+      }
+      if (typeof body.name === "string" && body.name.trim()) {
+        const cleanName = body.name.trim().slice(0, 64);
+        rm.name = cleanName;
+        rm.rawName = cleanName;
+        changed = true;
+      }
+      if (body.password !== undefined) {
+        pendingPassword = String(body.password || "");
+        changed = true;
+      }
+      if (changed) {
+        pushEv({ type: "host_action", subAction: "set_privacy", privacy: rm.privacy, playMode: rm.playMode, voipMode: rm.voipMode, name: rm.name }, { attachRoom: true });
+      }
     } else if (subAct === "kick" && targetCid && targetCid !== rm.creatorCid) {
       rm.kicked = Array.from(new Set([...(rm.kicked || []), targetCid])).slice(-100);
       delete rm.participants[targetCid];
@@ -710,6 +745,22 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     } else if (subAct === "demote" && targetCid && targetCid !== rm.creatorCid) {
       rm.co_hosts = (rm.co_hosts || []).filter((x) => x !== targetCid);
       pushEv({ type: "host_action", subAction: "demote", targetCid }, { attachRoom: true });
+    } else if (subAct === "toggle_cohost" && targetCid && targetCid !== rm.creatorCid) {
+      const curList = rm.co_hosts || [];
+      if (curList.includes(targetCid)) {
+        rm.co_hosts = curList.filter((x) => x !== targetCid);
+      } else {
+        rm.co_hosts = Array.from(new Set([...curList, targetCid]));
+      }
+      pushEv({ type: "host_action", subAction: "toggle_cohost", targetCid }, { attachRoom: true });
+    } else if (subAct === "transfer_host" && targetCid && rm.participants?.[targetCid] && !rm.curated) {
+      rm.host_id = targetCid;
+      rm.co_hosts = Array.from(new Set([...(rm.co_hosts || []), targetCid]));
+      pushEv({ type: "host_action", subAction: "transfer_host", targetCid }, { attachRoom: true });
+    } else if (subAct === "mute" && targetCid && rm.participants?.[targetCid]) {
+      rm.participants[targetCid].muted = true;
+      rm.participants[targetCid].speaking = false;
+      pushEv({ type: "host_action", subAction: "mute", targetCid }, { attachRoom: true });
     }
   } else if (act === "clear_chat") {
     if (!tokenVerified || !isPrivilegedInRoom(rm, cid)) {
@@ -735,7 +786,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     dirty = true;
   }
   if (dirty) rm.updatedAt = t;
-  return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError };
+  return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError, pendingPassword };
 }
 
 function serializeRoomInfo(rm, tokenVerified = false) {
@@ -841,7 +892,7 @@ export class WatchlivoRoomDO {
         if (stored) {
           this.room = stored;
           const healed = reconcileCuratedRoom(this.room, curatedSeed);
-          const pruned = pruneStaleParticipants(this.room);
+          const pruned = pruneStaleParticipants(this.room, this._activeWsCids());
           if (healed || pruned) await this._save();
           return Response.json({ ok: true, room: serializeRoomInfo(this.room, true) });
         }
@@ -856,7 +907,7 @@ export class WatchlivoRoomDO {
         return Response.json({ ok: false, error: "Bu oda artık mevcut değil" }, { status: 404 });
       }
       this.room = stored;
-      const pruned = pruneStaleParticipants(this.room);
+      const pruned = pruneStaleParticipants(this.room, this._activeWsCids());
       if (pruned) await this._save();
       const cid = String(u.searchParams.get("clientId") || "");
       const suppliedTok = String(u.searchParams.get("clientToken") || "").trim();
@@ -907,7 +958,7 @@ export class WatchlivoRoomDO {
         return new Response("Kicked", { status: 410 });
       }
       const uname = u.searchParams.get("username") || u.searchParams.get("name") || "Misafir";
-      const pruned = pruneStaleParticipants(rm);
+      const pruned = pruneStaleParticipants(rm, this._activeWsCids());
       const initAct = applyRoomAction(rm, cid, { type: "init", username: uname, color: u.searchParams.get("color") || "#27DCC8" }, { tokenVerified: true });
       if (initAct.dirty || pruned) await this._save();
 
@@ -922,11 +973,14 @@ export class WatchlivoRoomDO {
       server.addEventListener("message", async (ev) => {
         let msg; try { msg = JSON.parse(ev.data); } catch { return; }
         if (msg.type === "ping") {
-          server.send(JSON.stringify({ type: "pong", t0: msg.t0, t0Epoch: msg.t0Epoch, serverTime: nowSec() }));
           const tNow = nowSec();
+          if (rm.participants?.[cid]) {
+            rm.participants[cid].lastSeen = tNow;
+          }
+          server.send(JSON.stringify({ type: "pong", t0: msg.t0, t0Epoch: msg.t0Epoch, serverTime: tNow }));
           if (rm.privacy === "public" && (!rm._lastIdxSync || tNow - rm._lastIdxSync > 45)) {
             rm._lastIdxSync = tNow;
-            await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, cid, this.env), this.env);
+            await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, "", this.env), this.env);
           }
           return;
         }
@@ -938,19 +992,22 @@ export class WatchlivoRoomDO {
           await this._closeRoom(roomId);
           return;
         }
-        const pr = pruneStaleParticipants(rm);
+        const pr = pruneStaleParticipants(rm, this._activeWsCids());
         const res = applyRoomAction(rm, cid, msg, { tokenVerified: true });
         if (res.forbiddenError) {
           server.send(JSON.stringify({ type: "error", error: res.forbiddenError }));
           return;
         }
-        if (res.dirty || pr) await this._save();
-        if (msg.type === "leave" || pr) {
-          await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, cid, this.env), this.env);
+        if (res.pendingPassword !== undefined) {
+          await setRoomPassword(rm, res.pendingPassword);
+        }
+        if (res.dirty || pr || res.pendingPassword !== undefined) await this._save();
+        if (msg.type === "leave" || msg.type === "host_action" || pr) {
+          await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, "", this.env), this.env);
         }
         for (const item of res.pushedEvents) {
           const pkt = item.attachRoom
-            ? { ...item.ev, room: await serializeEdgeRoom(rm, item.ev.cid, this.env) }
+            ? { ...item.ev, room: await serializeEdgeRoom(rm, "", this.env) }
             : item.ev;
           this._broadcast(pkt, item.ev.type === "chat" ? null : server);
         }
@@ -964,10 +1021,10 @@ export class WatchlivoRoomDO {
         if (closedMark || !this.room) return;
         const res = applyRoomAction(rm, cid, { type: "leave" }, { tokenVerified: true });
         await this._save();
-        await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, cid, this.env), this.env);
+        await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, "", this.env), this.env);
         for (const item of res?.pushedEvents || []) {
           const pkt = item.attachRoom
-            ? { ...item.ev, room: await serializeEdgeRoom(rm, item.ev.cid, this.env) }
+            ? { ...item.ev, room: await serializeEdgeRoom(rm, "", this.env) }
             : item.ev;
           this._broadcast(pkt, null);
         }
@@ -1023,23 +1080,40 @@ export class WatchlivoRoomDO {
       return Response.json({ ok: true, roomClosed: true });
     }
 
-    const pruned = pruneStaleParticipants(rm);
+    const pruned = pruneStaleParticipants(rm, this._activeWsCids());
     const res = applyRoomAction(rm, cid, body, { tokenVerified });
     if (res.forbiddenError) {
       return Response.json({ ok: false, error: res.forbiddenError }, { status: 403 });
     }
-    if (res.dirty || pruned) await this._save();
+    if (res.pendingPassword !== undefined) {
+      await setRoomPassword(rm, res.pendingPassword);
+    }
+    if (res.dirty || pruned || res.pendingPassword !== undefined) await this._save();
     for (const item of res.pushedEvents) {
       const pkt = item.attachRoom
-        ? { ...item.ev, room: await serializeEdgeRoom(rm, item.ev.cid, this.env) }
+        ? { ...item.ev, room: await serializeEdgeRoom(rm, "", this.env) }
         : item.ev;
       this._broadcast(pkt, null);
     }
     for (const sig of res.privateSignals) {
       this._unicast(sig.targetId, sig);
     }
+    const tSyncNow = nowSec();
+    let idxNeedsRefresh = false;
+    if (rm.privacy === "public" && (!rm._lastIdxSync || tSyncNow - rm._lastIdxSync > 45)) {
+      rm._lastIdxSync = tSyncNow;
+      idxNeedsRefresh = true;
+    }
     const clientToken = tokenVerified ? suppliedTok : await signRoomClientToken(roomId, cid, this.env);
-    return Response.json({ ok: true, clientId: cid, clientToken, pruned: Boolean(pruned), serverTime: nowSec(), room: await serializeEdgeRoom(rm, cid, this.env) });
+    return Response.json({ ok: true, clientId: cid, clientToken, pruned: Boolean(pruned), idxNeedsRefresh, serverTime: tSyncNow, room: await serializeEdgeRoom(rm, cid, this.env) });
+  }
+
+  _activeWsCids() {
+    const s = new Set();
+    for (const meta of this.sockets.values()) {
+      if (meta?.cid) s.add(meta.cid);
+    }
+    return s;
   }
 
   async _closeRoom(roomId) {
@@ -1168,7 +1242,8 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
       env.WATCHLIVO_KV &&
       (["init", "join", "leave", "hb", "heartbeat", "play", "pause", "seek", "media", "set_media", "change_media", "resolve_media", "host_action", "kick", "privacy"].includes(body.type) ||
         Boolean(body.activeMedia) ||
-        Boolean(data.pruned))
+        Boolean(data.pruned) ||
+        Boolean(data.idxNeedsRefresh))
     ) {
       await syncPublicRoomIndex(roomId, data.room, env);
     }
@@ -1213,13 +1288,20 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
   const pruned = pruneStaleParticipants(rm);
   const res = applyRoomAction(rm, cid, body, { tokenVerified });
   if (res.forbiddenError) return jsonResp({ ok: false, error: res.forbiddenError }, 403);
+  if (res.pendingPassword !== undefined) {
+    await setRoomPassword(rm, res.pendingPassword);
+  }
+  const tKvNow = nowSec();
+  const kvIdxRefresh = Boolean(rm.privacy === "public" && (!rm._lastIdxSync || tKvNow - rm._lastIdxSync > 45));
+  if (kvIdxRefresh) rm._lastIdxSync = tKvNow;
   const serialized = await serializeEdgeRoom(rm, cid, env);
-  if ((res.dirty || pruned || healed) && env.WATCHLIVO_KV) {
+  if ((res.dirty || pruned || healed || res.pendingPassword !== undefined || kvIdxRefresh) && env.WATCHLIVO_KV) {
     await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 });
     if (
       ["init", "join", "leave", "media", "set_media", "change_media", "resolve_media", "host_action", "kick", "privacy"].includes(body.type) ||
       Boolean(body.activeMedia) ||
-      pruned
+      pruned ||
+      kvIdxRefresh
     ) {
       await syncPublicRoomIndex(roomId, serialized, env);
     }

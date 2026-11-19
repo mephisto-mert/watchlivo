@@ -49,7 +49,7 @@ const BYPASS_WORKER_HOSTS = [
   "irtau1.",
   "tau-video.",
   "niko-",
-  "pilavyerplay.",
+  "pilavyer",
   "ddizimag.",
   "imgsapi.pro",
   "ytenconline.xyz",
@@ -200,16 +200,23 @@ function originTimeoutMs(pathname) {
 
 function isStaticCacheablePath(pathname) {
   const p = normalizeSafePath(pathname);
-  if (p === "/static/desktop-auth.html" || p === "/desktop-auth.html") {
+  const pl = p.toLowerCase();
+  if (
+    pl === "/static/desktop-auth.html" ||
+    pl === "/desktop-auth.html" ||
+    pl === "/static/sw.js" ||
+    pl === "/sw.js" ||
+    pl === "/manifest.json" ||
+    pl === "/manifest.webmanifest" ||
+    pl.endsWith(".json")
+  ) {
     return false;
   }
   return (
     p.startsWith("/static/") ||
     p === "/favicon.ico" ||
     p === "/apple-touch-icon.png" ||
-    p === "/apple-touch-icon-precomposed.png" ||
-    p === "/manifest.json" ||
-    p === "/manifest.webmanifest"
+    p === "/apple-touch-icon-precomposed.png"
   );
 }
 
@@ -425,8 +432,8 @@ async function safeFetchSecondary(
   }
   const ua = request.headers.get("user-agent") || "";
   const isBotUa = BOT_UA_RE.test(ua);
-  const rootCacheKey = isIdempotent && safePath === "/" && !isBotUa ? new Request("https://edge-cache-v220.watchlivo.internal/__root_shell__", { method: "GET" }) : null;
-  const staticCacheKey = isIdempotent && isStaticCacheablePath(safePath) ? new Request(`https://edge-cache-v220.watchlivo.internal${safePath}${url.search}`, { method: "GET" }) : null;
+  const rootCacheKey = isIdempotent && safePath === "/" && !isBotUa ? new Request("https://edge-cache-v221.watchlivo.internal/__root_shell__", { method: "GET" }) : null;
+  const staticCacheKey = isIdempotent && isStaticCacheablePath(safePath) && !request.headers.get("range") ? new Request(`https://edge-cache-v221.watchlivo.internal${safePath}${url.search}`, { method: "GET" }) : null;
 
   let sawExplicitSuspension = false;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -562,11 +569,11 @@ export default {
         });
       }
 
-      // 2b. Fast Edge Cache hit for static assets (/static/*, icons, manifest)
+      // 2b. Fast Edge Cache hit for static assets (/static/*, icons)
       const edgeCache = getEdgeCache();
-      if (edgeCache && (request.method === "GET" || request.method === "HEAD") && isStaticCacheablePath(safePath)) {
+      if (edgeCache && (request.method === "GET" || request.method === "HEAD") && !request.headers.get("range") && isStaticCacheablePath(safePath)) {
         try {
-          const staticKey = new Request(`https://edge-cache-v220.watchlivo.internal${safePath}${url.search}`, { method: "GET" });
+          const staticKey = new Request(`https://edge-cache-v221.watchlivo.internal${safePath}${url.search}`, { method: "GET" });
           const cachedStatic = await edgeCache.match(staticKey);
           if (cachedStatic) {
             const h = new Headers(cachedStatic.headers);

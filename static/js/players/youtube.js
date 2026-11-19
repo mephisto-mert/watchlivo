@@ -1,7 +1,7 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261119_v220';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261119_v220';
-import { ensureHlsJs } from './hls-loader.js?v=20261119_v220';
+import { SubtitleDubController } from './subtitles.js?v=20261119_v221';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261119_v221';
+import { ensureHlsJs } from './hls-loader.js?v=20261119_v221';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -474,6 +474,7 @@ export class YouTubeAdapter {
               this.events.onBuffering?.(false);
               this.events.onPlay?.();
             } else if (e.data === S.PAUSED) {
+              clearTimeout(this.autoplayTimer);
               if (this._suppressYtPauseOnce || this._pipActive || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
                 this._suppressYtPauseOnce = false;
                 return;
@@ -615,6 +616,10 @@ export class YouTubeAdapter {
   }
 
   _activateAudioFallback(startAt = 0, autoplay = true) {
+    clearTimeout(this.autoplayTimer);
+    try { this.player?.destroy?.(); } catch (_) {}
+    this.player = null;
+    try { this.container?.querySelectorAll?.('iframe').forEach((el) => el.remove()); } catch (_) {}
     this._teardownDirectVideo();
     this.toggleVinylMode(true);
     if (this.audioEl) return;
@@ -913,6 +918,7 @@ export class YouTubeAdapter {
 
   pause() {
     this.wantPlaying = false;
+    clearTimeout(this.autoplayTimer);
     if (this.video) { try { this.video.pause(); } catch (_) {} return; }
     if (this._pipActive && this.pipVideo) { this.pipVideo.pause(); return; }
     if (this.audioEl) this.audioEl.pause();

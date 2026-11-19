@@ -74,7 +74,41 @@ function createWindow() {
   });
 
   win.webContents.setUserAgent(CHROME_UA);
+  const isAllowedAuthPopupUrl = (raw) => {
+    try {
+      const u = new URL(String(raw || ''));
+      if (u.protocol !== 'https:') return false;
+      const h = u.hostname.toLowerCase();
+      return (
+        h === 'accounts.google.com' ||
+        h === 'appleid.apple.com' ||
+        h === 'github.com' ||
+        h === 'discord.com' ||
+        h === 'watchlivo-38ab6.firebaseapp.com' ||
+        h === 'watchlivo-38ab6.web.app' ||
+        h === 'watchlivo.online'
+      );
+    } catch (_) {
+      return false;
+    }
+  };
   win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedAuthPopupUrl(url)) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 520,
+          height: 680,
+          autoHideMenuBar: true,
+          webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+            partition: 'persist:vortex-app',
+          },
+        },
+      };
+    }
     if (isSafeExternalHttpUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
   });

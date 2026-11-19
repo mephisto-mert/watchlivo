@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261119_v220';
-import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261119_v220';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261119_v220';
+import { toast } from './ui.js?v=20261119_v221';
+import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261119_v221';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261119_v221';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -1081,6 +1081,7 @@ export class Voice {
       }
       this.camOn = true;
       this.inCall = true;
+      this._activateCallAudio();
       this._attachVideoBubble('self', this.camStream, `📷 ${this.getSelfProfile().name || 'Sen'}`, false);
       await this._attachOrReplaceVideoTrack(this.screenStream || this.camStream);
       this.send('voice_state', { cam: true, inCall: true });
@@ -1134,6 +1135,7 @@ export class Voice {
       }
       this.screenOn = true;
       this.inCall = true;
+      this._activateCallAudio();
       this._attachVideoBubble('self-screen', this.screenStream, `🖥️ ${this.getSelfProfile().name || 'Sen'} · Ekran Yayını`, true);
       this.screenStream.getVideoTracks()[0]?.addEventListener('ended', () => { if (this.screenOn) this.toggleScreenShare(); });
       await this._attachOrReplaceVideoTrack(this.screenStream);
@@ -1259,8 +1261,8 @@ export class Voice {
         this._updateDuckState();
       }
       this.micOn = true;
-      this._ensureRelayPlayCtx();
-      for (const p of this._orderedPeerTargets()) this.peer(p.id);
+      this.inCall = true;
+      this._activateCallAudio();
       const aTrack = this.stream?.getAudioTracks?.()[0];
       if (aTrack) {
         for (const [id, st] of this.peers.entries()) {
@@ -1298,15 +1300,8 @@ export class Voice {
     }
   }
 
-  async joinCall({ withMic = true, withCam = false } = {}) {
-    prepareAudioSessionForMic();
-    this.inCall = true;
-    this.onStateChange?.();
-    if (withMic && !this.micOn) {
-      await this.toggleMic();
-    }
+  _activateCallAudio() {
     this._ensureRelayPlayCtx();
-    this._playCallChime(true);
     for (const p of this._orderedPeerTargets()) {
       const st = this.peer(p.id);
       if (st && st.pc.signalingState === 'stable' && st.pc.connectionState === 'new') {
@@ -1327,10 +1322,21 @@ export class Voice {
         }
       }
     }
+    this._ensureRelayLoops();
+  }
+
+  async joinCall({ withMic = true, withCam = false } = {}) {
+    prepareAudioSessionForMic();
+    this.inCall = true;
+    this.onStateChange?.();
+    if (withMic && !this.micOn) {
+      await this.toggleMic();
+    }
+    this._playCallChime(true);
+    this._activateCallAudio();
     if (withCam && !this.camOn) {
       await this.toggleCamera();
     }
-    this._ensureRelayLoops();
     this.send('voice_state', { inCall: true, muted: !this.micOn, cam: this.camOn, screen: this.screenOn, deafened: this.deafened });
     this.onStateChange?.();
     toast(this.micOn ? '📞 Ses Kanalına katıldın — mikrofonun açık!' : '🎧 Ses Kanalına dinleyici olarak katıldın');

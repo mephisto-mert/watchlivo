@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261119_v220';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261119_v221';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -158,18 +158,19 @@ if (typeof window !== 'undefined' && !window.__wlCmdKBound) {
   window.__wlCmdKBound = true;
   window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      if (document.querySelector('#popup-root > .popup-backdrop:not(.is-closing)')) return;
       const meshRoot = document.getElementById('mesh-root');
       if (meshRoot && !meshRoot.classList.contains('hidden') && !document.body.classList.contains('mesh-minimized')) {
         e.preventDefault();
         if (!document.querySelector('.mesh-layout.has-left')) {
           document.getElementById('nav-search-video')?.click();
-        } else if (!document.querySelector('.panel-left input.input, .sel-search input')) {
+        } else if (!document.querySelector('.panel-left .sel-search input, .panel-left input[type="search"]')) {
           const searchTabBtn = document.querySelector('.panel-left .drawer-tabs button') || document.getElementById('nav-search-video');
           searchTabBtn?.click?.();
         }
         const focusRoomSearch = () => {
-          const mInp = document.querySelector('.panel-left input[type="search"], .panel-left input[type="text"], .panel-left input.input, .sel-search input, .panel-left input:not([type="hidden"])');
-          if (mInp) {
+          const mInp = document.querySelector('.panel-left .sel-search input, .panel-left input[type="search"]');
+          if (mInp && mInp.offsetParent !== null) {
             mInp.focus();
             mInp.select?.();
             return true;

@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v220';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v220';
-import { api, qs, humanApiError } from '../api.js?v=20261119_v220';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v220';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v220';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v220';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v220';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v221';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v221';
+import { api, qs, humanApiError } from '../api.js?v=20261119_v221';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v221';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v221';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v221';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v221';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261119_v220';
+} from '../store.js?v=20261119_v221';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -1186,18 +1186,18 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 },
               }),
               prov?.logo ? h('span', { class: 'wl-continue-prov' }, h('img', { src: prov.logo, alt: '' })) : null,
-              h('span', { class: 'wl-continue-play-ico' }, '▶'),
-              h('button', {
-                type: 'button',
-                class: 'wl-continue-rm',
-                title: 'Listeden kaldır',
-                'aria-label': 'Listeden kaldır',
-                onclick: (ev) => {
-                  ev.stopPropagation();
-                  removeWatchProgress(itemKey);
-                  renderGrid();
-                },
-              }, '✕')),
+              h('span', { class: 'wl-continue-play-ico' }, '▶')),
+            h('button', {
+              type: 'button',
+              class: 'wl-continue-rm',
+              title: 'Listeden kaldır',
+              'aria-label': 'Listeden kaldır',
+              onclick: (ev) => {
+                ev.stopPropagation();
+                removeWatchProgress(itemKey);
+                renderGrid();
+              },
+            }, '✕'),
             h('div', { class: 'wl-continue-body' },
               h('div', { class: 'wl-continue-title' }, item.title || 'Sinema'),
               h('div', { class: 'wl-continue-sub' }, subTxt),

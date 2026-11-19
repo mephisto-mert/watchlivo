@@ -286,7 +286,7 @@ def main() -> None:
     latest_eps = fetch_local_json("/api/rave/latest-episodes", {"ok": True, "items": fallback_eps})
 
     bootstrap = {
-        "version": "20261119_v220",
+        "version": "20261119_v221",
         "catalog": all_items,
         "curatedRooms": curated_rooms,
         "newReleases": new_rel.get("items") or all_items[:24],
