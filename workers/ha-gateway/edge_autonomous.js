@@ -175,7 +175,7 @@ async function getBootstrap(env) {
     } catch {}
   }
   _curatedMap = new Map(DEFAULT_CURATED_LIVE_ROOMS.map((rm) => [rm.id, rm]));
-  return { version: "20261119_v222", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
+  return { version: "20261119_v223", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
 }
 
 function makeNonce() {
@@ -2026,60 +2026,199 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     return edgeJson({ ok: true, items: mergedNr });
   }
   if (safePath === "/api/rave/latest-episodes") {
-    const isDeadOrLegacyEp = (it) => {
-      const idStr = String(it?.id || "").trim().toLowerCase();
-      const badge = String(it?.sourceBadge || it?.source || "").toLowerCase();
-      return idStr.startsWith("dbx-") || idStr === "ac-7791" || idStr === "ac-8" || badge.includes("dizibox");
-    };
-    const rawItems = blockedSet.size ? boot.latestEpisodes.filter((it) => !isItemBlocked(it, blockedSet)) : boot.latestEpisodes;
-    const validItems = rawItems.filter((it) => !isDeadOrLegacyEp(it));
-    const CURATED_FALLBACK_EPS = [
-      { id: "tmdb-tv-1399", tmdbId: "1399", mediaType: "tv", title: "Game of Thrones", originalTitle: "Game of Thrones", year: "2011", season: 1, episode: 1, poster: "/api/rave/poster?tid=1399&mt=tv", sourceBadge: "🎬 Sinema+ HD" },
-      { id: "tmdb-tv-1396", tmdbId: "1396", mediaType: "tv", title: "Breaking Bad", originalTitle: "Breaking Bad", year: "2008", season: 1, episode: 1, poster: "/api/rave/poster?tid=1396&mt=tv", sourceBadge: "🎬 Sinema+ HD" },
-      { id: "tmdb-tv-66732", tmdbId: "66732", mediaType: "tv", title: "Stranger Things", originalTitle: "Stranger Things", year: "2016", season: 1, episode: 1, poster: "/api/rave/poster?tid=66732&mt=tv", sourceBadge: "🎬 Sinema+ HD" },
-      { id: "tmdb-tv-127532", tmdbId: "127532", mediaType: "tv", title: "Solo Leveling", originalTitle: "Solo Leveling", year: "2024", season: 1, episode: 1, poster: "/api/rave/poster?tid=127532&mt=tv", sourceBadge: "⚡ AnimeciX HD" },
-      { id: "tmdb-tv-95479", tmdbId: "95479", mediaType: "tv", title: "Jujutsu Kaisen", originalTitle: "Jujutsu Kaisen", year: "2020", season: 1, episode: 1, poster: "/api/rave/poster?tid=95479&mt=tv", sourceBadge: "⚡ AnimeciX HD" },
-      { id: "tmdb-tv-100088", tmdbId: "100088", mediaType: "tv", title: "The Last of Us", originalTitle: "The Last of Us", year: "2023", season: 1, episode: 1, poster: "/api/rave/poster?tid=100088&mt=tv", sourceBadge: "🎬 Sinema+ HD" },
-      { id: "tmdb-tv-115678", tmdbId: "115678", mediaType: "tv", title: "Gibi", originalTitle: "Gibi", year: "2021", season: 1, episode: 1, poster: "/api/rave/poster?tid=115678&mt=tv", sourceBadge: "🇹🇷 Yerli HD" },
-      { id: "tmdb-tv-228853", tmdbId: "228853", mediaType: "tv", title: "Prens", originalTitle: "Prens", year: "2023", season: 1, episode: 1, poster: "/api/rave/poster?tid=228853&mt=tv", sourceBadge: "🇹🇷 Yerli HD" },
-      { id: "tmdb-tv-119051", tmdbId: "119051", mediaType: "tv", title: "Wednesday", originalTitle: "Wednesday", year: "2022", season: 1, episode: 1, poster: "/api/rave/poster?tid=119051&mt=tv", sourceBadge: "🎬 Sinema+ HD" },
-      { id: "tmdb-tv-85937", tmdbId: "85937", mediaType: "tv", title: "İblis Keser", originalTitle: "Demon Slayer", year: "2019", season: 1, episode: 1, poster: "/api/rave/poster?tid=85937&mt=tv", sourceBadge: "⚡ AnimeciX HD" },
-      { id: "tmdb-tv-1429", tmdbId: "1429", mediaType: "tv", title: "Attack on Titan", originalTitle: "Attack on Titan", year: "2013", season: 1, episode: 1, poster: "/api/rave/poster?tid=1429&mt=tv", sourceBadge: "⚡ AnimeciX HD" },
-      { id: "tmdb-tv-209867", tmdbId: "209867", mediaType: "tv", title: "Frieren: Beyond Journey's End", originalTitle: "Frieren", year: "2023", season: 1, episode: 1, poster: "/api/rave/poster?tid=209867&mt=tv", sourceBadge: "⚡ AnimeciX HD" },
-    ];
-    const items = [];
-    const seenIds = new Set();
-    for (const c of [...CURATED_FALLBACK_EPS, ...validItems]) {
-      if (items.length >= 16) break;
-      const k = String(c?.tmdbId || c?.id || "");
-      if (!k || seenIds.has(k)) continue;
-      seenIds.add(k);
-      items.push(c);
-    }
-    if (items.length < 16 && Array.isArray(boot.catalog)) {
-      for (const c of boot.catalog) {
-        if (items.length >= 16) break;
-        if (!c || c.mediaType !== "tv" || isDeadOrLegacyEp(c) || !/^\d+$/.test(String(c.tmdbId || ""))) continue;
-        if (blockedSet.size && isItemBlocked(c, blockedSet)) continue;
-        const k = String(c.tmdbId);
-        if (seenIds.has(k)) continue;
-        seenIds.add(k);
-        items.push({
-          id: c.id || `tmdb-tv-${k}`,
-          tmdbId: k,
-          mediaType: "tv",
-          title: c.title || c.originalTitle || "",
-          originalTitle: c.originalTitle || c.title || "",
-          poster: c.poster || "",
-          year: c.year || "",
-          season: 1,
-          episode: 1,
-          source: c.source || "Sinema+",
-          sourceBadge: c.sourceBadge || "🎬 Sinema+ HD",
-        });
+    const forceRefresh = url.searchParams.get("refresh") === "1";
+    const kvCacheKey = "live:latest_vizyon_eps_v1";
+    const filterBlocked = (arr) => (blockedSet.size ? arr.filter((it) => it && !isItemBlocked(it, blockedSet)) : arr.filter(Boolean));
+    if (!forceRefresh && env?.WATCHLIVO_KV) {
+      const cached = await env.WATCHLIVO_KV.get(kvCacheKey, "json").catch(() => null);
+      if (cached && Array.isArray(cached.items) && cached.items.length >= 6) {
+        return edgeJson({ ok: true, items: filterBlocked(cached.items).slice(0, 16), cached: true });
       }
     }
-    return edgeJson({ ok: true, items });
+
+    const apiKey = String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim();
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const cutoffDate = new Date(Date.now() - 210 * 86400 * 1000).toISOString().slice(0, 10);
+
+    const fetchJsonSafe = async (u, hdrs = {}, timeoutMs = 4200) => {
+      try {
+        const r = await fetch(u, { headers: { "User-Agent": EDGE_UA, ...hdrs }, signal: AbortSignal.timeout(timeoutMs) });
+        if (!r.ok) { r.body?.cancel?.(); return null; }
+        return await r.json().catch(() => null);
+      } catch {
+        return null;
+      }
+    };
+
+    const [npTr, npGlob, onAir, acLatest] = await Promise.all([
+      fetchJsonSafe(`https://api.themoviedb.org/3/movie/now_playing?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&region=TR&page=1`),
+      fetchJsonSafe(`https://api.themoviedb.org/3/movie/now_playing?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&page=1`),
+      fetchJsonSafe(`https://api.themoviedb.org/3/tv/on_the_air?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&page=1`),
+      fetchJsonSafe("https://animecix.tv/secure/last-episodes?page=1&perPage=10", { Referer: "https://animecix.tv/", Accept: "application/json" }),
+    ]);
+
+    // 1. Newly released theater/streaming movies (TMDB now_playing)
+    const freshMovies = [];
+    const seenMov = new Set();
+    for (const m of [...(npTr?.results || []), ...(npGlob?.results || [])]) {
+      if (!m || !m.id || !m.poster_path) continue;
+      const rd = String(m.release_date || "");
+      if (rd && (rd > todayIso || rd < cutoffDate)) continue;
+      if (Number(m.vote_count || 0) < 12) continue;
+      const tid = String(m.id);
+      if (seenMov.has(tid)) continue;
+      seenMov.add(tid);
+      const yr = rd ? rd.slice(0, 4) : todayIso.slice(0, 4);
+      freshMovies.push({
+        id: `tmdb-movie-${tid}`,
+        tmdbId: tid,
+        mediaType: "movie",
+        title: String(m.title || m.original_title || "").trim(),
+        originalTitle: String(m.original_title || m.title || "").trim(),
+        year: yr,
+        rating: Number(Number(m.vote_average || 0).toFixed(1)) || 7.2,
+        poster: `https://image.tmdb.org/t/p/w342${m.poster_path}`,
+        backdrop: m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : `https://image.tmdb.org/t/p/w342${m.poster_path}`,
+        still: m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : `https://image.tmdb.org/t/p/w342${m.poster_path}`,
+        releaseDate: rd,
+        episodeLabel: `🎬 VİZYON ${yr}`,
+        sourceBadge: "🍿 Yeni Vizyon Filmi",
+        provider: "cinema",
+      });
+      if (freshMovies.length >= 8) break;
+    }
+
+    // 2. Currently airing TV series with REAL last_episode_to_air season & episode numbers
+    const airCands = (onAir?.results || [])
+      .filter((t) => t && t.id && t.poster_path && Number(t.vote_count || 0) >= 20 && !String(t.original_language || "").match(/^(zh|th|vi|tl)$/i))
+      .sort((a, b) => Number(b.popularity || 0) - Number(a.popularity || 0))
+      .slice(0, 10);
+    const tvDetails = await Promise.all(
+      airCands.map((t) => fetchJsonSafe(`https://api.themoviedb.org/3/tv/${t.id}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR`, {}, 3500))
+    );
+    const freshTvEps = [];
+    const seenTv = new Set();
+    for (const d of tvDetails) {
+      if (!d || !d.id || !d.poster_path) continue;
+      const le = d.last_episode_to_air;
+      const sNum = Number(le?.season_number || 0);
+      const eNum = Number(le?.episode_number || 0);
+      if (sNum < 1 || eNum < 1) continue;
+      const airD = String(le?.air_date || "");
+      if (airD && airD < cutoffDate) continue;
+      const tid = String(d.id);
+      if (seenTv.has(tid)) continue;
+      seenTv.add(tid);
+      const yr = String(d.first_air_date || "").slice(0, 4) || todayIso.slice(0, 4);
+      const stillPath = le?.still_path || d.backdrop_path || d.poster_path;
+      const epTitle = String(le?.name || "").trim();
+      const cleanEpTitle = epTitle && !/^bölüm\s*\d+$/i.test(epTitle) && !/^episode\s*\d+$/i.test(epTitle) ? epTitle : "";
+      freshTvEps.push({
+        id: `tmdb-tv-${tid}-s${sNum}e${eNum}`,
+        tmdbId: tid,
+        mediaType: "tv",
+        title: String(d.name || d.original_name || "").trim(),
+        originalTitle: String(d.original_name || d.name || "").trim(),
+        year: yr,
+        season: sNum,
+        episode: eNum,
+        episodeLabel: `S${sNum}:B${eNum}`,
+        episodeTitle: cleanEpTitle,
+        airDate: airD,
+        poster: `https://image.tmdb.org/t/p/w342${d.poster_path}`,
+        backdrop: d.backdrop_path ? `https://image.tmdb.org/t/p/w780${d.backdrop_path}` : `https://image.tmdb.org/t/p/w342${d.poster_path}`,
+        still: stillPath ? `https://image.tmdb.org/t/p/w500${stillPath}` : `https://image.tmdb.org/t/p/w342${d.poster_path}`,
+        sourceBadge: "📺 Yeni Bölüm",
+        provider: "cinema",
+      });
+      if (freshTvEps.length >= 8) break;
+    }
+
+    // 3. Live newly aired Anime episodes (AnimeciX)
+    const freshAnimeEps = [];
+    const rawAcArr = Array.isArray(acLatest?.data) ? acLatest.data : (Array.isArray(acLatest?.episodes) ? acLatest.episodes : (Array.isArray(acLatest) ? acLatest : []));
+    const seenAc = new Set();
+    for (const a of rawAcArr) {
+      if (!a || typeof a !== "object") continue;
+      const aTitle = String(a.title_name || a.title?.name || a.name || "").trim();
+      const sNum = Number(a.season_number || a.season || 1);
+      const eNum = Number(a.episode_number || a.episode || 0);
+      const acId = String(a.title_id || a.title?.id || "").trim();
+      if (!aTitle || eNum < 1 || !acId || seenAc.has(acId)) continue;
+      seenAc.add(acId);
+      const aPoster = String(a.title_poster || a.title?.poster || a.poster || "").trim();
+      freshAnimeEps.push({
+        id: `ac-${acId}`,
+        tmdbId: a.tmdb_id ? String(a.tmdb_id) : "",
+        mediaType: "tv",
+        title: aTitle,
+        originalTitle: aTitle,
+        year: todayIso.slice(0, 4),
+        season: Math.max(1, sNum),
+        episode: eNum,
+        episodeLabel: `S${Math.max(1, sNum)}:B${eNum}`,
+        poster: aPoster.startsWith("http") ? aPoster : `/api/rave/poster?t=${encodeURIComponent(aTitle)}&mt=tv`,
+        still: aPoster.startsWith("http") ? aPoster : "",
+        sourceBadge: "⚡ Yeni Anime Bölümü",
+        provider: "anime",
+        catalogProvider: "anime",
+      });
+      if (freshAnimeEps.length >= 4) break;
+    }
+
+    // 4. Interleave Movies + TV Episodes + Anime Episodes for a balanced "Yeni Vizyon & Son Bölümler" shelf
+    const mergedLive = [];
+    const seenKeys = new Set();
+    const pushItem = (it) => {
+      if (!it || mergedLive.length >= 16) return;
+      const k = it.tmdbId ? `${it.mediaType}:${it.tmdbId}` : `id:${it.id}`;
+      if (seenKeys.has(k)) return;
+      seenKeys.add(k);
+      mergedLive.push(it);
+    };
+    const maxLen = Math.max(freshTvEps.length, freshMovies.length, freshAnimeEps.length);
+    for (let i = 0; i < maxLen && mergedLive.length < 16; i++) {
+      if (freshTvEps[i]) pushItem(freshTvEps[i]);
+      if (freshMovies[i]) pushItem(freshMovies[i]);
+      if (i % 2 === 1 && freshAnimeEps[Math.floor(i / 2)]) pushItem(freshAnimeEps[Math.floor(i / 2)]);
+    }
+
+    // Include custom Vizyon releases if any exist in KV
+    const customPool = env?.WATCHLIVO_KV ? (await env.WATCHLIVO_KV.get("vizyon:custom_releases", "json").catch(() => null)) || [] : [];
+    const finalItems = [];
+    const seenFinal = new Set();
+    for (const it of [...(Array.isArray(customPool) ? customPool.slice(0, 4) : []), ...mergedLive]) {
+      if (!it || finalItems.length >= 16) break;
+      const k = it.tmdbId ? `${it.mediaType || "movie"}:${it.tmdbId}` : `id:${it.id}`;
+      if (seenFinal.has(k)) continue;
+      seenFinal.add(k);
+      finalItems.push(it);
+    }
+
+    // Fallback ONLY if all live upstreams failed completely
+    if (finalItems.length < 4 && Array.isArray(boot.newReleases)) {
+      for (const nr of boot.newReleases) {
+        if (!nr || finalItems.length >= 12) break;
+        const yrNum = Number(String(nr.year || "").slice(0, 4));
+        if (yrNum && yrNum < 2025) continue;
+        pushItem({
+          ...nr,
+          mediaType: nr.mediaType || "movie",
+          episodeLabel: nr.mediaType === "tv" ? `S${nr.season || 1}:B${nr.episode || 1}` : `🎬 VİZYON ${nr.year || "2026"}`,
+          sourceBadge: nr.sourceBadge || "🍿 Vizyonda & Yeni",
+        });
+      }
+      for (const it of mergedLive) {
+        if (finalItems.length >= 16) break;
+        const k = it.tmdbId ? `${it.mediaType || "movie"}:${it.tmdbId}` : `id:${it.id}`;
+        if (!seenFinal.has(k)) { seenFinal.add(k); finalItems.push(it); }
+      }
+    }
+
+    if (finalItems.length >= 6 && env?.WATCHLIVO_KV) {
+      await env.WATCHLIVO_KV.put(kvCacheKey, JSON.stringify({ items: finalItems, ts: Math.floor(Date.now() / 1000) }), { expirationTtl: 1800 }).catch(() => {});
+    }
+    return edgeJson({ ok: true, items: filterBlocked(finalItems).slice(0, 16), cached: false });
   }
   if (isSeasonsPath) {
     const rawId = (url.searchParams.get("id") || "").trim();

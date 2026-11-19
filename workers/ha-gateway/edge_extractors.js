@@ -552,9 +552,64 @@ async function extractFullhdMoviePage(pageUrl, fetchPublicFn) {
   }
   for (const vodU of vodCandidates.slice(0, 3)) {
     const out = await resolveEmbedHtmlToHls(vodU, fetchPublicFn);
-    if (out?.url) return out;
+    if (out?.url) {
+      return {
+        ...out,
+        streams: [{ url: out.url, referer: out.referer || "https://rapidvid.org/", label: "📡 FullHDFilm · Dual HD (1080p HLS)" }],
+      };
+    }
   }
   return null;
+}
+
+export async function extractFullhdSearchMovie({ title, displayTitle, originalTitle, year = "" }, fetchPublicFn) {
+  const FHD_ORIGIN = "https://www.fullhdfilmizlesene.now";
+  const reqTitles = [originalTitle, title, displayTitle]
+    .map((x) => String(x || "").replace(/\(\d{4}\)/g, "").trim())
+    .filter(Boolean);
+  if (!reqTitles.length) return null;
+  const qList = [];
+  for (const t of reqTitles) {
+    if (!qList.includes(t)) qList.push(t);
+    if (t.includes(":")) {
+      const pre = t.split(":")[0].trim();
+      if (pre.length >= 3 && !qList.includes(pre)) qList.push(pre);
+    }
+  }
+
+  let bestUrl = "";
+  let bestScore = 0;
+  for (const q of qList.slice(0, 2)) {
+    const html = await fetchTextSafe(
+      `${FHD_ORIGIN}/arama/${encodeURIComponent(q)}`,
+      { "User-Agent": UA_EDGE, Referer: `${FHD_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+      fetchPublicFn,
+      4000
+    );
+    if (!html) continue;
+    const itemRe = /<li[^>]+class=["'][^"']*\bfilm\b[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi;
+    let m;
+    while ((m = itemRe.exec(html)) !== null) {
+      const block = m[1];
+      const hrefM = block.match(/href=["'](https?:\/\/(?:www\.)?fullhdfilmizlesene\.[a-z]+\/film\/[^"']+)["']/i);
+      if (!hrefM?.[1]) continue;
+      const trTitle = decodeHtmlEntitiesBasic(block.match(/<span[^>]+class=["']film-title["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] || "");
+      const origTitle = decodeHtmlEntitiesBasic(block.match(/<span[^>]+class=["']kt["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] || "");
+      const yrM = block.match(/<span[^>]+class=["']film-yil["'][^>]*>\s*(\d{4})\s*<\/span>/i);
+      const cardYear = yrM ? yrM[1] : "";
+      const cands = [trTitle, origTitle].filter(Boolean);
+      for (const ct of cands) {
+        const sc = titlesMatchScore(cardYear ? `${ct} (${cardYear})` : ct, reqTitles, year);
+        if (sc > bestScore) {
+          bestScore = sc;
+          bestUrl = hrefM[1];
+        }
+      }
+    }
+    if (bestScore >= 90) break;
+  }
+  if (!bestUrl || bestScore < 45) return null;
+  return await extractFullhdMoviePage(bestUrl, fetchPublicFn);
 }
 
 async function extractHdfcPage(pageUrl, mtype, s, e, fetchPublicFn) {
@@ -1573,11 +1628,11 @@ function mergeResolvedResults(resultList) {
   const rankStream = (st) => {
     const u = String(st.url || "").toLowerCase();
     if (/makesomthingup|centralodsseyproud|\/r6\//.test(u)) return 0;
-    if (/dbx\.molystream\.org/.test(u)) return 1;
-    if (/sprintcdn|r66nv9ed|owphbf24|filemoon|byse/.test(u)) return 1;
+    if (/dbx\.molystream\.org|player\.filmizle\.in|storage\.diziyou\.love|ksdpictures\.site|video\.twimg\.com/.test(u)) return 1;
+    if (/sprintcdn|r66nv9ed|owphbf24|filemoon|byse|cdnimg|rapidvid/.test(u)) return 1;
     if (/tau-video|irtau1/.test(u)) return 2;
     if (/imgsapi\.pro|pilavyer/.test(u)) return 3;
-    if (/dragonballzfans/.test(u)) return 4;
+    if (/vixsrc\.to|dragonballzfans/.test(u)) return 4;
     if (!isVmpxOrVidmolyUrl(u)) return 4;
     return isCfPoisonedVmpxUrl(u) ? 6 : 5;
   };
@@ -2071,6 +2126,538 @@ async function extractAnimecix({ title, displayTitle, originalTitle, tmdbId = ""
   return { url: streams[0].url, referer: streams[0].referer, subs: [], streams, tag: streams[0].tag };
 }
 
+const FILMIZLE_IN_HOST_RE = /^(?:[a-z0-9-]+\.)?filmizle\.in$/i;
+
+export async function extractSinemaccMovie({ title, displayTitle, originalTitle, year = "" }, fetchPublicFn) {
+  const SC_ORIGIN = "https://sinemacc.com";
+  const reqTitles = [originalTitle, title, displayTitle]
+    .map((x) => String(x || "").replace(/\(\d{4}\)/g, "").trim())
+    .filter(Boolean);
+  if (!reqTitles.length) return null;
+  const qList = [];
+  for (const t of reqTitles) {
+    if (!qList.includes(t)) qList.push(t);
+    if (t.includes(":")) {
+      const pre = t.split(":")[0].trim();
+      if (pre.length >= 3 && !qList.includes(pre)) qList.push(pre);
+    }
+  }
+
+  let bestUrl = "";
+  let bestScore = 0;
+  for (const q of qList.slice(0, 2)) {
+    const html = await fetchTextSafe(
+      `${SC_ORIGIN}/arama/?s=${encodeURIComponent(q)}`,
+      { "User-Agent": UA_EDGE, Referer: `${SC_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+      fetchPublicFn,
+      4000
+    );
+    if (!html) continue;
+    const resIdx = html.indexOf("Arama Sonu");
+    const scoped = resIdx >= 0 ? html.slice(resIdx) : html;
+    const cardRe = /<div[^>]+class=["'][^"']*\bfilm_kutusu\b[^"']*["'][^>]*>[\s\S]{0,600}?<a[^>]+href=["'](https?:\/\/(?:www\.)?sinemacc\.com\/film\/([a-z0-9-]+)\/?)["'][^>]*?(?:title=["']([^"']*)["'])?/gi;
+    let m;
+    while ((m = cardRe.exec(scoped)) !== null) {
+      const href = m[1];
+      const slug = m[2];
+      const rawTitleAttr = decodeHtmlEntitiesBasic(m[3] || "").replace(/\s*(?:İzle|izle|HD|Full)\s*$/i, "").trim();
+      const yrM = slug.match(/(?:^|-)((?:19|20)\d{2})$/);
+      const slugYear = yrM ? yrM[1] : "";
+      const slugClean = slug.replace(/-(?:19|20)\d{2}$/, "").replace(/-/g, " ").trim();
+      const cands = [rawTitleAttr, slugClean].filter(Boolean);
+      for (const ct of cands) {
+        const sc = titlesMatchScore(slugYear ? `${ct} (${slugYear})` : ct, reqTitles, year);
+        if (sc > bestScore) {
+          bestScore = sc;
+          bestUrl = href;
+        }
+      }
+    }
+    if (bestScore >= 90) break;
+  }
+  if (!bestUrl || bestScore < 45) return null;
+
+  const pageHtml = await fetchTextSafe(
+    bestUrl,
+    { "User-Agent": UA_EDGE, Referer: `${SC_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+    fetchPublicFn,
+    4000
+  );
+  if (!pageHtml) return null;
+
+  const playerCands = [];
+  const seenHashes = new Set();
+  for (const bm of pageHtml.matchAll(/aHR0c[A-Za-z0-9+/=]{16,}/g)) {
+    try {
+      let b64 = bm[0];
+      while (b64.length % 4 !== 0) b64 += "=";
+      const decoded = atob(b64).trim();
+      const pu = new URL(decoded);
+      if (pu.protocol !== "https:" || !FILMIZLE_IN_HOST_RE.test(pu.hostname)) continue;
+      const hm = pu.pathname.match(/^\/video\/([a-f0-9]{16,})/i);
+      if (!hm) continue;
+      const hash = hm[1];
+      if (seenHashes.has(hash)) continue;
+      seenHashes.add(hash);
+      const isTur = decoded.includes("lng=tur") || decoded.includes("lng=trsub");
+      playerCands.push({ url: decoded, origin: pu.origin, hash, isTur });
+    } catch {}
+  }
+  if (!playerCands.length) return null;
+  playerCands.sort((a, b) => (a.isTur === b.isTur ? 0 : a.isTur ? -1 : 1));
+
+  for (const cand of playerCands.slice(0, 2)) {
+    const apiUrl = `${cand.origin}/player/index.php?data=${encodeURIComponent(cand.hash)}&do=getVideo`;
+    const postPromise = (async () => {
+      try {
+        const r = await fetch(apiUrl, {
+          method: "POST",
+          headers: {
+            "User-Agent": UA_EDGE,
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+            Origin: cand.origin,
+            Referer: cand.url,
+          },
+          body: `hash=${encodeURIComponent(cand.hash)}&r=${encodeURIComponent(`${SC_ORIGIN}/`)}`,
+          redirect: "manual",
+          signal: AbortSignal.timeout(4200),
+        });
+        if (!r.ok) {
+          r.body?.cancel?.();
+          return null;
+        }
+        return await r.json().catch(() => null);
+      } catch {
+        return null;
+      }
+    })();
+    const htmlPromise = fetchTextSafe(
+      cand.url,
+      { "User-Agent": UA_EDGE, Referer: bestUrl, "Accept-Language": "tr-TR,tr;q=0.9" },
+      fetchPublicFn,
+      3800
+    );
+
+    const [vidJson, playerHtml] = await Promise.all([postPromise, htmlPromise]);
+    const masterUrl = String(vidJson?.securedLink || vidJson?.videoSource || "").trim();
+    if (!masterUrl.startsWith("https://")) continue;
+    try {
+      if (isBlockedAdHost(new URL(masterUrl).hostname)) continue;
+    } catch {
+      continue;
+    }
+
+    const m3Txt = await fetchTextSafe(
+      masterUrl,
+      { "User-Agent": UA_EDGE, Referer: `${cand.origin}/`, Accept: "*/*" },
+      fetchPublicFn,
+      3200
+    );
+    if (!m3Txt || !m3Txt.includes("#EXTM3U")) continue;
+
+    const subs = [];
+    const subRef = `${cand.origin}/`;
+    if (playerHtml) {
+      const mJsSub = playerHtml.match(/playerjsSubtitle\s*=\s*["'](?:\[[^\]]*\])?(https?:\/\/[^"']+)["']/i);
+      if (mJsSub?.[1]) {
+        subs.push({ lang: "tr", url: mJsSub[1].trim(), referer: subRef, source: "sinemacc" });
+      } else {
+        const unp = unpackDeanEdwards(playerHtml);
+        const mTrack = unp.replace(/\\\//g, "/").match(/"kind"\s*:\s*"captions"[^}]*"file"\s*:\s*"(https?:\/\/[^"]+)"/i)
+          || unp.replace(/\\\//g, "/").match(/"file"\s*:\s*"(https?:\/\/[^"]+)"[^}]*"label"\s*:\s*"Turkish"/i);
+        if (mTrack?.[1]) {
+          subs.push({ lang: "tr", url: mTrack[1].trim(), referer: subRef, source: "sinemacc" });
+        }
+      }
+    }
+
+    return {
+      url: masterUrl,
+      referer: `${cand.origin}/`,
+      subs,
+      streams: [{ url: masterUrl, referer: `${cand.origin}/`, label: "📡 SinemaCC · Dual HD (1080p HLS)" }],
+      tag: "hls_sinemacc",
+    };
+  }
+  return null;
+}
+
+export async function extractDiziyouLove({ title, displayTitle, originalTitle, year = "", s, e }, fetchPublicFn) {
+  const DY_ORIGIN = "https://www.diziyou.love";
+  const reqTitles = [originalTitle, title, displayTitle]
+    .map((x) => String(x || "").replace(/\(\d{4}\)/g, "").trim())
+    .filter(Boolean);
+  if (!reqTitles.length || !s || !e) return null;
+
+  const tryEpisodeUrl = async (epUrl, preVerified = false) => {
+    const epHtml = await fetchTextSafe(
+      epUrl,
+      { "User-Agent": UA_EDGE, Referer: `${DY_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+      fetchPublicFn,
+      3800
+    );
+    if (!epHtml) return null;
+    if (!preVerified) {
+      const tm = epHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const rawPt = tm
+        ? decodeHtmlEntitiesBasic(tm[1])
+            .replace(/\s+\d+\.\s*Sezon.*$/i, "")
+            .replace(/\s*(?:izle|Diziyou|\|).*$/i, "")
+            .trim()
+        : "";
+      if (rawPt && titlesMatchScore(rawPt, reqTitles, year) < 40) return null;
+    }
+    const pm = epHtml.match(/\/player\/(\d+)\.html/i);
+    if (!pm?.[1]) return null;
+    const pid = pm[1];
+    const origM3u8 = `https://storage.diziyou.love/episodes/${pid}/play.m3u8`;
+    const dubM3u8 = `https://storage.diziyou.love/episodes/${pid}_tr/play.m3u8`;
+    const hasDubBtn = /id=["']turkceDublaj["']/i.test(epHtml);
+
+    const probeM3 = async (u) => {
+      const txt = await fetchTextSafe(
+        u,
+        { "User-Agent": UA_EDGE, Referer: `${DY_ORIGIN}/`, Accept: "*/*" },
+        fetchPublicFn,
+        3000
+      );
+      return txt && txt.includes("#EXTM3U") ? u : "";
+    };
+    const checkSub = async (lang, subUrl) => {
+      try {
+        const sr = await fetch(subUrl, {
+          method: "HEAD",
+          headers: { "User-Agent": UA_EDGE, Referer: `${DY_ORIGIN}/` },
+          redirect: "manual",
+          signal: AbortSignal.timeout(1500),
+        });
+        sr.body?.cancel?.();
+        return sr.ok ? { lang, url: subUrl, referer: `${DY_ORIGIN}/`, source: "diziyou_love" } : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const [origOk, dubOk, trSub, enSub] = await Promise.all([
+      probeM3(origM3u8),
+      hasDubBtn ? probeM3(dubM3u8) : Promise.resolve(""),
+      checkSub("tr", `https://storage.diziyou.love/subtitles/${pid}/tr.vtt`),
+      checkSub("en", `https://storage.diziyou.love/subtitles/${pid}/en.vtt`),
+    ]);
+
+    const streams = [];
+    if (dubOk) {
+      streams.push({ url: dubOk, referer: `${DY_ORIGIN}/`, label: "📡 Diziyou · Türkçe Dublaj (HD HLS)" });
+    }
+    if (origOk) {
+      streams.push({ url: origOk, referer: `${DY_ORIGIN}/`, label: "📡 Diziyou · Türkçe Altyazılı (HD HLS)" });
+    }
+    if (!streams.length) return null;
+    const subs = [trSub, enSub].filter(Boolean);
+    return {
+      url: streams[0].url,
+      referer: `${DY_ORIGIN}/`,
+      subs,
+      streams,
+      tag: "hls_dylove",
+    };
+  };
+
+  // 1. Direct slug fast path (1 hop)
+  const triedUrls = new Set();
+  for (const t of reqTitles.slice(0, 2)) {
+    const sl = slugifyAscii(t);
+    if (!sl || sl.length < 2) continue;
+    const epU = `${DY_ORIGIN}/${sl}-${s}-sezon-${e}-bolum/`;
+    if (triedUrls.has(epU)) continue;
+    triedUrls.add(epU);
+    const hit = await tryEpisodeUrl(epU, false);
+    if (hit?.url) return hit;
+  }
+
+  // 2. WordPress search fallback -> series page -> episode link
+  const sHtml = await fetchTextSafe(
+    `${DY_ORIGIN}/?s=${encodeURIComponent(reqTitles[0])}`,
+    { "User-Agent": UA_EDGE, Referer: `${DY_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+    fetchPublicFn,
+    3800
+  );
+  if (!sHtml) return null;
+
+  let bestSeriesUrl = "";
+  let bestScore = 0;
+  const linkRe = /<a[^>]+(?:title=["']([^"']*)["'][^>]+)?href=["'](https:\/\/www\.diziyou\.love\/([a-z0-9-]+)\/)["'](?:[^>]+title=["']([^"']*)["'])?[^>]*>/gi;
+  let lm;
+  while ((lm = linkRe.exec(sHtml)) !== null) {
+    const href = lm[2];
+    const sl = lm[3];
+    if (!sl || /(?:sezon|bolum|dizi-arsivi|iletisim|gizlilik|hakkimizda|wp-|feed|page|category|etiket|tur|arama)/i.test(sl)) continue;
+    const tAttr = decodeHtmlEntitiesBasic(lm[1] || lm[4] || "").trim();
+    const slClean = sl.replace(/\d+$/, "").replace(/-/g, " ").trim();
+    const sc = Math.max(
+      tAttr ? titlesMatchScore(tAttr, reqTitles, year) : -1,
+      titlesMatchScore(slClean, reqTitles, year)
+    );
+    if (sc > bestScore) {
+      bestScore = sc;
+      bestSeriesUrl = href;
+    }
+  }
+  if (!bestSeriesUrl || bestScore < 45) return null;
+
+  const seriesHtml = await fetchTextSafe(
+    bestSeriesUrl,
+    { "User-Agent": UA_EDGE, Referer: `${DY_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+    fetchPublicFn,
+    3800
+  );
+  if (!seriesHtml) return null;
+  const epRe = new RegExp(`href=["'](https:\\/\\/www\\.diziyou\\.love\\/[a-z0-9-]+-${s}-sezon-${e}-bolum\\/?)["']`, "i");
+  const em = seriesHtml.match(epRe);
+  if (!em?.[1] || triedUrls.has(em[1])) return null;
+  return await tryEpisodeUrl(em[1], true);
+}
+
+export async function extractDiziyouNet({ title, displayTitle, originalTitle, year = "", s, e }, fetchPublicFn) {
+  const DN_ORIGIN = "https://diziyou.net";
+  const reqTitles = [originalTitle, title, displayTitle]
+    .map((x) => String(x || "").replace(/\(\d{4}\)/g, "").trim())
+    .filter(Boolean);
+  if (!reqTitles.length || !s || !e) return null;
+
+  const tryEpisodeUrl = async (epUrl, preVerified = false) => {
+    const epHtml = await fetchTextSafe(
+      epUrl,
+      { "User-Agent": UA_EDGE, Referer: `${DN_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+      fetchPublicFn,
+      3800
+    );
+    if (!epHtml) return null;
+    if (!preVerified) {
+      const tm = epHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const rawPt = tm
+        ? decodeHtmlEntitiesBasic(tm[1])
+            .replace(/\s+\d+\.\s*Sezon.*$/i, "")
+            .replace(/\s*(?:izle|Diziyou|\||-).*$/i, "")
+            .trim()
+        : "";
+      if (rawPt && titlesMatchScore(rawPt, reqTitles, year) < 40) return null;
+    }
+
+    const ifrUrls = [];
+    for (const im of epHtml.matchAll(/<iframe[^>]+(?:src|data-src)=["']([^"']+)["']/gi)) {
+      let u = String(im[1] || "").trim();
+      if (!u || u.startsWith("about:")) continue;
+      if (u.startsWith("//")) u = `https:${u}`;
+      if (u.startsWith("https://") && !ifrUrls.includes(u)) ifrUrls.push(u);
+    }
+
+    for (const ifrUrl of ifrUrls.slice(0, 2)) {
+      if (isDirectEmbedPageUrl(ifrUrl)) {
+        const directOut = await resolveEmbedHtmlToHls(ifrUrl, fetchPublicFn);
+        if (directOut?.url) return directOut;
+        continue;
+      }
+
+      if (/ksdpictures\.site/i.test(ifrUrl)) {
+        const embHtml = await fetchTextSafe(
+          ifrUrl,
+          { "User-Agent": UA_EDGE, Referer: epUrl, "Accept-Language": "tr-TR,tr;q=0.9" },
+          fetchPublicFn,
+          3800
+        );
+        if (!embHtml) continue;
+        const m3M = embHtml.match(/https?:\/\/[^\s'"<>\\]+\.m3u8[^\s'"<>\\]*/i);
+        if (!m3M?.[0]) continue;
+        const masterUrl = m3M[0].replace(/\\\//g, "/");
+        try {
+          if (isBlockedAdHost(new URL(masterUrl).hostname)) continue;
+        } catch {
+          continue;
+        }
+        const ksdRef = "https://ksdpictures.site/";
+        const m3Txt = await fetchTextSafe(
+          masterUrl,
+          { "User-Agent": UA_EDGE, Referer: ksdRef, Accept: "*/*" },
+          fetchPublicFn,
+          3000
+        );
+        if (!m3Txt || !m3Txt.includes("#EXTM3U")) continue;
+
+        const subs = [];
+        const seenSubs = new Set();
+        for (const vm of embHtml.replace(/\\\//g, "/").matchAll(/https?:\/\/[^\s'"<>]+\.vtt[^\s'"<>]*/gi)) {
+          const su = vm[0].trim();
+          if (!su || seenSubs.has(su) || /forced/i.test(su)) continue;
+          seenSubs.add(su);
+          const lang = /sub_tur|turkish|_tr\b/i.test(su) ? "tr" : /sub_eng|english|_en\b/i.test(su) ? "en" : "";
+          if (lang) subs.push({ lang, url: su, referer: ksdRef, source: "diziyou_net" });
+        }
+        return {
+          url: masterUrl,
+          referer: ksdRef,
+          subs,
+          streams: [{ url: masterUrl, referer: ksdRef, label: "📡 DiziyouNet · Çoklu Ses (HD HLS)" }],
+          tag: "hls_dynet",
+        };
+      }
+
+      if (/yabancidizim\.com\/psource\//i.test(ifrUrl)) {
+        const embHtml = await fetchTextSafe(
+          ifrUrl,
+          { "User-Agent": UA_EDGE, Referer: epUrl, "Accept-Language": "tr-TR,tr;q=0.9" },
+          fetchPublicFn,
+          3800
+        );
+        if (!embHtml) continue;
+        const m3M = embHtml.match(/https?:\/\/[^\s'"<>\\]+\.m3u8[^\s'"<>\\]*/i);
+        if (!m3M?.[0]) continue;
+        const masterUrl = m3M[0].replace(/\\\//g, "/");
+        let host = "";
+        try {
+          host = new URL(masterUrl).hostname.toLowerCase();
+          if (isBlockedAdHost(host)) continue;
+        } catch {
+          continue;
+        }
+        const streamRef = host.includes("twimg.com") ? "" : "https://yabancidizim.com/";
+        const hdrs = { "User-Agent": UA_EDGE, Accept: "*/*" };
+        if (streamRef) hdrs.Referer = streamRef;
+        const m3Txt = await fetchTextSafe(masterUrl, hdrs, fetchPublicFn, 3200);
+        if (!m3Txt || !m3Txt.includes("#EXTM3U")) continue;
+        return {
+          url: masterUrl,
+          referer: streamRef,
+          subs: [],
+          streams: [{ url: masterUrl, referer: streamRef, label: "📡 DiziyouNet · Doğrudan HD (HLS)" }],
+          tag: "hls_dynet",
+        };
+      }
+    }
+    return null;
+  };
+
+  // 1. Direct slug fast path (1 hop)
+  const triedUrls = new Set();
+  for (const t of reqTitles.slice(0, 2)) {
+    const sl = slugifyAscii(t);
+    if (!sl || sl.length < 2) continue;
+    const epU = `${DN_ORIGIN}/bolum/${sl}-${s}-sezon-${e}-bolum/`;
+    if (triedUrls.has(epU)) continue;
+    triedUrls.add(epU);
+    const hit = await tryEpisodeUrl(epU, false);
+    if (hit?.url) return hit;
+  }
+
+  // 2. WordPress search fallback -> matched series slug -> episode URL
+  const sHtml = await fetchTextSafe(
+    `${DN_ORIGIN}/?s=${encodeURIComponent(reqTitles[0])}`,
+    { "User-Agent": UA_EDGE, Referer: `${DN_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+    fetchPublicFn,
+    3800
+  );
+  if (!sHtml) return null;
+
+  let bestSlug = "";
+  let bestScore = 0;
+  const linkRe = /<a[^>]+href=["'](https:\/\/diziyou\.net\/dizi\/([a-z0-9-]+)\/)["'](?:[^>]+title=["']([^"']*)["'])?[^>]*>/gi;
+  let lm;
+  while ((lm = linkRe.exec(sHtml)) !== null) {
+    const sl = lm[2];
+    const tAttr = decodeHtmlEntitiesBasic(lm[3] || "").replace(/\s*(?:izle|İzle)\s*$/i, "").trim();
+    const sc = Math.max(
+      tAttr ? titlesMatchScore(tAttr, reqTitles, year) : -1,
+      titlesMatchScore(sl.replace(/-/g, " "), reqTitles, year)
+    );
+    if (sc > bestScore) {
+      bestScore = sc;
+      bestSlug = sl;
+    }
+  }
+  if (!bestSlug || bestScore < 45) return null;
+
+  const candEp = `${DN_ORIGIN}/bolum/${bestSlug}-${s}-sezon-${e}-bolum/`;
+  if (!triedUrls.has(candEp)) {
+    const hit = await tryEpisodeUrl(candEp, true);
+    if (hit?.url) return hit;
+  }
+  const seriesHtml = await fetchTextSafe(
+    `${DN_ORIGIN}/dizi/${bestSlug}/`,
+    { "User-Agent": UA_EDGE, Referer: `${DN_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+    fetchPublicFn,
+    3800
+  );
+  if (!seriesHtml) return null;
+  const epRe = new RegExp(`href=["'](https:\\/\\/diziyou\\.net\\/bolum\\/[a-z0-9-]+-${s}-sezon-${e}-bolum\\/?)["']`, "i");
+  const em = seriesHtml.match(epRe);
+  if (!em?.[1] || triedUrls.has(em[1])) return null;
+  return await tryEpisodeUrl(em[1], true);
+}
+
+export async function extractVixsrc({ tmdbId = "", mtype, s, e }, fetchPublicFn) {
+  const tid = String(tmdbId || "").trim();
+  if (!/^\d+$/.test(tid)) return null;
+  const VIX_ORIGIN = "https://vixsrc.to";
+  const apiUrl = mtype === "tv"
+    ? `${VIX_ORIGIN}/api/tv/${tid}/${Number(s || 1)}/${Number(e || 1)}`
+    : `${VIX_ORIGIN}/api/movie/${tid}`;
+
+  const rawJson = await fetchTextSafe(
+    apiUrl,
+    { "User-Agent": UA_EDGE, Referer: `${VIX_ORIGIN}/`, Accept: "application/json, */*" },
+    fetchPublicFn,
+    3500
+  );
+  if (!rawJson) return null;
+  let obj;
+  try {
+    obj = JSON.parse(rawJson);
+  } catch {
+    return null;
+  }
+  const embedPath = String(obj?.src || "").trim();
+  if (!embedPath.startsWith("/embed/")) return null;
+
+  const embHtml = await fetchTextSafe(
+    `${VIX_ORIGIN}${embedPath}`,
+    { "User-Agent": UA_EDGE, Referer: `${VIX_ORIGIN}/`, Accept: "text/html, */*" },
+    fetchPublicFn,
+    3800
+  );
+  if (!embHtml) return null;
+
+  const mpIdx = embHtml.indexOf("window.masterPlaylist");
+  if (mpIdx < 0) return null;
+  const blk = embHtml.slice(mpIdx, mpIdx + 900);
+  const urlM = blk.match(/url\s*:\s*['"](https:\/\/vixsrc\.to\/playlist\/[^'"]+)['"]/i);
+  const tokM = blk.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/i);
+  const expM = blk.match(/['"]expires['"]\s*:\s*['"]([^'"]+)['"]/i);
+  const asnM = blk.match(/['"]asn['"]\s*:\s*['"]([^'"]*)['"]/i);
+  if (!urlM?.[1] || !tokM?.[1] || !expM?.[1]) return null;
+
+  const basePl = urlM[1];
+  const sep = basePl.includes("?") ? "&" : "?";
+  const asnPart = asnM?.[1] ? `&asn=${encodeURIComponent(asnM[1])}` : "";
+  const fullPl = `${basePl}${sep}token=${encodeURIComponent(tokM[1])}&expires=${encodeURIComponent(expM[1])}&h=1${asnPart}`;
+
+  const m3Txt = await fetchTextSafe(
+    fullPl,
+    { "User-Agent": UA_EDGE, Referer: `${VIX_ORIGIN}/`, Accept: "*/*" },
+    fetchPublicFn,
+    3200
+  );
+  if (!m3Txt || !m3Txt.includes("#EXTM3U")) return null;
+
+  return {
+    url: fullPl,
+    referer: `${VIX_ORIGIN}/`,
+    subs: [],
+    streams: [{ url: fullPl, referer: `${VIX_ORIGIN}/`, label: "📡 VixSrc · Global HD (Multi-Audio HLS)" }],
+    tag: "hls_vixsrc",
+  };
+}
+
 export async function resolveTurkishCatalogStream({ title, displayTitle, originalTitle, sourceUrl, year = "", mtype, s, e, tmdbId = "", fetchPublicFn }) {
   try {
     const src = String(sourceUrl || "").trim();
@@ -2122,39 +2709,41 @@ export async function resolveTurkishCatalogStream({ title, displayTitle, origina
       const wtHasNonVmpx = Boolean(wtRes?.streams?.some((st) => !isVmpxOrVidmolyUrl(st?.url)));
       if (wtRes?.url && wtHasNonVmpx) return wtRes;
 
-      const [fmVal, dlVal, hxVal] = await settleWithFastClean([
+      const [scVal, fmVal, dlVal, hxVal] = await settleWithFastClean([
+        extractSinemaccMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn),
         extractFilmmoduMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn),
         extractDizilife({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "movie", s, e }, fetchPublicFn),
         extractHexa({ tmdbId, mtype: "movie", s, e }, fetchPublicFn),
-      ], 1400);
-      const firstMerged = mergeResolvedResults([wtRes, fmVal, dlVal, hxVal]);
+      ], 1500);
+      const firstMerged = mergeResolvedResults([wtRes, scVal, fmVal, dlVal, hxVal]);
       const hasCleanStream = Boolean(firstMerged?.streams?.some((st) => !isVmpxOrVidmolyUrl(st?.url)));
       if (firstMerged?.url && hasCleanStream) return firstMerged;
 
-      const [dmVal, acVal] = await settleWithFastClean([
+      const [vixVal, dmVal, acVal] = await settleWithFastClean([
+        extractVixsrc({ tmdbId, mtype: "movie", s, e }, fetchPublicFn),
         extractDdizimag({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "movie", s, e }, fetchPublicFn),
         extractAnimecix({ title, displayTitle, originalTitle, tmdbId, year, mtype: "movie", s, e }, fetchPublicFn),
-      ], 1200);
-      const secondMerged = mergeResolvedResults([firstMerged, dmVal, acVal]);
+      ], 1400);
+      const secondMerged = mergeResolvedResults([firstMerged, vixVal, dmVal, acVal]);
       if (secondMerged?.url) return secondMerged;
       if (wtRes?.url) return wtRes;
     } else if (mtype === "tv") {
-      const [dlVal, dbxVal, dmVal] = await settleWithFastClean([
+      const [dlVal, dbxVal, dnVal, dylVal, dmVal] = await settleWithFastClean([
         extractDizilife({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "tv", s, e }, fetchPublicFn),
         extractDiziboxEpisode({ title, displayTitle, originalTitle, sourceUrl: src, year, s, e }, fetchPublicFn),
+        extractDiziyouNet({ title, displayTitle, originalTitle, year, s, e }, fetchPublicFn),
+        extractDiziyouLove({ title, displayTitle, originalTitle, year, s, e }, fetchPublicFn),
         extractDdizimag({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "tv", s, e }, fetchPublicFn),
       ], 1600);
-      const firstMerged = mergeResolvedResults([dlVal, dbxVal, dmVal]);
+      const firstMerged = mergeResolvedResults([dlVal, dbxVal, dnVal, dylVal, dmVal]);
       const hasCleanTv = Boolean(firstMerged?.streams?.some((st) => !isVmpxOrVidmolyUrl(st?.url)));
       if (firstMerged?.url && hasCleanTv) return firstMerged;
 
-      const [acRes] = await Promise.allSettled([
+      const [acVal, vixVal] = await settleWithFastClean([
         extractAnimecix({ title, displayTitle, originalTitle, tmdbId, year, mtype: "tv", s, e }, fetchPublicFn),
-      ]);
-      const secondMerged = mergeResolvedResults([
-        firstMerged,
-        acRes.status === "fulfilled" ? acRes.value : null,
-      ]);
+        extractVixsrc({ tmdbId, mtype: "tv", s, e }, fetchPublicFn),
+      ], 1400);
+      const secondMerged = mergeResolvedResults([firstMerged, acVal, vixVal]);
       if (secondMerged?.url) return secondMerged;
     }
   } catch {}

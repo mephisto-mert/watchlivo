@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v222';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v222';
-import { api, qs, humanApiError } from '../api.js?v=20261119_v222';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v222';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v222';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v222';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v222';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v223';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v223';
+import { api, qs, humanApiError } from '../api.js?v=20261119_v223';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v223';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v223';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v223';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v223';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261119_v222';
+} from '../store.js?v=20261119_v223';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -166,7 +166,12 @@ export function providerTile(p, onClick) {
         : (p.glyph ? h('span', { class: 'p-icon', style: { background: p.accent || '#27DCC8' }, html: icons[p.glyph] }) : h('span', { style: { fontWeight: '800', fontSize: '.95rem' } }, shortName.slice(0, 2)))),
     h('div', { class: 'provider-meta' },
       h('span', { class: 'ptitle' }, shortName),
-      h('span', { class: 'psub' }, subText)));
+      h('span', { class: 'psub' }, subText),
+      isHero ? h('div', { class: 'provider-hero-pills' },
+        h('span', { class: 'provider-hero-chip' }, '40.000+ Film & Dizi'),
+        h('span', { class: 'provider-hero-chip' }, '4K HDR'),
+        h('span', { class: 'provider-hero-chip' }, 'TR Dublaj & Altyazı')) : null,
+      isHero ? h('span', { class: 'provider-hero-cta' }, 'Arşivi Keşfet →') : null));
 
   return card;
 }
@@ -1227,7 +1232,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const latestEpsRail = (!compact && !state.mesh && latestEpsItems.length) ? h('section', { class: 'wl-continue-section wl-latest-eps-section', id: 'wl-latest-eps-section' },
       h('div', { class: 'wl-continue-head' },
         h('div', { class: 'wl-continue-title-group' },
-          h('span', { class: 'wl-continue-heading' }, '🆕 Son Eklenen Yeni Bölümler'),
+          h('span', { class: 'wl-continue-heading' }, '🆕 Vizyondaki Yeni Filmler & Son Bölümler'),
           h('span', { class: 'wl-continue-cloud-pill' }, '⚡ Canlı Otomatik Takip')),
         h('div', { class: 'wl-continue-actions', style: { display: 'flex', gap: '6px', alignItems: 'center' } },
           h('button', {
@@ -1237,11 +1242,15 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           }, '🍿 Tüm Vizyon & Yeni Bölümler'))),
       h('div', { class: 'wl-continue-strip' },
         ...latestEpsItems.slice(0, 14).map((epItem) => {
+          const isMovie = epItem.mediaType === 'movie';
           const sNum = Number(epItem.season || 1);
           const eNum = Number(epItem.episode || 1);
-          const epBadge = epItem.episodeLabel || `S${sNum}:B${eNum}`;
-          const subLabel = `${sNum}. Sezon ${eNum}. Bölüm · ${epItem.episodeTitle || epItem.sourceBadge || 'Yeni Bölüm'}`;
-          const prov = getProvider(epItem.provider || 'cinema') || { id: 'cinema', name: 'Sinema+' };
+          const epBadge = epItem.episodeLabel || (isMovie ? `🎬 ${epItem.year || 'YENİ'}` : `S${sNum}:B${eNum}`);
+          const subLabel = isMovie
+            ? `${epItem.year || 'Yeni'} · ${epItem.rating ? `⭐ ${epItem.rating} · ` : ''}${epItem.sourceBadge || 'Yeni Vizyon Filmi'}`
+            : `${sNum}. Sezon ${eNum}. Bölüm · ${epItem.episodeTitle || epItem.sourceBadge || 'Yeni Bölüm'}`;
+          const prov = getProvider(epItem.catalogProvider || epItem.provider || 'cinema') || { id: 'cinema', name: 'Sinema+' };
+          const posterMt = isMovie ? 'movie' : 'tv';
           return h('div', {
             class: 'wl-continue-card wl-latest-ep-card',
             role: 'button',
@@ -1257,10 +1266,17 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               if (cardEl.classList.contains('busy')) return;
               if (!checkProviderAuthGate(epItem, prov)) return;
               cardEl.classList.add('busy');
-              toast(`🆕 ${epItem.title} · ${sNum}. Sezon ${eNum}. Bölüm odada hazırlanıyor...`);
+              toast(isMovie
+                ? `🎬 ${epItem.title} odada hazırlanıyor...`
+                : `🆕 ${epItem.title} · ${sNum}. Sezon ${eNum}. Bölüm odada hazırlanıyor...`);
               try {
-                const resolved = await resolveCatalogItem(epItem, prov, sNum, eNum);
-                if (resolved) await pickSafe(resolved);
+                const resolved = await resolveCatalogItem(epItem, prov, isMovie ? 1 : sNum, isMovie ? 1 : eNum, epItem.episodeTitle || '', { silentErrors: !isMovie });
+                if (resolved) {
+                  await pickSafe(resolved);
+                } else if (!isMovie && (epItem.tmdbId || epItem.title)) {
+                  toast(`⚠️ S${sNum}:B${eNum} akışı henüz eklenmemiş — bölüm seçici açılıyor...`);
+                  openTvSeriesModal(epItem, prov);
+                }
               } finally {
                 cardEl.classList.remove('busy');
               }
@@ -1268,24 +1284,24 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           },
             h('div', { class: 'wl-continue-thumb' },
               h('img', {
-                src: (epItem.still && !isBadTmdbHash(epItem.still))
-                  ? epItem.still
-                  : ((epItem.backdrop && !isBadTmdbHash(epItem.backdrop))
-                    ? epItem.backdrop
-                    : ((epItem.poster && !isBadTmdbHash(epItem.poster))
-                      ? epItem.poster
-                      : `/api/rave/poster?${qs({ tid: epItem.tmdbId || '', t: epItem.title || '', mt: 'tv' })}`)),
+                src: (epItem.poster && !isBadTmdbHash(epItem.poster))
+                  ? epItem.poster
+                  : ((epItem.still && !isBadTmdbHash(epItem.still))
+                    ? epItem.still
+                    : ((epItem.backdrop && !isBadTmdbHash(epItem.backdrop))
+                      ? epItem.backdrop
+                      : `/api/rave/poster?${qs({ tid: epItem.tmdbId || '', t: epItem.title || '', mt: posterMt })}`)),
                 alt: epItem.title || '',
                 loading: 'lazy',
                 onerror: (e) => {
                   const el = e.currentTarget || e.target;
                   const step = Number(el.dataset.fbStep || 0);
-                  if (step === 0 && epItem.poster && !isBadTmdbHash(epItem.poster) && el.src !== epItem.poster) {
+                  if (step === 0 && epItem.backdrop && !isBadTmdbHash(epItem.backdrop) && el.src !== epItem.backdrop) {
                     el.dataset.fbStep = '1';
-                    el.src = epItem.poster;
+                    el.src = epItem.backdrop;
                   } else if (step < 2 && epItem.title) {
                     el.dataset.fbStep = '2';
-                    el.src = `/api/rave/poster?${qs({ tid: epItem.tmdbId || '', t: epItem.title || '', mt: 'tv' })}`;
+                    el.src = `/api/rave/poster?${qs({ tid: epItem.tmdbId || '', t: epItem.title || '', mt: posterMt })}`;
                   } else {
                     el.onerror = null;
                     el.src = '/static/watchlivo-poster.svg';
@@ -1295,7 +1311,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               h('span', { class: 'wl-ep-badge' }, epBadge),
               h('span', { class: 'wl-continue-play-ico' }, '▶')),
             h('div', { class: 'wl-continue-body' },
-              h('div', { class: 'wl-continue-title' }, epItem.title || 'Dizi'),
+              h('div', { class: 'wl-continue-title' }, epItem.title || (isMovie ? 'Film' : 'Dizi')),
               h('div', { class: 'wl-continue-sub' }, subLabel)));
         }))) : null;
 

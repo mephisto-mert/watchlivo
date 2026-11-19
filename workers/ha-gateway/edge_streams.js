@@ -38,7 +38,11 @@ function b64UrlDecode(sid) {
 }
 
 export function inferStreamReferer(u) {
-  if (!u || u.includes("hakunaymatata.com")) return "";
+  if (!u || u.includes("hakunaymatata.com") || u.includes("twimg.com")) return "";
+  if (u.includes("diziyou.love")) return "https://www.diziyou.love/";
+  if (u.includes("ksdpictures.")) return "https://ksdpictures.site/";
+  if (u.includes("filmizle.in") || u.includes("monacesfofestom")) return "https://player.filmizle.in/";
+  if (u.includes("vixsrc.") || u.includes("vix-content.") || u.includes("blackpuma")) return "https://vixsrc.to/";
   if (u.includes("pilavyer")) return "https://pilavyerplay.top/";
   if (u.includes("ddizimag.")) return "https://ddizimag.icu/";
   if (u.includes("imgsapi.pro") || u.includes("ytenconline.xyz") || u.includes("filmmodu.")) return "https://www.filmmodu.one/";
@@ -251,8 +255,9 @@ const OFFLOAD_PROXY_ORIGIN = "https://watchlivo-stream-proxy.watchlivo-edge.work
 const OFFLOAD_BYPASS_HOSTS = [
   "hakunaymatata.com", "vidmoly.", "vmbox.", "vmnow.", "vmpx.", "vmget.", "vmeas.",
   "sprintcdn", "r66nv9ed", "owphbf24", "filemoon.", "byse.",
-  "webteizle.", "dizibox.", "sezonlukdizi.",
-  "hdfilmcehennemi.", "fullhdfilmizlesene.", "rapidrame.", "rapidvid.",
+  "webteizle.", "dizibox.", "sezonlukdizi.", "diziyou.", "ksdpictures.",
+  "hdfilmcehennemi.", "fullhdfilmizlesene.", "rapidrame.", "rapidvid.", "cdnimg",
+  "filmizle.in", "monacesfofestom", "vixsrc.", "vix-content.", "blackpuma", "twimg.com",
   "ag2m5.cfd", "uk-traffic-", "fastplay.",
   "radyotvonline.com", "radyotvonline.net", "nexa.mov", "dplayer", "playmix.",
   "makesomthingup.", "cdnimages.", "ercdn.net", "daioncdn.net",
@@ -273,7 +278,11 @@ async function buildSignedProxyPath(targetUrl, ref, ext, env) {
     || targetUrl.includes("/file/tau-video/")
     || String(cleanRef || "").includes("molystream.org")
     || String(cleanRef || "").includes("tau-video.xyz")
-    || String(cleanRef || "").includes("filmmodu.");
+    || String(cleanRef || "").includes("filmmodu.")
+    || String(cleanRef || "").includes("filmizle.in")
+    || String(cleanRef || "").includes("vixsrc.")
+    || String(cleanRef || "").includes("diziyou.")
+    || String(cleanRef || "").includes("ksdpictures.");
   const base = useLocal ? "" : OFFLOAD_PROXY_ORIGIN;
   return `${base}/api/rave/stream-proxy?${q.toString()}`;
 }
@@ -608,7 +617,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
           id: `sub-${idx}`,
           lang: t.lang || "tr",
           label: t.lang === "tr" ? "🇹🇷 Türkçe" : (t.lang === "en" ? "🇬🇧 İngilizce" : String(t.lang || "Altyazı").toUpperCase()),
-          url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(t.url)}`,
+          url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(t.url)}${t.referer ? `&ref=${b64UrlEncode(t.referer)}` : ""}`,
         }));
         return jsonResp({
           id: tmdbId || id,
@@ -812,7 +821,7 @@ export async function handleEdgeHlsManifest(url, env) {
     if (isMaster || /\.m3u8(\?|$)/i.test(abs)) {
       return `/api/rave/stream?sid=${b64UrlEncode(abs)}${ref ? `&ref=${b64UrlEncode(ref)}` : ""}&proxy_segs=1&ext=.m3u8`;
     }
-    const ext = /\.m4s(\?|$)/i.test(abs) ? ".m4s" : /\.mp4(\?|$)/i.test(abs) ? ".mp4" : ".ts";
+    const ext = /\.m4s(\?|$)/i.test(abs) ? ".m4s" : /\.mp4(\?|$)/i.test(abs) ? ".mp4" : /\.vtt(\?|$)/i.test(abs) ? ".vtt" : ".ts";
     return await buildSignedProxyPath(abs, ref, ext, env);
   }));
   return new Response(out.join("\n"), {

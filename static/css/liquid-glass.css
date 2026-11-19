@@ -1,0 +1,680 @@
+/* ==========================================================================
+   WATCHLIVO 2026 — "LIQUID GLASS CINEMA" DESIGN SYSTEM (v223)
+   Inspired by Apple TV+ Liquid Glass, Linear Obsidian & Netflix/Plex 2026
+   ========================================================================== */
+
+:root {
+  --font-app: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --lg-surface: rgba(255, 255, 255, 0.036);
+  --lg-surface-hover: rgba(255, 255, 255, 0.068);
+  --lg-glass: rgba(11, 15, 25, 0.68);
+  --lg-glass-strong: rgba(9, 13, 22, 0.84);
+  --lg-border: rgba(255, 255, 255, 0.085);
+  --lg-border-strong: rgba(255, 255, 255, 0.14);
+  --lg-rim-top: inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
+  --lg-rim-top-bright: inset 0 1px 0 0 rgba(255, 255, 255, 0.24);
+  --lg-rim-bottom: inset 0 -1px 0 0 rgba(0, 0, 0, 0.45);
+  --lg-shadow-card: 0 14px 36px rgba(0, 0, 0, 0.42);
+  --lg-shadow-float: 0 22px 54px rgba(0, 0, 0, 0.58);
+  --lg-spring: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html, body {
+  font-family: var(--font-app) !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* 1. Atmospheric Obsidian Canvas (No flat black — subtle multi-orb cinema depth) */
+body {
+  background-color: var(--bg-base, #06090e) !important;
+  background-image:
+    radial-gradient(62% 48% at 12% 0%, color-mix(in srgb, var(--accent, #27dcc8) 12%, transparent), transparent 68%),
+    radial-gradient(54% 46% at 88% 8%, color-mix(in srgb, var(--accent-2, #38bdf8) 10%, transparent), transparent 68%),
+    radial-gradient(70% 55% at 50% 100%, rgba(15, 23, 42, 0.55), transparent 72%) !important;
+  background-attachment: fixed;
+  color: #e6edf6;
+}
+
+/* Crisp Editorial Typography & Tabular Numerals */
+h1, h2, h3, .hero-title, .hero-main-title, .wl-continue-heading, .rave-providers-title, .lobby-sec-title {
+  letter-spacing: -0.026em;
+  font-weight: 800;
+}
+.ctl-time, .episode-dur, .wl-continue-sub, .wl-ep-badge, .provider-cat-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 2. Liquid Glass Top Navigation Header */
+.top-nav-capsule,
+header.navbar.top-nav-capsule {
+  background: rgba(7, 10, 18, 0.74) !important;
+  backdrop-filter: blur(26px) saturate(190%) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(190%) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.36), inset 0 -1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+.top-nav-capsule .logo-wordmark {
+  letter-spacing: 0.16em !important;
+  font-weight: 800 !important;
+  background: linear-gradient(180deg, #ffffff 10%, rgba(226, 232, 240, 0.78) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent !important;
+}
+
+.top-nav-capsule .nav-icon,
+.top-nav-capsule .btn-icon {
+  background: rgba(255, 255, 255, 0.045) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  box-shadow: var(--lg-rim-top) !important;
+  transition: transform 0.22s var(--lg-spring), background 0.2s ease, border-color 0.2s ease !important;
+}
+.top-nav-capsule .nav-icon:hover,
+.top-nav-capsule .btn-icon:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  transform: translateY(-1px);
+}
+
+.top-nav-capsule #btn-create-room,
+.top-nav-capsule .btn-create-room {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
+  color: var(--accent-ink, #041014) !important;
+  border: 1px solid rgba(255, 255, 255, 0.28) !important;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 32%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.45) !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.01em;
+  transition: transform 0.22s var(--lg-spring), box-shadow 0.22s ease, filter 0.2s ease !important;
+}
+.top-nav-capsule #btn-create-room:hover,
+.top-nav-capsule .btn-create-room:hover {
+  transform: translateY(-1.5px);
+  filter: brightness(1.06);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--accent) 44%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+}
+
+/* 3. Liquid Glass Floating Navigation Dock (Desktop & Mobile) */
+@media (min-width: 961px) {
+  .app-layout {
+    gap: 16px !important;
+    padding-top: 14px !important;
+  }
+  .floating-dock {
+    background: linear-gradient(180deg, rgba(20, 26, 42, 0.68), rgba(10, 14, 24, 0.78)) !important;
+    backdrop-filter: blur(28px) saturate(195%) !important;
+    -webkit-backdrop-filter: blur(28px) saturate(195%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 20px !important;
+    box-shadow: var(--lg-shadow-float), var(--lg-rim-top-bright), var(--lg-rim-bottom) !important;
+    padding: 7px 10px !important;
+  }
+  .floating-dock .dock-btn {
+    border-radius: 13px !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.01em;
+    color: rgba(226, 232, 240, 0.78) !important;
+    transition: transform 0.22s var(--lg-spring), background 0.2s ease, color 0.2s ease !important;
+  }
+  .floating-dock .dock-btn:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.07) !important;
+    color: #ffffff !important;
+  }
+  .floating-dock .dock-btn.active {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
+    color: var(--accent-ink, #041014) !important;
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 36%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.45) !important;
+  }
+  .floating-dock .dock-btn.active svg {
+    color: var(--accent-ink, #041014) !important;
+  }
+  .floating-dock .dock-quick-btn {
+    background: rgba(255, 255, 255, 0.045) !important;
+    border: 1px solid rgba(255, 255, 255, 0.085) !important;
+    border-radius: 12px !important;
+    box-shadow: var(--lg-rim-top) !important;
+    color: rgba(235, 242, 252, 0.9) !important;
+    font-weight: 600 !important;
+    transition: transform 0.2s var(--lg-spring), background 0.2s ease, border-color 0.2s ease !important;
+  }
+  .floating-dock .dock-quick-btn:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
+    border-color: color-mix(in srgb, var(--accent) 42%, rgba(255, 255, 255, 0.16)) !important;
+    transform: translateY(-1px);
+  }
+}
+
+@media (max-width: 960px), (orientation: landscape) and (max-height: 560px) {
+  body:not(.in-room) #home-root > .floating-dock,
+  body.mesh-minimized #home-root > .floating-dock {
+    background: linear-gradient(180deg, rgba(13, 18, 30, 0.84), rgba(7, 10, 18, 0.94)) !important;
+    backdrop-filter: blur(28px) saturate(200%) !important;
+    -webkit-backdrop-filter: blur(28px) saturate(200%) !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.14) !important;
+    box-shadow: 0 -10px 32px rgba(0, 0, 0, 0.52), inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
+  }
+  #home-root > .floating-dock .dock-btn {
+    border-radius: 14px !important;
+    transition: background 0.22s var(--lg-spring), color 0.2s ease, transform 0.18s var(--lg-spring) !important;
+  }
+  #home-root > .floating-dock .dock-btn.active {
+    background: color-mix(in srgb, var(--accent) 16%, rgba(255, 255, 255, 0.05)) !important;
+    color: var(--accent) !important;
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 38%, rgba(255, 255, 255, 0.18)) !important;
+  }
+}
+
+/* 4. De-Boxed Editorial Chrome: Airy Theme Ribbon & Shimmering Frosted APK Strip */
+.wl-studio-theme-strip {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 2px 2px !important;
+  margin: 0 !important;
+  gap: 8px !important;
+}
+.wl-theme-strip-label {
+  font-size: 0.72rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(203, 213, 225, 0.56) !important;
+  font-weight: 700 !important;
+}
+.wl-theme-pill {
+  background: rgba(255, 255, 255, 0.035) !important;
+  border: 1px solid rgba(255, 255, 255, 0.075) !important;
+  box-shadow: var(--lg-rim-top) !important;
+  border-radius: 999px !important;
+  padding: 5px 11px !important;
+  font-size: 0.74rem !important;
+  font-weight: 600 !important;
+  transition: transform 0.2s var(--lg-spring), background 0.2s ease, border-color 0.2s ease !important;
+}
+.wl-theme-pill:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  transform: translateY(-1px);
+}
+.wl-theme-pill.active {
+  background: color-mix(in srgb, var(--pill-accent, var(--accent)) 18%, rgba(12, 16, 28, 0.85)) !important;
+  border-color: color-mix(in srgb, var(--pill-accent, var(--accent)) 62%, rgba(255, 255, 255, 0.2)) !important;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--pill-accent, var(--accent)) 22%, transparent), var(--lg-rim-top) !important;
+}
+.wl-theme-strip-more {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 999px !important;
+  box-shadow: var(--lg-rim-top) !important;
+}
+
+.wl-app-banner {
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.04) 0%, color-mix(in srgb, var(--accent) 9%, rgba(16, 22, 36, 0.55)) 52%, rgba(255, 255, 255, 0.035) 100%) !important;
+  backdrop-filter: blur(20px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(160%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28), var(--lg-rim-top) !important;
+}
+.wl-app-banner-badge {
+  background: color-mix(in srgb, var(--accent) 16%, rgba(10, 14, 24, 0.7)) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, transparent) !important;
+  color: var(--accent) !important;
+  border-radius: 999px !important;
+  letter-spacing: 0.05em !important;
+  font-size: 0.64rem !important;
+}
+.wl-banner-apk-btn {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
+  color: var(--accent-ink, #041014) !important;
+  border: none !important;
+  border-radius: 999px !important;
+  font-weight: 800 !important;
+  text-decoration: none !important;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.42) !important;
+}
+
+/* 5. Raycast / Apple TV+ Command-Palette Search Bar & Borderless Filter Pills */
+.rave-top-bar {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 2px 0 6px !important;
+  gap: 10px !important;
+}
+.home-search {
+  background: linear-gradient(180deg, rgba(20, 27, 44, 0.72), rgba(11, 16, 28, 0.84)) !important;
+  backdrop-filter: blur(22px) saturate(175%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(175%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.11) !important;
+  border-radius: 999px !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34), var(--lg-rim-top-bright) !important;
+  padding: 5px 6px 5px 16px !important;
+  transition: border-color 0.22s ease, box-shadow 0.22s ease, transform 0.22s var(--lg-spring) !important;
+}
+.home-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 65%, rgba(255, 255, 255, 0.24)) !important;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.46), 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent), var(--lg-rim-top-bright) !important;
+}
+.home-search .btn.primary {
+  border-radius: 999px !important;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
+  color: var(--accent-ink, #041014) !important;
+  font-weight: 800 !important;
+  padding: 0 18px !important;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+}
+.wl-search-kbd {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 8px !important;
+  color: rgba(226, 232, 240, 0.72) !important;
+}
+
+.provider-cat-pill,
+.cat-tab-pill,
+.lobby-tab {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.085) !important;
+  border-radius: 999px !important;
+  box-shadow: var(--lg-rim-top) !important;
+  color: rgba(226, 232, 240, 0.84) !important;
+  font-weight: 600 !important;
+  transition: transform 0.2s var(--lg-spring), background 0.2s ease, border-color 0.2s ease !important;
+}
+.provider-cat-pill:hover,
+.cat-tab-pill:hover,
+.lobby-tab:hover {
+  background: rgba(255, 255, 255, 0.095) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  transform: translateY(-1px);
+}
+.provider-cat-pill.active,
+.cat-tab-pill.active,
+.lobby-tab.on {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
+  color: var(--accent-ink, #041014) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 34%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.45) !important;
+  font-weight: 800 !important;
+}
+
+/* 6. Open Editorial Media Shelves (No heavy boxed walls around Continue Watching & Latest Episodes) */
+.wl-continue-section,
+.wl-latest-eps-section {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 6px 0 10px !important;
+  margin-bottom: 10px !important;
+}
+.wl-continue-heading {
+  font-size: 1.02rem !important;
+  color: #f8fafc !important;
+}
+.wl-continue-cloud-pill {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  color: rgba(226, 232, 240, 0.78) !important;
+  border-radius: 999px !important;
+  font-weight: 600 !important;
+}
+.wl-continue-card {
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.055) 0%, rgba(13, 18, 30, 0.68) 100%) !important;
+  backdrop-filter: blur(18px) saturate(155%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(155%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.34), var(--lg-rim-top) !important;
+  transition: transform 0.26s var(--lg-spring), border-color 0.22s ease, box-shadow 0.26s ease, background 0.22s ease !important;
+}
+.wl-continue-card:hover {
+  transform: translateY(-3px) !important;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.085) 0%, rgba(16, 23, 38, 0.82) 100%) !important;
+  border-color: color-mix(in srgb, var(--accent) 48%, rgba(255, 255, 255, 0.18)) !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 20px color-mix(in srgb, var(--accent) 16%, transparent), var(--lg-rim-top-bright) !important;
+}
+.wl-continue-thumb {
+  border-radius: 11px !important;
+  overflow: hidden;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+.wl-continue-thumb img {
+  transition: transform 0.42s var(--lg-spring) !important;
+}
+.wl-continue-card:hover .wl-continue-thumb img {
+  transform: scale(1.07);
+}
+.wl-continue-prog {
+  height: 4px !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+.wl-continue-prog-fill {
+  background: linear-gradient(90deg, var(--accent), var(--accent-2)) !important;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 65%, transparent) !important;
+}
+.wl-ep-badge {
+  background: rgba(8, 12, 22, 0.76) !important;
+  backdrop-filter: blur(10px) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, rgba(255, 255, 255, 0.22)) !important;
+  color: #f8fafc !important;
+}
+
+/* 7. Specular Liquid Glass Bento Grid & Sinema+ Centerpiece */
+.rave-providers-title {
+  font-size: 1.08rem !important;
+  color: #f8fafc !important;
+}
+.rave-providers-badge {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  color: rgba(226, 232, 240, 0.78) !important;
+  border-radius: 999px !important;
+}
+.provider-head-btn {
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.045) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: var(--lg-rim-top) !important;
+  font-weight: 700 !important;
+  transition: transform 0.22s var(--lg-spring), background 0.2s ease, border-color 0.2s ease !important;
+}
+.provider-head-btn:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  transform: translateY(-1px);
+}
+.provider-head-btn.primary {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, rgba(14, 20, 34, 0.85)), color-mix(in srgb, var(--accent-2) 16%, rgba(10, 14, 24, 0.9))) !important;
+  border-color: color-mix(in srgb, var(--accent) 48%, rgba(255, 255, 255, 0.16)) !important;
+  color: #f8fafc !important;
+}
+
+.rave-home-provider-grid .provider-tile {
+  position: relative;
+  border-radius: 20px !important;
+  background:
+    radial-gradient(280px circle at var(--mx, 50%) var(--my, 0%), color-mix(in srgb, var(--tile-accent, var(--accent)) calc(var(--spot-alpha, 0) * 24%), transparent), transparent 68%),
+    radial-gradient(110% 95% at 15% 0%, color-mix(in srgb, var(--tile-accent, var(--accent)) 14%, transparent), transparent 62%),
+    linear-gradient(165deg, rgba(22, 29, 46, 0.74) 0%, rgba(10, 13, 22, 0.92) 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  box-shadow: var(--lg-shadow-card), var(--lg-rim-top), var(--lg-rim-bottom) !important;
+  transition: transform 0.3s var(--lg-spring), border-color 0.24s ease, box-shadow 0.3s ease !important;
+}
+.rave-home-provider-grid .provider-tile:hover {
+  transform: translateY(-4px) scale(1.01) !important;
+  border-color: color-mix(in srgb, var(--tile-accent, var(--accent)) 55%, rgba(255, 255, 255, 0.24)) !important;
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.58), 0 0 32px -6px color-mix(in srgb, var(--tile-accent, var(--accent)) 36%, transparent), var(--lg-rim-top-bright) !important;
+}
+.rave-home-provider-grid .provider-tile .provider-corner-tag {
+  background: rgba(8, 11, 20, 0.68) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid color-mix(in srgb, var(--tile-accent, var(--accent)) 42%, rgba(255, 255, 255, 0.16)) !important;
+  border-radius: 999px !important;
+  padding: 3px 9px !important;
+  font-size: 0.62rem !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.06em !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
+}
+
+/* Sinema+ Hero Centerpiece Bento Tile */
+.rave-home-provider-grid .provider-tile.hero-provider-tile {
+  background:
+    radial-gradient(360px circle at var(--mx, 30%) var(--my, 20%), rgba(245, 158, 11, calc(var(--spot-alpha, 0) * 0.28 + 0.12)), transparent 65%),
+    radial-gradient(95% 85% at 88% 12%, rgba(56, 189, 248, 0.14), transparent 58%),
+    linear-gradient(145deg, rgba(36, 26, 14, 0.86) 0%, rgba(14, 17, 29, 0.94) 55%, rgba(9, 12, 21, 0.98) 100%) !important;
+  border: 1px solid rgba(245, 158, 11, 0.34) !important;
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.56), 0 0 42px -12px rgba(245, 158, 11, 0.32), var(--lg-rim-top-bright) !important;
+}
+.provider-hero-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.provider-hero-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  color: rgba(254, 243, 199, 0.92);
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  backdrop-filter: blur(8px);
+}
+.provider-hero-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #160c02;
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  width: fit-content;
+}
+@media (max-width: 720px) {
+  .provider-hero-pills,
+  .provider-hero-cta {
+    display: none !important;
+  }
+}
+
+/* 8. Cinema Poster Cards, Series Picker & Apple-Style Liquid Glass Modals */
+.poster.catalog-card {
+  border-radius: 16px !important;
+  background: linear-gradient(180deg, rgba(18, 24, 38, 0.85), rgba(10, 13, 22, 0.96)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.085) !important;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42), var(--lg-rim-top) !important;
+  transition: transform 0.28s var(--lg-spring), border-color 0.24s ease, box-shadow 0.28s ease !important;
+}
+.poster.catalog-card:hover {
+  transform: translateY(-5px) scale(1.015) !important;
+  border-color: color-mix(in srgb, var(--accent) 55%, rgba(255, 255, 255, 0.22)) !important;
+  box-shadow: 0 22px 46px rgba(0, 0, 0, 0.62), 0 0 26px -6px color-mix(in srgb, var(--accent) 34%, transparent), var(--lg-rim-top-bright) !important;
+}
+.poster.catalog-card img {
+  transition: transform 0.45s var(--lg-spring) !important;
+}
+.poster.catalog-card:hover img {
+  transform: scale(1.05);
+}
+
+.popup-backdrop {
+  background: rgba(3, 6, 12, 0.72) !important;
+  backdrop-filter: blur(12px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(140%) !important;
+}
+.popup {
+  background: linear-gradient(180deg, rgba(16, 22, 36, 0.9), rgba(9, 13, 22, 0.96)) !important;
+  backdrop-filter: blur(34px) saturate(185%) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(185%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 24px !important;
+  box-shadow: 0 32px 84px rgba(0, 0, 0, 0.74), var(--lg-rim-top-bright), var(--lg-rim-bottom) !important;
+}
+
+.episode-card {
+  border-radius: 16px !important;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.045), rgba(11, 15, 26, 0.85)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.36), var(--lg-rim-top) !important;
+  transition: transform 0.26s var(--lg-spring), border-color 0.22s ease, box-shadow 0.26s ease !important;
+}
+.episode-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 52%, rgba(255, 255, 255, 0.18)) !important;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.54), var(--lg-rim-top-bright) !important;
+}
+.episode-card .episode-thumb img {
+  transition: transform 0.42s var(--lg-spring);
+}
+.episode-card:hover .episode-thumb img {
+  transform: scale(1.05);
+}
+
+/* 9. Lobby & Live TV Cards */
+.meshthumb,
+.tv-card {
+  border-radius: 18px !important;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.048), rgba(10, 14, 24, 0.88)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.085) !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.38), var(--lg-rim-top) !important;
+  transition: transform 0.26s var(--lg-spring), border-color 0.22s ease, box-shadow 0.26s ease !important;
+}
+.meshthumb:hover,
+.tv-card:hover {
+  transform: translateY(-4px) !important;
+  border-color: color-mix(in srgb, var(--accent) 52%, rgba(255, 255, 255, 0.18)) !important;
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.56), var(--lg-rim-top-bright) !important;
+}
+
+/* 10. Cinema-Grade Liquid Glass Room View (Navbar, Stage, Controls, Chat) */
+#mesh-root > .navbar {
+  background: rgba(7, 10, 18, 0.78) !important;
+  backdrop-filter: blur(24px) saturate(185%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(185%) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36) !important;
+}
+#mesh-root .room-brand-capsule {
+  background: rgba(255, 255, 255, 0.045) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: var(--lg-rim-top) !important;
+}
+#mesh-root > .navbar .nav-icon.room-nav-pill {
+  background: rgba(255, 255, 255, 0.045) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  box-shadow: var(--lg-rim-top) !important;
+  transition: transform 0.2s var(--lg-spring), background 0.2s ease, border-color 0.2s ease !important;
+}
+#mesh-root > .navbar .nav-icon.room-nav-pill:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+#mesh-root .panel-video {
+  border-radius: 18px !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.68), var(--lg-rim-top) !important;
+}
+#mesh-root .video-frame {
+  border-radius: 18px !important;
+}
+#mesh-root .ctl-bar-row .ctl-action:not(#ctl-play) {
+  background: rgba(12, 16, 28, 0.56) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14) !important;
+}
+#mesh-root .ctl-bar-row #ctl-play {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
+  color: var(--accent-ink, #041014) !important;
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 42%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.45) !important;
+}
+#mesh-root .timeline .cur {
+  background: linear-gradient(90deg, var(--accent), var(--accent-2)) !important;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 60%, transparent) !important;
+}
+#mesh-root .timeline .knob {
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 75%, transparent), 0 0 0 2px rgba(255, 255, 255, 0.85) !important;
+}
+
+#mesh-root .panel-chat {
+  background: linear-gradient(180deg, rgba(13, 18, 30, 0.76), rgba(8, 11, 20, 0.88)) !important;
+  backdrop-filter: blur(22px) saturate(165%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(165%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-radius: 18px !important;
+  box-shadow: var(--lg-shadow-card), var(--lg-rim-top) !important;
+}
+#mesh-root .discord-call-bar {
+  background: rgba(255, 255, 255, 0.035) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 14px !important;
+  box-shadow: var(--lg-rim-top) !important;
+}
+#mesh-root .discord-join-btn {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
+  color: var(--accent-ink, #041014) !important;
+  border: none !important;
+  font-weight: 800 !important;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 32%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.42) !important;
+}
+#mesh-root .chatbar .chat-input {
+  background: rgba(255, 255, 255, 0.045) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--lg-rim-top) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+#mesh-root .chatbar .chat-input:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, rgba(255, 255, 255, 0.2)) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent), var(--lg-rim-top) !important;
+}
+#mesh-root .react-emoji-btn {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 11px !important;
+  transition: transform 0.2s var(--lg-spring), background 0.18s ease !important;
+}
+#mesh-root .react-emoji-btn:hover {
+  background: rgba(255, 255, 255, 0.11) !important;
+  transform: translateY(-2px) scale(1.08);
+}
+
+/* 11. Subtle Liquid Glass Toast */
+.wl-dynamic-toast {
+  background: rgba(11, 15, 26, 0.88) !important;
+  backdrop-filter: blur(24px) saturate(185%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(185%) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, rgba(255, 255, 255, 0.14)) !important;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.62), var(--lg-rim-top-bright) !important;
+}
+
+/* 12. Mobile Refinement (Keep crisp edge-to-edge feel & 0 overflow) */
+@media (max-width: 600px) {
+  .home-search {
+    border-radius: 16px !important;
+    padding: 4px 5px 4px 12px !important;
+  }
+  .rave-home-provider-grid .provider-tile {
+    border-radius: 16px !important;
+  }
+  .rave-home-provider-grid .provider-tile .provider-corner-tag {
+    padding: 2px 7px !important;
+    font-size: 0.56rem !important;
+    letter-spacing: 0.03em !important;
+    right: 8px !important;
+    top: 8px !important;
+    max-width: none !important;
+    overflow: visible !important;
+  }
+  #mesh-root .panel-video,
+  #mesh-root .video-frame,
+  #mesh-root .panel-chat {
+    border-radius: 14px !important;
+  }
+}
+
+/* 13. Reduced Motion Accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .provider-tile,
+  .wl-continue-card,
+  .poster.catalog-card,
+  .episode-card,
+  .meshthumb,
+  .tv-card,
+  .dock-btn,
+  .react-emoji-btn {
+    transition: none !important;
+    transform: none !important;
+  }
+}
