@@ -510,6 +510,14 @@ test("edge_autonomous: UA gate, /r/ query preservation, single-slice catalog, tr
   assert.equal(rInvite.headers.get("Location"), "/#/mesh/cinema-club?pwd=123&s=2&e=5");
 
   // 3. Single-slice page=2&limit=10 on 40-item catalog returns exact slice [11..20] + tr/vizyon filter checks
+  //    (TMDB discover unavailable -> local bootstrap catalog fallback contract)
+  const realFetchCat = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const u = String(typeof input === "string" ? input : input?.url || "");
+    if (u.includes("api.themoviedb.org")) return new Response("{}", { status: 503 });
+    return realFetchCat(input, init);
+  };
+  try {
   const catReq = new Request("https://watchlivo.online/api/rave/catalog?page=2&limit=10", {
     headers: { "X-Watchlivo-Token": edgeToken },
   });
@@ -530,6 +538,36 @@ test("edge_autonomous: UA gate, /r/ query preservation, single-slice catalog, tr
   const vizReq = new Request("https://watchlivo.online/api/rave/catalog?category=vizyon", { headers: { "X-Watchlivo-Token": edgeToken } });
   const vizJson = await (await handleAutonomousEdge(vizReq, new URL(vizReq.url), "/api/rave/catalog", env)).json();
   assert.equal(vizJson.total, 5);
+  } finally {
+    globalThis.fetch = realFetchCat;
+  }
+
+  // 3b. TMDB discover available -> totals come from TMDB total_results, local verified items lead page 1
+  globalThis.fetch = async (input, init) => {
+    const u = String(typeof input === "string" ? input : input?.url || "");
+    if (u.includes("api.themoviedb.org/3/discover/")) {
+      const isTv = u.includes("/discover/tv");
+      const results = Array.from({ length: 20 }, (_, i) => ({
+        id: (isTv ? 900000 : 800000) + i, name: `Disc TV ${i}`, title: `Disc Movie ${i}`,
+        poster_path: "/p.jpg", genre_ids: [18], vote_average: 7, vote_count: 100,
+        first_air_date: "2020-01-01", release_date: "2020-01-01",
+      }));
+      return new Response(JSON.stringify({ results, total_results: isTv ? 21000 : 54000 }), { status: 200 });
+    }
+    return realFetchCat(input, init);
+  };
+  try {
+    const dReq = new Request("https://watchlivo.online/api/rave/catalog?provider=cinema&category=dram&page=1", { headers: { "X-Watchlivo-Token": edgeToken } });
+    const dJson = await (await handleAutonomousEdge(dReq, new URL(dReq.url), "/api/rave/catalog", env)).json();
+    assert.equal(dJson.source, "tmdb-discover");
+    assert.equal(dJson.totalTv, 21000);
+    assert.equal(dJson.totalMovies, 54000);
+    assert.equal(dJson.totalAvailable, 75000);
+    assert.equal(dJson.hasMore, true);
+    assert.ok(dJson.items.length >= 40);
+  } finally {
+    globalThis.fetch = realFetchCat;
+  }
 
   // 4. PBKDF2 register -> /me -> login -> logout -> /me returns 401
   const rReg = await handleAutonomousEdge(

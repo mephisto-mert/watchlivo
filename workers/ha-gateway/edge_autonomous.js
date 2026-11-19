@@ -608,7 +608,14 @@ function filterCatalog(items, url) {
 
 async function handleEdgeCatalogSearch(boot, url, env) {
   const rawQ = (url.searchParams.get("q") || url.searchParams.get("query") || "").trim();
-  if (rawQ.length < 2) return filterCatalog(boot.catalog, url);
+  if (rawQ.length < 2) {
+    const shuffleOnly = ["1", "true", "yes"].includes((url.searchParams.get("shuffle") || url.searchParams.get("random") || "").trim().toLowerCase());
+    if (!shuffleOnly) {
+      const disc = await handleEdgeTmdbDiscoverCatalog(boot, url, env).catch(() => null);
+      if (disc) return disc;
+    }
+    return filterCatalog(boot.catalog, url);
+  }
 
   const { provider, cat, list: localAll } = filterCatalogUnpaged(boot.catalog, url);
   const tmdbHits = await searchTmdbEdge(rawQ, env);
@@ -636,6 +643,158 @@ async function handleEdgeCatalogSearch(boot, url, env) {
     items: merged.slice(start, start + limit),
     hasMore: merged.length > start + limit,
   };
+}
+
+// ---------------------------------------------------------------------------
+// TMDB Discover-backed catalog (parity with Python origin `/api/rave/catalog`)
+// ---------------------------------------------------------------------------
+const DISCOVER_GENRES = {
+  aksiyon: ["10759", "28"], action: ["10759", "28"],
+  macera: ["10759", "12"], adventure: ["10759", "12"],
+  animasyon: ["16", "16"], animation: ["16", "16"],
+  komedi: ["35", "35"], comedy: ["35", "35"],
+  suc: ["80", "80"], crime: ["80", "80"],
+  belgesel: ["99", "99"], documentary: ["99", "99"],
+  dram: ["18", "18"], drama: ["18", "18"],
+  aile: ["10751", "10751"], family: ["10751", "10751"],
+  fantastik: ["10765", "14"], fantasy: ["10765", "14"],
+  tarih: ["10768", "36"], history: ["10768", "36"],
+  korku: ["9648", "27"], horror: ["9648", "27"],
+  muzik: ["", "10402"],
+  gizem: ["9648", "9648"], mystery: ["9648", "9648"],
+  romantik: ["10749", "10749"], romance: ["10749", "10749"],
+  bilim_kurgu: ["10765", "878"], scifi: ["10765", "878"],
+  gerilim: ["80", "53"], thriller: ["80", "53"],
+  savas: ["10768", "10752"], war: ["10768", "10752"],
+  western: ["37", "37"],
+};
+const _discoverMemCache = new Map();
+
+async function fetchTmdbDiscoverPage(u, dtype) {
+  try {
+    const r = await fetch(u, { signal: AbortSignal.timeout(4500) });
+    if (!r.ok) return { total: 0, items: [] };
+    const data = await r.json();
+    const items = (data.results || [])
+      .filter((x) => x && x.poster_path)
+      .map((x) => mapTmdbItem({ ...x, media_type: x.media_type || dtype }));
+    return { total: Number(data.total_results || 0), dtype, items };
+  } catch {
+    return { total: 0, dtype, items: [] };
+  }
+}
+
+async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
+  const provider = (url.searchParams.get("provider") || "cinema").trim().toLowerCase();
+  if (!["cinema", "all", "free_tr", "netflix", "disney", "prime", "max", "hbomax", "crunchyroll"].includes(provider)) return null;
+  const cat = (url.searchParams.get("category") || url.searchParams.get("genre") || "all").trim().toLowerCase();
+  const mtFlt = (url.searchParams.get("mediaType") || url.searchParams.get("type") || "").trim().toLowerCase();
+  const pg = Math.max(1, Math.min(500, Number(url.searchParams.get("page") || 1) || 1));
+  const cacheKey = `catdisc:v1:${provider}:${cat}:${mtFlt}:${pg}`;
+  const now = Date.now();
+  const mem = _discoverMemCache.get(cacheKey);
+  if (mem && now - mem.ts < 600_000) return mem.payload;
+  if (env?.WATCHLIVO_KV) {
+    const kvHit = await env.WATCHLIVO_KV.get(cacheKey, "json").catch(() => null);
+    if (kvHit && Array.isArray(kvHit.items) && kvHit.items.length) {
+      _discoverMemCache.set(cacheKey, { ts: now, payload: kvHit });
+      return kvHit;
+    }
+  }
+
+  const apiKey = encodeURIComponent(String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim());
+  const today = new Date().toISOString().slice(0, 10);
+  let tvQ = "&without_genres=10763,10764,10766,10767&vote_count.gte=5";
+  let mvQ = `&primary_release_date.lte=${today}&vote_count.gte=10`;
+  if (cat === "tr" || cat === "dublaj" || cat === "yerli") {
+    tvQ += "&with_original_language=tr";
+    mvQ += "&with_original_language=tr";
+  } else if (cat === "anime") {
+    tvQ += "&with_genres=16&with_original_language=ja";
+    mvQ += "&with_genres=16&with_original_language=ja";
+  } else if (DISCOVER_GENRES[cat]) {
+    const [tg, mg] = DISCOVER_GENRES[cat];
+    tvQ += tg ? `&with_genres=${tg}` : "&with_genres=-1";
+    mvQ += mg ? `&with_genres=${mg}` : "";
+  } else if (cat === "trend") {
+    tvQ += "&vote_average.gte=7.5&vote_count.gte=150";
+    mvQ += "&vote_average.gte=7.5&vote_count.gte=250";
+  }
+  const baseTv = `https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&language=tr-TR${tvQ}`;
+  const baseMv = `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=tr-TR${mvQ}`;
+
+  const wantTv = mtFlt !== "movie" && cat !== "movies";
+  const wantMv = mtFlt !== "tv" && cat !== "series" && cat !== "anime";
+  const eps = [];
+  if (cat === "vizyon") {
+    eps.push([`https://api.themoviedb.org/3/movie/now_playing?api_key=${apiKey}&language=tr-TR&region=TR&page=${pg}`, "movie"]);
+    eps.push([`https://api.themoviedb.org/3/trending/movie/week?api_key=${apiKey}&language=tr-TR&page=${pg}`, "movie"]);
+    eps.push([`https://api.themoviedb.org/3/tv/on_the_air?api_key=${apiKey}&language=tr-TR&page=${pg}`, "tv"]);
+    eps.push([`https://api.themoviedb.org/3/trending/tv/week?api_key=${apiKey}&language=tr-TR&page=${pg}`, "tv"]);
+  } else {
+    const p1 = (pg - 1) * 2 + 1;
+    const p2 = p1 + 1;
+    if (wantTv) {
+      eps.push([`${baseTv}&sort_by=popularity.desc&page=${p1}`, "tv"]);
+      eps.push([`${baseTv}&sort_by=vote_count.desc&page=${p2}`, "tv"]);
+    }
+    if (wantMv) {
+      eps.push([`${baseMv}&sort_by=popularity.desc&page=${p1}`, "movie"]);
+      eps.push([`${baseMv}&sort_by=vote_count.desc&page=${p2}`, "movie"]);
+    }
+  }
+  const results = await Promise.all(eps.map(([u, t]) => fetchTmdbDiscoverPage(u, t)));
+  let totTv = 0;
+  let totMv = 0;
+  const seen = new Set();
+  const tmdbItems = [];
+  const maxLen = Math.max(0, ...results.map((r) => r.items.length));
+  for (let i = 0; i < maxLen; i++) {
+    for (const r of results) {
+      const it = r.items[i];
+      if (!it) continue;
+      const k = `${it.mediaType}:${it.tmdbId}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      tmdbItems.push(it);
+    }
+  }
+  for (const r of results) {
+    if (r.dtype === "tv") totTv = Math.max(totTv, r.total);
+    else totMv = Math.max(totMv, r.total);
+  }
+  if (!tmdbItems.length) return null;
+
+  let items = tmdbItems;
+  const { list: localList } = filterCatalogUnpaged(boot.catalog, url);
+  const localFiltered = localList.filter((x) => (mtFlt === "tv" ? x.mediaType === "tv" : mtFlt === "movie" ? x.mediaType !== "tv" : true));
+  if (pg === 1 && localFiltered.length) {
+    const localKeys = new Set(localFiltered.map((x) => (x.tmdbId ? `${x.mediaType === "tv" ? "tv" : "movie"}:${x.tmdbId}` : "")).filter(Boolean));
+    items = [...localFiltered.slice(0, 24), ...tmdbItems.filter((x) => !localKeys.has(`${x.mediaType}:${x.tmdbId}`))];
+  }
+  const localTv = localFiltered.filter((x) => x.mediaType === "tv").length;
+  const localMv = localFiltered.length - localTv;
+  const totalTv = Math.max(totTv, localTv);
+  const totalMovies = Math.max(totMv, localMv);
+  const payload = {
+    provider,
+    query: "",
+    page: pg,
+    category: cat,
+    total: totalTv + totalMovies,
+    totalAvailable: totalTv + totalMovies,
+    totalTv,
+    totalMovies,
+    items,
+    hasMore: pg < 250 && tmdbItems.length >= 10,
+    source: "tmdb-discover",
+  };
+  if (_discoverMemCache.size >= 200) _discoverMemCache.delete(_discoverMemCache.keys().next().value);
+  _discoverMemCache.set(cacheKey, { ts: now, payload });
+  if (env?.WATCHLIVO_KV) {
+    await env.WATCHLIVO_KV.put(cacheKey, JSON.stringify(payload), { expirationTtl: 3600 }).catch(() => {});
+  }
+  return payload;
 }
 
 // ---------------------------------------------------------------------------
