@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v226';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v226';
-import { api, qs, humanApiError } from '../api.js?v=20261119_v226';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v226';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v226';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v226';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v226';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261120_v227';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261120_v227';
+import { api, qs, humanApiError } from '../api.js?v=20261120_v227';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261120_v227';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261120_v227';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261120_v227';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261120_v227';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261119_v226';
+} from '../store.js?v=20261120_v227';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -428,7 +428,7 @@ export function openYtPersonalizeModal(onUpdated) {
             btn.disabled = true;
             btn.textContent = '⏳ Google OAuth Açılıyor & YouTube Eşitleniyor...';
             try {
-              const res = await syncGoogleYoutubeOAuth(expectedEmail, '');
+              const res = await syncGoogleYoutubeOAuth('', expectedEmail);
               toast(`🔴 Google YouTube hesabı eşitlendi! (${res.importedSubs} abonelik, ${res.importedLikes} beğeni aktarıldı)`);
               renderSubsList();
               onUpdated?.();

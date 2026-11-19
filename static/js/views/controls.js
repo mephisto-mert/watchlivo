@@ -1,15 +1,16 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261119_v226';
-import { api, qs as buildQs } from '../api.js?v=20261119_v226';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261119_v226';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v226';
-import { getProvider } from '../providers.js?v=20261119_v226';
-import { expectedPosition } from '../sync.js?v=20261119_v226';
-import { thumbFor } from './lobby.js?v=20261119_v226';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261119_v226';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261119_v226';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261119_v226';
-import { avatar } from '../profile.js?v=20261119_v226';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261120_v227';
+import { api, qs as buildQs } from '../api.js?v=20261120_v227';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261120_v227';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261120_v227';
+import { getProvider } from '../providers.js?v=20261120_v227';
+import { expectedPosition } from '../sync.js?v=20261120_v227';
+import { thumbFor } from './lobby.js?v=20261120_v227';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261120_v227';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261120_v227';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261120_v227';
+import { avatar } from '../profile.js?v=20261120_v227';
+import { unlockSfxAudio } from './chat.js?v=20261120_v227';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -87,6 +88,7 @@ export function buildControls(frame, ctx) {
   const onGlobalTouchStamp = (ev) => {
     lastAnyTouchAt = Date.now();
     if (ev?.type === 'touchstart') resumeSharedAudioContext();
+    if (ev?.type === 'touchend') unlockSfxAudio();
   };
   if (typeof window !== 'undefined') {
     window.addEventListener('touchstart', onGlobalTouchStamp, { capture: true, passive: true });
@@ -106,6 +108,9 @@ export function buildControls(frame, ctx) {
     }
     frame.classList.remove('idle-cursor');
     controls.classList.add('ui-active');
+    if (!wasVisible) {
+      try { tick(); } catch (_) {}
+    }
     clearTimeout(uiTimer);
     uiTimer = setTimeout(() => {
       const v = host.adapter?.video;
@@ -123,6 +128,7 @@ export function buildControls(frame, ctx) {
   };
   const syncUnlockAudioOnly = () => {
     resumeSharedAudioContext();
+    unlockSfxAudio();
     host.userUnlocked = true;
     host.autoplayBlocked = false;
     host.unlockAudio();
@@ -238,6 +244,7 @@ export function buildControls(frame, ctx) {
     id: 'ctl-break-btn',
     title: 'Mola (duraklatma) isteği gönder veya odayı duraklat',
     ...tapProps(() => {
+      unlockSfxAudio();
       if (state.mesh?.curated) {
         toast('7/24 canlı TV yayını duraklatılamaz');
         return;
@@ -1235,7 +1242,7 @@ export function buildControls(frame, ctx) {
       class: 'react-emoji-btn ctl-fs-react-btn',
       title: `Tepki: ${em}`,
       'aria-label': `Tepki ${em}`,
-      ...tapProps(() => actions.reaction(em)),
+      ...tapProps(() => { unlockSfxAudio(); actions.reaction(em); }),
     }, em)));
   const volWrap = h('div', { class: `vol-wrap ${isIosFixedVol() ? 'is-fixed-vol' : ''}`.trim() }, volBtn, volRange);
   const barRow = h('div', { class: 'ctl-bar-row' },
@@ -1539,16 +1546,19 @@ export function buildControls(frame, ctx) {
       loading.classList.add('hidden');
     }
     stageBackdrop.classList.toggle('is-hero-cover', false);
-    if (!scrubbing) {
-      const pct = d ? (p / d) * 100 : 0;
-      cur.style.width = `${pct}%`;
-      knob.style.left = `${pct}%`;
-      const timeLabel = host.adapter?.caps.live ? 'CANLI' : `${fmtTime(p)} / ${fmtTime(d)}`;
-      time.textContent = timeLabel;
-      timeline.setAttribute('aria-valuenow', String(Math.round(pct)));
-      timeline.setAttribute('aria-valuetext', timeLabel);
+    const hudVisible = controls.classList.contains('ui-active') || controls.classList.contains('show') || scrubbing;
+    if (hudVisible) {
+      if (!scrubbing) {
+        const pct = d ? (p / d) * 100 : 0;
+        cur.style.width = `${pct}%`;
+        knob.style.left = `${pct}%`;
+        const timeLabel = host.adapter?.caps.live ? 'CANLI' : `${fmtTime(p)} / ${fmtTime(d)}`;
+        if (time.textContent !== timeLabel) time.textContent = timeLabel;
+        timeline.setAttribute('aria-valuenow', String(Math.round(pct)));
+        timeline.setAttribute('aria-valuetext', timeLabel);
+      }
+      buf.style.width = d ? `${Math.min(100, ((host.adapter?.getBuffered?.() || 0) / d) * 100)}%` : '0%';
     }
-    buf.style.width = d ? `${Math.min(100, ((host.adapter?.getBuffered?.() || 0) / d) * 100)}%` : '0%';
     updateUnmuteVisibility();
     renderCinemaSeats();
     const m = state.mesh?.media;
@@ -1610,7 +1620,8 @@ export function buildControls(frame, ctx) {
     } else {
       nextEpBanner.classList.add('hidden');
     }
-    if (ambilightEnabled) {
+    const isCoarseMobile = typeof window !== 'undefined' && Boolean(window.matchMedia?.('(pointer: coarse)')?.matches);
+    if (ambilightEnabled && !isCoarseMobile) {
       ambilightCanvas.classList.add('on');
       const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
       if (v && v.videoWidth > 0 && !v.paused) {
@@ -1624,9 +1635,9 @@ export function buildControls(frame, ctx) {
       ambilightCanvas.style.opacity = '0';
       ambilightCanvas.classList.remove('on');
     }
-    if (!host.adapter?.video || (host.adapter.video.readyState >= 2 && (host.adapter.video.videoWidth > 0 || host.adapter.isMusic))) {
+    if (!host.adapter?.video) {
       host.adapter?.subs?.onTimeUpdate?.(p);
-    } else {
+    } else if (!(host.adapter.video.readyState >= 2 && (host.adapter.video.videoWidth > 0 || host.adapter.isMusic))) {
       host.adapter?.subs?.clearActiveCue?.();
     }
     if (m && d > 0 && Date.now() - lastMediaPosSyncAt > 2500 && typeof navigator !== 'undefined' && navigator.mediaSession?.setPositionState) {
@@ -2926,7 +2937,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261119_v226',
+            v: '20261120_v227',
           });
           api(`/api/rave/seasons?${q.toString()}`, { timeout: 8000 })
             .then((inf) => {

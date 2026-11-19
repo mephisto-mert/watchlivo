@@ -1,11 +1,11 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261119_v226';
-import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261119_v226';
-import { avatar } from '../profile.js?v=20261119_v226';
-import { api, qs, humanApiError } from '../api.js?v=20261119_v226';
-import { resolveMusicItem } from './selection-kinds.js?v=20261119_v226';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261119_v226';
-import { ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v226';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261120_v227';
+import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261120_v227';
+import { avatar } from '../profile.js?v=20261120_v227';
+import { api, qs, humanApiError } from '../api.js?v=20261120_v227';
+import { resolveMusicItem } from './selection-kinds.js?v=20261120_v227';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261120_v227';
+import { ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261120_v227';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -18,6 +18,8 @@ const SOUNDBOARD = [
 let _sfxAudioCtx = null;
 let _sfxUnlockWired = false;
 let _sfxSilentPrimed = false;
+let _lastResumeBurstAt = 0;
+let _nextSfxScheduleTime = 0;
 
 function getOrCreateSfxContext() {
   if (typeof window === 'undefined') return null;
@@ -26,8 +28,28 @@ function getOrCreateSfxContext() {
   if (!_sfxAudioCtx || _sfxAudioCtx.state === 'closed') {
     _sfxAudioCtx = new Ctx();
     _sfxSilentPrimed = false;
+    try {
+      _sfxAudioCtx.onstatechange = () => {
+        if (_sfxAudioCtx && _sfxAudioCtx.state !== 'running') {
+          _sfxSilentPrimed = false;
+        }
+      };
+    } catch (_) {}
   }
   return _sfxAudioCtx;
+}
+
+function primeSilentSfxBuffer(ac) {
+  if (!ac || ac.state !== 'running' || _sfxSilentPrimed) return;
+  _sfxSilentPrimed = true;
+  try {
+    const silentBuf = ac.createBuffer(1, 1, Math.max(8000, ac.sampleRate || 44100));
+    const src = ac.createBufferSource();
+    src.buffer = silentBuf;
+    src.connect(ac.destination);
+    src.onended = () => { try { src.disconnect(); } catch (_) {} };
+    src.start(0);
+  } catch (_) {}
 }
 
 export function unlockSfxAudio() {
@@ -35,19 +57,19 @@ export function unlockSfxAudio() {
     ensureIosPlaybackAudioSession?.();
     const ac = getOrCreateSfxContext();
     if (!ac) return null;
-    if (ac.state === 'suspended' || ac.state === 'interrupted') {
-      ac.resume().catch(() => {});
+    if (ac.state === 'running') {
+      primeSilentSfxBuffer(ac);
+      return ac;
     }
-    if (!_sfxSilentPrimed) {
-      _sfxSilentPrimed = true;
-      try {
-        const silentBuf = ac.createBuffer(1, 1, Math.max(8000, ac.sampleRate || 44100));
-        const src = ac.createBufferSource();
-        src.buffer = silentBuf;
-        src.connect(ac.destination);
-        src.onended = () => { try { src.disconnect(); } catch (_) {} };
-        src.start(0);
-      } catch (_) {}
+    if (ac.state === 'suspended' || ac.state === 'interrupted') {
+      Promise.resolve(ac.resume()).then(() => {
+        if (ac.state === 'running') {
+          primeSilentSfxBuffer(ac);
+        } else if (ac.state === 'interrupted') {
+          try { ac.close?.().catch?.(() => {}); } catch (_) {}
+          if (_sfxAudioCtx === ac) _sfxAudioCtx = null;
+        }
+      }).catch(() => {});
     }
     return ac;
   } catch (_) {
@@ -59,16 +81,20 @@ function wireGlobalSfxUnlock() {
   if (_sfxUnlockWired || typeof window === 'undefined') return;
   _sfxUnlockWired = true;
   const onGesture = () => {
-    const ac = unlockSfxAudio();
-    if (ac && ac.state === 'running' && _sfxSilentPrimed) {
-      window.removeEventListener('pointerdown', onGesture, true);
-      window.removeEventListener('touchstart', onGesture, true);
-      window.removeEventListener('keydown', onGesture, true);
-    }
+    if (_sfxAudioCtx && _sfxAudioCtx.state === 'running' && _sfxSilentPrimed) return;
+    unlockSfxAudio();
   };
-  window.addEventListener('pointerdown', onGesture, { capture: true, passive: true });
-  window.addEventListener('touchstart', onGesture, { capture: true, passive: true });
+  window.addEventListener('touchend', onGesture, { capture: true, passive: true });
+  window.addEventListener('pointerup', onGesture, { capture: true, passive: true });
+  window.addEventListener('click', onGesture, { capture: true, passive: true });
   window.addEventListener('keydown', onGesture, { capture: true, passive: true });
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && _sfxAudioCtx && _sfxAudioCtx.state !== 'running') {
+        _sfxSilentPrimed = false;
+      }
+    }, { passive: true });
+  }
 }
 wireGlobalSfxUnlock();
 
@@ -78,14 +104,26 @@ function withRunningSfxContext(renderFn) {
     ensureIosPlaybackAudioSession?.();
     const ac = getOrCreateSfxContext();
     if (!ac) return;
-    const invoke = () => {
-      if (!ac || ac.state === 'closed') return;
+    const queuedAt = Date.now();
+    const invoke = (fromResume = false) => {
+      if (!ac || ac.state !== 'running') return;
+      const nowMs = Date.now();
+      if (fromResume) {
+        if (nowMs - queuedAt > 1500) return;
+        if (nowMs - _lastResumeBurstAt < 45) return;
+        _lastResumeBurstAt = nowMs;
+      }
+      const baseNow = ac.currentTime + 0.015;
+      const startAt = (!fromResume && _nextSfxScheduleTime > baseNow && _nextSfxScheduleTime - baseNow < 0.6)
+        ? _nextSfxScheduleTime
+        : baseNow;
+      _nextSfxScheduleTime = startAt + 0.095;
       try {
-        renderFn(ac, ac.currentTime + 0.015);
+        renderFn(ac, startAt);
       } catch (_) {}
     };
     if (ac.state === 'running') {
-      invoke();
+      invoke(false);
       return;
     }
     if (typeof ac.resume === 'function') {
@@ -93,10 +131,13 @@ function withRunningSfxContext(renderFn) {
       const runOnce = () => {
         if (fired) return;
         fired = true;
-        invoke();
+        invoke(true);
       };
       Promise.resolve(ac.resume()).then(() => {
-        if (ac.state === 'running') runOnce();
+        if (ac.state === 'running') {
+          primeSilentSfxBuffer(ac);
+          runOnce();
+        }
       }).catch(() => {});
     }
   } catch (_) {}
@@ -198,7 +239,7 @@ export function playEmojiSfx(emoji) {
   if (emoji === '👏') { playRoomSfx('clap'); return; }
   if (emoji === '😂') { playRoomSfx('laugh'); return; }
   withRunningSfxContext((ac, now) => {
-    if (emoji === '❤️') {
+    if (emoji === '❤️' || emoji === '❤') {
       [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
         scheduleTone(ac, { type: 'sine', freqStart: freq, gainPeak: 0.25, startAt: now + i * 0.06, dur: 0.22 });
       });
@@ -367,6 +408,7 @@ export function buildChat(ctx) {
     'aria-label': 'Mola Zamanı',
     title: 'Mola (duraklatma) isteği gönder veya odayı duraklat',
     onclick: () => {
+      unlockSfxAudio();
       if (state.mesh?.curated) {
         toast('7/24 canlı TV yayını duraklatılamaz');
         return;
@@ -605,6 +647,7 @@ export function buildChat(ctx) {
 
   let mutedLiveCallForVoiceNote = false;
   function restoreLiveCallMicAfterVoiceNote() {
+    if (typeof window !== 'undefined') window.__wlVoiceRecActive = false;
     if (!mutedLiveCallForVoiceNote) return;
     mutedLiveCallForVoiceNote = false;
     if (ctx.voice?.micOn && !ctx.voice?.deafened) {
@@ -633,6 +676,7 @@ export function buildChat(ctx) {
     }
     if (voiceRecStarting) return;
     voiceRecStarting = true;
+    if (typeof window !== 'undefined') window.__wlVoiceRecActive = true;
     if (ctx.voice?.micOn) {
       mutedLiveCallForVoiceNote = true;
       ctx.voice.stream?.getAudioTracks().forEach((t) => { t.enabled = false; });
@@ -766,6 +810,7 @@ export function buildChat(ctx) {
     }, 80);
   });
 
+  let lastVoiceBtnSig = '';
   function syncVoiceUi() {
     const v = ctx.voice;
     const micOn = Boolean(v?.micOn);
@@ -774,38 +819,42 @@ export function buildChat(ctx) {
     const deafened = Boolean(v?.deafened);
     const inCall = Boolean(v?.inCall || micOn || camOn || screenOn);
     const stageOn = Boolean(v?.stageGridMode);
-
-    discordCallBar.classList.toggle('in-call', inCall);
-    dJoinBtn.classList.toggle('active', inCall);
-    dJoinBtn.setAttribute('aria-pressed', String(inCall));
-    dJoinBtn.setAttribute('aria-label', inCall ? 'Ayrıl' : 'Sesliye Katıl');
-    dHeadMicBtn.setAttribute('aria-pressed', String(micOn));
-    dHeadCamBtn.setAttribute('aria-pressed', String(camOn));
-    dMicPill.setAttribute('aria-pressed', String(micOn));
-    dDeafPill.setAttribute('aria-pressed', String(deafened));
-    dCamPill.setAttribute('aria-pressed', String(camOn));
-    dScreenPill.setAttribute('aria-pressed', String(screenOn));
-    dStageBtn.setAttribute('aria-pressed', String(stageOn));
-    dStripBtn.setAttribute('aria-pressed', String(Boolean(v?.stripMode)));
-    dJoinBtn.replaceChildren(
-      h('span', { class: 'd-btn-ico', html: inCall ? icons.phoneOff : icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }),
-      inCall ? h('span', { class: 'd-join-active' }, 'Ayrıl') : h('span', { class: 'd-join-full' }, 'Sesliye Katıl'),
-      inCall ? null : h('span', { class: 'd-join-short' }, 'Katıl'),
-    );
-    dStageBtn.classList.toggle('on', stageOn);
-    dStripBtn.classList.toggle('on', Boolean(v?.stripMode));
-    dMicPill.classList.toggle('on', micOn);
-    dMicPill.replaceChildren(h('span', { html: micOn ? icons.mic : icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), micOn ? 'Mikrofon' : 'Sessiz');
-    dHeadMicBtn.classList.toggle('on', micOn);
-    dHeadMicBtn.replaceChildren(h('span', { class: 'd-btn-ico', html: micOn ? icons.mic : icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, micOn ? 'Mikrofon Açık' : 'Mikrofon'));
-    dDeafPill.classList.toggle('on', deafened);
-    dDeafPill.replaceChildren(h('span', { html: deafened ? icons.headphonesOff : icons.headphones, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), deafened ? 'Sağır' : 'Kulaklık');
-    dCamPill.classList.toggle('on', camOn);
-    dHeadCamBtn.classList.toggle('on', camOn);
-    dHeadCamBtn.replaceChildren(h('span', { class: 'd-btn-ico', html: camOn ? icons.camera : icons.cameraOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, camOn ? 'Kamera Açık' : 'Kamera'));
-    dCamPill.replaceChildren(h('span', { html: camOn ? icons.camera : icons.cameraOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Kamera');
-    dScreenPill.classList.toggle('on', screenOn);
-    dScreenPill.replaceChildren(h('span', { html: icons.screenShare, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), screenOn ? 'Durdur' : 'Ekran');
+    const stripOn = Boolean(v?.stripMode);
+    const btnSig = `${inCall ? 1 : 0}|${micOn ? 1 : 0}|${camOn ? 1 : 0}|${screenOn ? 1 : 0}|${deafened ? 1 : 0}|${stageOn ? 1 : 0}|${stripOn ? 1 : 0}`;
+    if (btnSig !== lastVoiceBtnSig) {
+      lastVoiceBtnSig = btnSig;
+      discordCallBar.classList.toggle('in-call', inCall);
+      dJoinBtn.classList.toggle('active', inCall);
+      dJoinBtn.setAttribute('aria-pressed', String(inCall));
+      dJoinBtn.setAttribute('aria-label', inCall ? 'Ayrıl' : 'Sesliye Katıl');
+      dHeadMicBtn.setAttribute('aria-pressed', String(micOn));
+      dHeadCamBtn.setAttribute('aria-pressed', String(camOn));
+      dMicPill.setAttribute('aria-pressed', String(micOn));
+      dDeafPill.setAttribute('aria-pressed', String(deafened));
+      dCamPill.setAttribute('aria-pressed', String(camOn));
+      dScreenPill.setAttribute('aria-pressed', String(screenOn));
+      dStageBtn.setAttribute('aria-pressed', String(stageOn));
+      dStripBtn.setAttribute('aria-pressed', String(stripOn));
+      dJoinBtn.replaceChildren(
+        h('span', { class: 'd-btn-ico', html: inCall ? icons.phoneOff : icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }),
+        inCall ? h('span', { class: 'd-join-active' }, 'Ayrıl') : h('span', { class: 'd-join-full' }, 'Sesliye Katıl'),
+        inCall ? null : h('span', { class: 'd-join-short' }, 'Katıl'),
+      );
+      dStageBtn.classList.toggle('on', stageOn);
+      dStripBtn.classList.toggle('on', stripOn);
+      dMicPill.classList.toggle('on', micOn);
+      dMicPill.replaceChildren(h('span', { html: micOn ? icons.mic : icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), micOn ? 'Mikrofon' : 'Sessiz');
+      dHeadMicBtn.classList.toggle('on', micOn);
+      dHeadMicBtn.replaceChildren(h('span', { class: 'd-btn-ico', html: micOn ? icons.mic : icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, micOn ? 'Mikrofon Açık' : 'Mikrofon'));
+      dDeafPill.classList.toggle('on', deafened);
+      dDeafPill.replaceChildren(h('span', { html: deafened ? icons.headphonesOff : icons.headphones, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), deafened ? 'Sağır' : 'Kulaklık');
+      dCamPill.classList.toggle('on', camOn);
+      dHeadCamBtn.classList.toggle('on', camOn);
+      dHeadCamBtn.replaceChildren(h('span', { class: 'd-btn-ico', html: camOn ? icons.camera : icons.cameraOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, camOn ? 'Kamera Açık' : 'Kamera'));
+      dCamPill.replaceChildren(h('span', { html: camOn ? icons.camera : icons.cameraOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Kamera');
+      dScreenPill.classList.toggle('on', screenOn);
+      dScreenPill.replaceChildren(h('span', { html: icons.screenShare, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), screenOn ? 'Durdur' : 'Ekran');
+    }
 
     const rawParts = state.mesh?.participants || [];
     const selfId = ctx.voice?.getSelfId?.() || state.clientId || state.self?.id;
@@ -1205,6 +1254,7 @@ export function buildChat(ctx) {
         title: users.map((u) => String(u).split('#')[0]).join(', '),
         onclick: (e) => {
           e.stopPropagation();
+          unlockSfxAudio();
           spawnReactionBurst(e.currentTarget, em);
           closeAllMsgActions(e.currentTarget.closest('.msg'));
           actions.reactMessage?.(msgId, em);
@@ -1365,6 +1415,7 @@ export function buildChat(ctx) {
         title: `İfade bırak: ${em}`,
         onclick: (e) => {
           e.stopPropagation();
+          unlockSfxAudio();
           const btn = e.currentTarget;
           spawnReactionBurst(btn, em);
           btn.blur?.();

@@ -1,10 +1,10 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261119_v226';
-import { api } from '../api.js?v=20261119_v226';
-import { expectedPosition } from '../sync.js?v=20261119_v226';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261119_v226';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261119_v226';
-import { ensureHlsJs } from './hls-loader.js?v=20261119_v226';
+import { SubtitleDubController } from './subtitles.js?v=20261120_v227';
+import { api } from '../api.js?v=20261120_v227';
+import { expectedPosition } from '../sync.js?v=20261120_v227';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261120_v227';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261120_v227';
+import { ensureHlsJs } from './hls-loader.js?v=20261120_v227';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -460,7 +460,7 @@ export class Html5Adapter {
       if (this.subs && this.subs.selectedSubId !== 'off' && this.subs.subCues?.length) {
         this.subs.onTimeUpdate(this.video.currentTime);
       }
-    }, 100);
+    }, 200);
     this.hasEnded = false;
     const fireEndedOnce = () => {
       if (this.hasEnded) return;
@@ -902,10 +902,10 @@ export class Html5Adapter {
         abrBandWidthFactor: isMobileScreen ? 0.82 : 0.88,
         abrBandWidthUpFactor: isMobileScreen ? 0.65 : 0.72,
         autoLevelCapping: -1,
-        maxBufferLength: isMobileScreen ? 35 : 50,
-        maxMaxBufferLength: isMobileScreen ? 70 : 110,
-        backBufferLength: isMobileScreen ? 25 : 45,
-        maxBufferSize: (isMobileScreen ? 35 : 60) * 1000 * 1000,
+        maxBufferLength: isMobileScreen ? 24 : 50,
+        maxMaxBufferLength: isMobileScreen ? 48 : 110,
+        backBufferLength: isMobileScreen ? 14 : 45,
+        maxBufferSize: (isMobileScreen ? 28 : 60) * 1000 * 1000,
         maxBufferHole: 0.5,
         maxAudioFramesDrift: 2,
         stretchShortVideoTrack: true,
@@ -1049,17 +1049,20 @@ export class Html5Adapter {
                 this.hls.nextAutoLevel = Math.max(0, curLvl - 1);
               } else if (lvlCount <= 1 && nativeAltIdx < alts.length) {
                 const nowMs = Date.now();
-                if (!firstSingleStallAt || nowMs - firstSingleStallAt > 24000) {
-                  firstSingleStallAt = nowMs;
-                  singleLevelStalls = 1;
-                } else {
-                  singleLevelStalls += 1;
-                }
-                if (singleLevelStalls >= 2) {
-                  singleLevelStalls = 0;
-                  this._reportStreamHealth?.(srcUrl, false, { stalled: true });
-                  loadCandidateUrl(alts[nativeAltIdx++], doneCb);
-                  return;
+                const inRecentSeek = v.seeking || v.readyState >= 3 || (this.lastSeekAt && nowMs - this.lastSeekAt < 8000);
+                if (!inRecentSeek) {
+                  if (!firstSingleStallAt || nowMs - firstSingleStallAt > 24000) {
+                    firstSingleStallAt = nowMs;
+                    singleLevelStalls = 1;
+                  } else {
+                    singleLevelStalls += 1;
+                  }
+                  if (singleLevelStalls >= 3) {
+                    singleLevelStalls = 0;
+                    this._reportStreamHealth?.(srcUrl, false, { stalled: true });
+                    loadCandidateUrl(alts[nativeAltIdx++], doneCb);
+                    return;
+                  }
                 }
               }
             } catch (err) { /* ignore */ }
@@ -1248,14 +1251,19 @@ export class Html5Adapter {
     let lastZeroDimSwitchAt = 0;
     let zeroDimDowngraded = false;
     this._zeroDimPlayStartAt = 0;
+    this._zeroDimStartPos = -1;
     const checkZeroDimAudioOnly = () => {
       if (this.video !== v || this.isMusic || isAudioOnlyUrl(this.currentUrl)) {
         v.removeEventListener('timeupdate', checkZeroDimAudioOnly);
         return;
       }
-      if (v.seeking) return;
-      if (!this._zeroDimPlayStartAt && !v.paused) this._zeroDimPlayStartAt = performance.now();
+      if (v.seeking || (typeof document !== 'undefined' && document.hidden)) return;
+      if (!this._zeroDimPlayStartAt && !v.paused && v.readyState >= 2) {
+        this._zeroDimPlayStartAt = performance.now();
+        this._zeroDimStartPos = Number(v.currentTime || 0);
+      }
       const elapsedAfterStart = this._zeroDimPlayStartAt ? (performance.now() - this._zeroDimPlayStartAt) / 1000 : 0;
+      const playedDelta = this._zeroDimStartPos >= 0 ? Math.max(0, Number(v.currentTime || 0) - this._zeroDimStartPos) : 0;
       const q = typeof v.getVideoPlaybackQuality === 'function' ? v.getVideoPlaybackQuality() : null;
       const decFrames = q && typeof q.totalVideoFrames === 'number'
         ? q.totalVideoFrames
@@ -1264,15 +1272,15 @@ export class Html5Adapter {
         v.removeEventListener('timeupdate', checkZeroDimAudioOnly);
         return;
       }
-      const hasZeroVideoDim = v.videoWidth === 0 && elapsedAfterStart > (this.useNativeHls ? 4.2 : 2.2) && (v.currentTime || 0) > 1.5;
-      const hasZeroDecodedFrames = Boolean(this.hls) && decFrames === 0 && elapsedAfterStart > 2.8;
+      const hasZeroVideoDim = v.videoWidth === 0 && elapsedAfterStart > (this.useNativeHls ? 4.5 : 2.8) && playedDelta > 1.5;
+      const hasZeroDecodedFrames = Boolean(this.hls) && decFrames === 0 && elapsedAfterStart > 3.6 && playedDelta > 1.5;
       if (v.readyState >= 2 && !v.paused && (hasZeroVideoDim || hasZeroDecodedFrames)) {
         const nowMs = Date.now();
         if (this.hls && !zeroDimDowngraded) {
           zeroDimDowngraded = true;
           lastZeroDimSwitchAt = nowMs;
           try {
-            if (this.hls.levels?.length > 1) this.hls.currentLevel = 0;
+            if (this.hls.levels?.length > 1) this.hls.nextAutoLevel = 0;
             if (hasZeroDecodedFrames) this.hls.recoverMediaError();
           } catch (e) { /* ignore */ }
           return;
@@ -1688,17 +1696,8 @@ export class Html5Adapter {
           }, { once: true });
         }
       } else {
+        this.initialSeekPending = 0;
         try { v.currentTime = target; } catch (e) { /* ignore */ }
-        if (target >= 0.5 && Math.abs(Number(v.currentTime || 0) - target) > 1.8) {
-          this.initialSeekPending = target;
-          this.loadedAtMs = Date.now();
-          this._bindInitSeekIfNeeded?.();
-          if (this.hls) {
-            try { this.hls.startLoad?.(target); } catch (_) {}
-          }
-        } else {
-          this.initialSeekPending = 0;
-        }
       }
     }
     this.subs?.clearActiveCue?.();
@@ -1711,20 +1710,25 @@ export class Html5Adapter {
     if (target < 0.5) return;
     const v = this._activeMediaEl();
     if (!v || v.readyState < 2) {
+      const prevTarget = Number(this.initialSeekPending || 0);
+      const bigJump = prevTarget <= 0 || Math.abs(target - prevTarget) >= 5.0;
+      if (!bigJump) return;
+      const nowMs = Date.now();
       this.initialSeekPending = target;
       this.lastSeekTarget = target;
       this.highestPlayedPos = Math.max(this.highestPlayedPos || 0, target);
-      this.lastSeekAt = Date.now();
-      this.loadedAtMs = Date.now();
+      this.lastSeekAt = nowMs;
+      this.loadedAtMs = nowMs;
       this._bindInitSeekIfNeeded?.();
-      if (this.hls) {
+      if (this.hls && (!this._lastInitStartLoadAt || nowMs - this._lastInitStartLoadAt >= 3000)) {
+        this._lastInitStartLoadAt = nowMs;
         try {
           if (this.hls.config) this.hls.config.startPosition = target;
           this.hls.startLoad?.(target);
         } catch (_) {}
       }
       this._enforceInitialSeekFn?.();
-    } else if (Math.abs(Number(v.currentTime || 0) - target) > 1.5) {
+    } else if (!v.seeking && Math.abs(Number(v.currentTime || 0) - target) > 2.4) {
       this.seek(target);
     }
   }

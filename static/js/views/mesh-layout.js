@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261119_v226';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261119_v226';
-import { navIcon, logo } from './home.js?v=20261119_v226';
-import { createSelection } from './selection.js?v=20261119_v226';
-import { buildControls } from './controls.js?v=20261119_v226';
-import { buildChat } from './chat.js?v=20261119_v226';
-import { PANELS } from './panels.js?v=20261119_v226';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261120_v227';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261120_v227';
+import { navIcon, logo } from './home.js?v=20261120_v227';
+import { createSelection } from './selection.js?v=20261120_v227';
+import { buildControls } from './controls.js?v=20261120_v227';
+import { buildChat } from './chat.js?v=20261120_v227';
+import { PANELS } from './panels.js?v=20261120_v227';
 
 const PRIVACY_META = {
   public: ['🌐', 'Herkese Açık'],

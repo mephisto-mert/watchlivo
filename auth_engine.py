@@ -1087,7 +1087,12 @@ async def auth_oauth(request: Request) -> JSONResponse:
             req = urllib.request.Request(g_url, headers={"User-Agent": "WatchlivoAuth/1.0"})
             with urllib.request.urlopen(req, timeout=5) as gr:
                 g_info = json.loads(gr.read().decode("utf-8"))
-                aud_ok = (not GOOGLE_OAUTH_CLIENT_ID) or (g_info.get("aud") in (GOOGLE_OAUTH_CLIENT_ID, FIREBASE_PROJECT_ID))
+                aud_val = str(g_info.get("aud") or "").strip()
+                aud_ok = (
+                    (not GOOGLE_OAUTH_CLIENT_ID)
+                    or (aud_val in (GOOGLE_OAUTH_CLIENT_ID, FIREBASE_PROJECT_ID))
+                    or (aud_val.startswith("1034129375158-") and aud_val.endswith(".apps.googleusercontent.com"))
+                )
                 if aud_ok and g_info.get("email") and (str(g_info.get("email_verified")).lower() in ("true", "1")):
                     fb_email = str(g_info.get("email")).strip().lower()
                     fb_name = str(g_info.get("name") or g_info.get("given_name") or "").strip()[:24]

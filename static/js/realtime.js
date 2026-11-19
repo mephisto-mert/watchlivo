@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261119_v226';
-import { api } from './api.js?v=20261119_v226';
-import { state } from './store.js?v=20261119_v226';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261119_v226';
+import { clock } from './sync.js?v=20261120_v227';
+import { api } from './api.js?v=20261120_v227';
+import { state } from './store.js?v=20261120_v227';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261120_v227';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -138,12 +138,17 @@ export class MeshConnection {
   start() {
     if (typeof window !== 'undefined') window.__vortexActiveConn = this;
     if (!this._visHandler) {
-      this._visHandler = () => {
+      this._visHandler = (ev) => {
         if (this.closed || document.hidden) return;
         this.retry = 0;
         this.httpFailCount = 0;
         if (this.mode === 'http') {
-          this.httpSend({ type: 'init' }, true);
+          const stale = !this.lastRoom || !this._lastPollOkAt || (Date.now() - this._lastPollOkAt > 12000);
+          if (ev?.type === 'focus' && !stale) {
+            if (!this.inFlight) this.httpSend({ type: 'poll' }, false);
+          } else {
+            this.httpSend({ type: 'init' }, true);
+          }
         } else if (this.mode === 'ws' && (!this.ws || this.ws.readyState > 1)) {
           this.startWs();
         }
@@ -466,13 +471,18 @@ export class MeshConnection {
       }
       if (this.closed) return false;
       this.httpFailCount = 0;
+      this._lastPollOkAt = Date.now();
       if (res?.roomClosed) {
         this.close(false);
         this.onMessage?.({ type: 'room_closed', roomId: this.roomId, roomClosed: true, error: res.error || '' });
         return false;
       }
       if (res.clientToken || (res.clientId && res.clientId !== this.clientId)) {
+        const cidChanged = Boolean(res.clientId && res.clientId !== this.clientId);
         this._rememberToken(res.clientToken, res.clientId);
+        if (cidChanged) {
+          this.onMessage?.({ type: 'client_id_sync', clientId: this.clientId });
+        }
         if (!isPoll) {
           try { sessionStorage.setItem('vortex_cid', this.clientId); } catch (e) { /* ignore */ }
         }
@@ -501,8 +511,8 @@ export class MeshConnection {
         let stateMutated = false;
         if (Array.isArray(res.participants)) {
           const partKey = (p) => `${p.id}:${p.uid || ''}:${p.name || ''}:${p.handle || ''}:${p.color || ''}:${p.avatarUrl || ''}:${p.isHost}:${p.isCoHost}:${p.isCreator}:${p.isStageSpeaker}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}:${p.inCall}:${p.deafened}:${p.handRaised}:${p.statusText || ''}`;
-          const prevPIds = (this.lastRoom.participants || []).map(partKey).join('|');
-          const nextPIds = res.participants.map(partKey).join('|');
+          const prevPIds = (this.lastRoom.participants || []).map(partKey).sort().join('|');
+          const nextPIds = res.participants.map(partKey).sort().join('|');
           if (prevPIds !== nextPIds) {
             this.lastRoom.participants = res.participants;
             stateMutated = true;
@@ -562,7 +572,12 @@ export class MeshConnection {
           } else if (state.mesh?.media) {
             const isSelfHost = Boolean((res.host_id || this.lastRoom.host_id) && this.clientId && (res.host_id || this.lastRoom.host_id) === this.clientId);
             if (!isSelfHost || Number(res.media.meshStateTime || 0) >= Number(state.mesh.media.meshStateTime || 0) - 0.2) {
-              Object.assign(state.mesh.media, this.lastRoom.media);
+              state.mesh.media.meshStatePosition = this.lastRoom.media.meshStatePosition;
+              state.mesh.media.meshStateTime = this.lastRoom.media.meshStateTime;
+              state.mesh.media.currentTime = this.lastRoom.media.currentTime;
+              state.mesh.media.liveTime = this.lastRoom.media.liveTime;
+              state.mesh.media.serverNow = this.lastRoom.media.serverNow;
+              state.mesh.media.updatedAt = this.lastRoom.media.updatedAt;
             }
           }
         }
@@ -607,9 +622,9 @@ export class MeshConnection {
           try { sessionStorage.setItem(`vortex_st_${this.roomId}`, this.syncToken); } catch (e) { /* ignore */ }
         }
         const srvLastChatId = Array.isArray(res.room.chat) && res.room.chat.length ? String(res.room.chat[res.room.chat.length - 1]?.id || '') : '';
-        const pVoiceSig = (res.room.participants || []).map((p) => `${p.id}:${p.muted}:${p.cam}:${p.screen}:${p.inCall}:${p.speaking}:${p.handRaised}:${p.isStageSpeaker}`).join(',');
+        const pVoiceSig = (res.room.participants || []).map((p) => `${p.id}:${p.muted}:${p.cam}:${p.screen}:${p.inCall}:${p.speaking}:${p.handRaised}:${p.isStageSpeaker}`).sort().join(',');
         const mSpeed = Number(res.room.media?.meshStatePlaybackSpeed ?? res.room.media?.rate ?? 1).toFixed(2);
-        const stamp = `${res.room.rev}|${res.room.privacy}|${res.room.playMode}|${res.room.voipMode}|${res.room.name}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateStatus}|${mSpeed}|${res.room.media?.url}|${res.room.media?.videoId || ''}|${res.room.media?.title || ''}|${res.room.chat?.length}|${srvLastChatId}|${res.room.host_id}|${(res.room.polls || []).length}|${(res.room.queue || []).length}|${(res.room.skip_votes || []).length}|${pVoiceSig}`;
+        const stamp = `${res.room.privacy}|${res.room.playMode}|${res.room.voipMode}|${res.room.name}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateStatus}|${mSpeed}|${res.room.media?.url}|${res.room.media?.videoId || ''}|${res.room.media?.title || ''}|${res.room.chat?.length}|${srvLastChatId}|${res.room.host_id}|${(res.room.polls || []).length}|${(res.room.queue || []).length}|${(res.room.skip_votes || []).length}|${pVoiceSig}`;
         if (isInit) {
           this.onMessage?.({ type: 'init', clientId: this.clientId, room: res.room });
         } else if (stamp !== this.lastRoomStamp) {

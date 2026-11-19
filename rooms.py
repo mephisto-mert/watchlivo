@@ -1198,7 +1198,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
     raw_parts.sort(
         key=lambda x: (
             0 if x.get("id") == host_id else (1 if x.get("id") in co_set else (2 if not x.get("muted", True) or x.get("cam") or x.get("screen") else 3)),
-            -float(x.get("lastSeen") or 0.0),
+            str(x.get("id") or ""),
         )
     )
     dedup_parts = list(raw_parts)
@@ -2140,9 +2140,9 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         room["media"]["playing"] = want_play
         room["media"]["playbackAnchored"] = True
         room["_tok_sig"] = ""
-        if prev_playing and want_play and not is_anchor_hb and cur_live > 5.0 and abs(inc_t - cur_live) <= 0.08 and room.get("privacy") == prev_privacy:
+        if prev_playing and want_play and not is_anchor_hb and cur_live > 2.0 and abs(inc_t - cur_live) <= 2.5 and room.get("privacy") == prev_privacy:
             return out
-        if is_anchor_hb or bool(room["media"].get("playing")) != prev_playing or room.get("privacy") != prev_privacy or abs(inc_t - cur_live) > 0.25:
+        if is_anchor_hb or bool(room["media"].get("playing")) != prev_playing or room.get("privacy") != prev_privacy or abs(inc_t - cur_live) > 2.5:
             room["rev"] = int(room.get("rev") or 1) + 1
         hb_ev = _sync_event(room, "heartbeat", name)
         hb_ev["id"] = req_act_id or ("ev_" + uuid.uuid4().hex[:10])
@@ -2747,19 +2747,33 @@ def _handle_social(room, cid, data, out, name, is_host):
                 users = list(reacts.get(emoji) or [])
                 base_name = name.split("#")[0]
                 actor_tag = f"{base_name}#{cid[-4:]}"
+                added_react = False
                 if actor_tag in users:
                     users.remove(actor_tag)
                 elif name in users:
                     users.remove(name)
                 else:
                     users.append(actor_tag)
+                    added_react = True
                 if users:
                     reacts[emoji] = users[:30]
                 else:
                     reacts.pop(emoji, None)
                 target_m["reactions"] = reacts
                 room["rev"] = int(room.get("rev") or 1) + 1
-                out["broadcast"].append(({"type": "msg_reacted", "msgId": msg_id, "reactions": reacts}, None))
+                react_ev = {
+                    "id": req_act_id or ("ev_" + uuid.uuid4().hex[:10]),
+                    "ts": t_now,
+                    "type": "msg_reacted",
+                    "msgId": msg_id,
+                    "emoji": emoji,
+                    "added": added_react,
+                    "reactions": reacts,
+                    "cid": cid,
+                    "user": name,
+                }
+                room["events"] = (room.get("events") or [])[-34:] + [react_ev]
+                out["broadcast"].append((react_ev, None))
     elif mtype == "typing":
         ev = {"id": uuid.uuid4().hex[:10], "ts": now(), "type": "typing", "user": name, "cid": cid}
         room["events"] = (room.get("events") or [])[-34:] + [ev]
@@ -3897,7 +3911,7 @@ async def http_sync(request: Request):
             and client_part_cnt == server_part_cnt
         ):
             elapsed_w = max(0.0, t_cur - float(m.get("updatedAt") or t_cur))
-            recent_ev = [e for e in (room.get("events") or []) if t_cur - float(e.get("ts") or 0) < 6.0][-15:]
+            recent_ev = [e for e in (room.get("events") or []) if t_cur - float(e.get("ts") or 0) < 14.0][-25:]
             recent_sig = [s for s in (room.get("signals") or []) if s.get("targetId") == cid and t_cur - float(s.get("ts") or 0) < 12.0][-80:]
             ser_Quick = serialize(room, for_cid=cid)
             return JSONResponse({

@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261119_v226';
-import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261119_v226';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261119_v226';
+import { h, icons, popup, toast } from './ui.js?v=20261120_v227';
+import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261120_v227';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261120_v227';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261119_v226';
+} from './store.js?v=20261120_v227';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -482,14 +482,42 @@ const BRAND_SVGS = {
 let _fbAuthPromise = null;
 let _resolvedFb = null;
 
+function isMobileUa() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function isIosStandalonePwa() {
+  if (typeof navigator === 'undefined' || typeof window === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const isIos = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return Boolean(navigator.standalone === true || window.isWatchlivoNativeIOS || (isIos && window.matchMedia?.('(display-mode: standalone)')?.matches));
+}
+
 function isEmbeddedInAppWebView() {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
   if (/WatchlivoApp/i.test(ua)) return false;
-  if (/FBAN|FBAV|Instagram|Line\/|MicroMessenger|Snapchat|Twitter|TikTok|BytedanceWebview|musical_ly|Telegram/i.test(ua)) {
+  if (/FBAN|FBAV|FB_IAB|Instagram|WhatsApp|Line\/|MicroMessenger|Snapchat|Twitter|TikTok|BytedanceWebview|musical_ly|Telegram|GSA\/|LinkedInApp|Discord/i.test(ua)) {
     return true;
   }
-  return /Android/i.test(ua) && /;\s*wv\)/i.test(ua);
+  if (/Android/i.test(ua) && /;\s*wv\b/i.test(ua)) return true;
+  const isIos = /iPhone|iPad|iPod/i.test(ua);
+  if (isIos && /AppleWebKit/i.test(ua) && !/Safari\//i.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS/i.test(ua) && !isIosStandalonePwa()) {
+    return true;
+  }
+  return false;
+}
+
+function safeStorageGet(store, k) {
+  try { return store.getItem(k); } catch (_) { return null; }
+}
+function safeStorageSet(store, k, v) {
+  try { store.setItem(k, v); } catch (_) {}
+}
+function safeStorageRemove(store, k) {
+  try { store.removeItem(k); } catch (_) {}
 }
 
 async function getFirebaseAuth() {
@@ -502,14 +530,11 @@ async function getFirebaseAuth() {
     ]);
     const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
     const auth = getAuth(app);
-    if (typeof auth.authStateReady === 'function') {
-      await Promise.race([
-        auth.authStateReady().catch(() => {}),
-        new Promise((r) => setTimeout(r, 2500)),
-      ]);
-    }
     const bundle = { auth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, RecaptchaVerifier, signInWithPhoneNumber };
     _resolvedFb = bundle;
+    if (typeof auth.authStateReady === 'function') {
+      auth.authStateReady().catch(() => {});
+    }
     return bundle;
   })().catch(() => {
     _fbAuthPromise = null;
@@ -523,23 +548,41 @@ export function preloadFirebaseAuth() {
 }
 
 export async function checkRedirectAuth() {
-  const pendingStamp = Number(localStorage.getItem('watchlivo_auth_pending_redirect') || 0);
-  const isPending = Boolean(pendingStamp);
-  if (!isPending) return null;
-  const isFreshPending = !Number.isFinite(pendingStamp) || (Date.now() - pendingStamp < 5 * 60 * 1000);
-  const pendingPw = sessionStorage.getItem('watchlivo_auth_pending_pw') || '';
+  const rawPending = safeStorageGet(localStorage, 'watchlivo_auth_pending_redirect');
+  if (!rawPending) return null;
+  const pendingStamp = Number(rawPending);
+  const isFreshPending = Number.isFinite(pendingStamp) && pendingStamp > 0 && (Date.now() - pendingStamp < 5 * 60 * 1000);
+  if (!isFreshPending) {
+    safeStorageRemove(localStorage, 'watchlivo_auth_pending_redirect');
+    safeStorageRemove(sessionStorage, 'watchlivo_auth_pending_pw');
+    safeStorageRemove(sessionStorage, 'watchlivo_auth_pending_email');
+    return null;
+  }
+  const pendingPw = safeStorageGet(sessionStorage, 'watchlivo_auth_pending_pw') || '';
 
   return Promise.race([
     (async () => {
       try {
         const fb = await getFirebaseAuth();
         if (!fb?.auth || !fb?.getRedirectResult) return null;
+        if (typeof fb.auth.authStateReady === 'function') {
+          await Promise.race([
+            fb.auth.authStateReady().catch(() => {}),
+            new Promise((r) => setTimeout(r, 2500)),
+          ]);
+        }
         let redirectErr = null;
         const cred = await fb.getRedirectResult(fb.auth).catch((err) => {
           redirectErr = err;
           return null;
         });
-        const fbUser = cred?.user || (isFreshPending && fb.auth.currentUser?.email ? fb.auth.currentUser : null);
+        let fbUser = cred?.user || null;
+        if (!fbUser && fb.auth.currentUser?.email) {
+          const lastSignInMs = Date.parse(fb.auth.currentUser.metadata?.lastSignInTime || '');
+          if (Number.isFinite(lastSignInMs) && lastSignInMs >= pendingStamp - 15000) {
+            fbUser = fb.auth.currentUser;
+          }
+        }
         if (fbUser) {
           const idToken = await fbUser.getIdToken(true);
           const fbEmail = (fbUser.email || '').trim().toLowerCase();
@@ -549,15 +592,15 @@ export async function checkRedirectAuth() {
             body: { provider: 'google', idToken, email: fbEmail, name: fbName, password: pendingPw.length >= 6 ? pendingPw : '' },
           });
           if (res?.ok && res.user) {
-            localStorage.removeItem('watchlivo_auth_pending_redirect');
-            sessionStorage.removeItem('watchlivo_auth_pending_pw');
-            sessionStorage.removeItem('watchlivo_auth_pending_email');
+            safeStorageRemove(localStorage, 'watchlivo_auth_pending_redirect');
+            safeStorageRemove(sessionStorage, 'watchlivo_auth_pending_pw');
+            safeStorageRemove(sessionStorage, 'watchlivo_auth_pending_email');
             const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
             toast('✓ ' + prof.name + ' (@' + prof.handle + ') olarak giriş yapıldı');
             return prof;
           }
           if (res?.error) toast(res.error);
-        } else if (isFreshPending) {
+        } else {
           const code = String(redirectErr?.code || '');
           toast(/unauthorized-domain/i.test(code)
             ? 'Bu alan adı Google girişi için yetkilendirilmemiş.'
@@ -567,16 +610,16 @@ export async function checkRedirectAuth() {
         console.warn('Redirect auth check failed:', e);
         toast(e?.message || 'Google girişi doğrulanamadı.');
       } finally {
-        localStorage.removeItem('watchlivo_auth_pending_redirect');
-        sessionStorage.removeItem('watchlivo_auth_pending_pw');
-        sessionStorage.removeItem('watchlivo_auth_pending_email');
+        safeStorageRemove(localStorage, 'watchlivo_auth_pending_redirect');
+        safeStorageRemove(sessionStorage, 'watchlivo_auth_pending_pw');
+        safeStorageRemove(sessionStorage, 'watchlivo_auth_pending_email');
       }
       return null;
     })(),
     new Promise((resolve) => setTimeout(() => {
-      localStorage.removeItem('watchlivo_auth_pending_redirect');
-      sessionStorage.removeItem('watchlivo_auth_pending_pw');
-      sessionStorage.removeItem('watchlivo_auth_pending_email');
+      safeStorageRemove(localStorage, 'watchlivo_auth_pending_redirect');
+      safeStorageRemove(sessionStorage, 'watchlivo_auth_pending_pw');
+      safeStorageRemove(sessionStorage, 'watchlivo_auth_pending_email');
       resolve(null);
     }, 12000))
   ]);
@@ -590,12 +633,20 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
   let phonePendingNumber = '';
   let phoneSending = false;
   let socialLoginBusy = false;
-  const lastProvider = localStorage.getItem(LAST_PROVIDER_KEY) || '';
+  let socialAttemptSeq = 0;
+  let socialUnlockCleanup = null;
+  const lastProvider = safeStorageGet(localStorage, LAST_PROVIDER_KEY) || '';
   preloadFirebaseAuth();
   const root = h('div', { class: 'wl-auth-modal' });
   let modalRef = null;
 
+  const clearSocialUnlockWatchers = () => {
+    try { socialUnlockCleanup?.(); } catch (_) {}
+    socialUnlockCleanup = null;
+  };
+
   const finish = (prof, msg) => {
+    clearSocialUnlockWatchers();
     modalRef?.close?.();
     if (msg) toast(msg);
     onDone?.(prof);
@@ -612,6 +663,30 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     };
     if (socialLoginBusy) return;
     socialLoginBusy = true;
+    const myAttempt = ++socialAttemptSeq;
+    let settled = false;
+    const armMobileTabReturnRelease = () => {
+      clearSocialUnlockWatchers();
+      let focusTimer = null;
+      const safetyTimer = setTimeout(() => {
+        if (!settled && socialAttemptSeq === myAttempt) socialLoginBusy = false;
+      }, 45000);
+      const onReturn = () => {
+        if (settled || socialAttemptSeq !== myAttempt || (typeof document !== 'undefined' && document.hidden)) return;
+        clearTimeout(focusTimer);
+        focusTimer = setTimeout(() => {
+          if (!settled && socialAttemptSeq === myAttempt) socialLoginBusy = false;
+        }, 1800);
+      };
+      window.addEventListener('focus', onReturn, { passive: true });
+      document.addEventListener('visibilitychange', onReturn, { passive: true });
+      socialUnlockCleanup = () => {
+        clearTimeout(focusTimer);
+        clearTimeout(safetyTimer);
+        window.removeEventListener('focus', onReturn);
+        document.removeEventListener('visibilitychange', onReturn);
+      };
+    };
     try {
       let idToken = '';
       let fbEmail = '';
@@ -642,7 +717,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       }
 
       if (isEmbeddedInAppWebView()) {
-        showErr('Google güvenliği uygulama içi tarayıcıdan (WhatsApp, Instagram vb.) girişe izin vermez. Sağ üst menüden "Chrome / Safari ile Aç" seçeneğini kullanın veya e-posta ile giriş yapın.');
+        showErr('Google güvenliği uygulama içi tarayıcıdan (WhatsApp, Instagram, Telegram vb.) girişe izin vermez. Sağ üst menüden "Chrome / Safari ile Aç" seçeneğini kullanın veya e-posta ile giriş yapın.');
         return;
       }
 
@@ -660,27 +735,31 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       gProv.setCustomParameters(customParams);
       const isStandaloneApk = /WatchlivoApp/i.test(navigator.userAgent);
       if (isStandaloneApk) {
-        localStorage.setItem('watchlivo_auth_pending_redirect', Date.now().toString());
-        sessionStorage.setItem('watchlivo_auth_pending_pw', cleanPw);
+        safeStorageSet(localStorage, 'watchlivo_auth_pending_redirect', Date.now().toString());
+        safeStorageSet(sessionStorage, 'watchlivo_auth_pending_pw', cleanPw);
         toast('Google giriş sayfasına aktarılıyorsunuz...');
-        await fb.signInWithRedirect(fb.auth, gProv);
+        try {
+          await fb.signInWithRedirect(fb.auth, gProv);
+        } catch (rdErr) {
+          safeStorageRemove(localStorage, 'watchlivo_auth_pending_redirect');
+          safeStorageRemove(sessionStorage, 'watchlivo_auth_pending_pw');
+          showErr('Google yönlendirmesi başlatılamadı. Lütfen tekrar deneyin.');
+        }
         return;
       }
       const popStartedAt = Date.now();
+      let cred = null;
       try {
         // Call signInWithPopup immediately without prior await so mobile Safari/Chrome preserves user activation
         const popPromise = fb.signInWithPopup(fb.auth, gProv);
-        toast('Google ile giriş penceresi açılıyor...');
-        const cred = await popPromise;
-        if (cred?.user) {
-          idToken = await cred.user.getIdToken(true);
-          fbEmail = (cred.user.email || '').trim().toLowerCase();
-          fbName = cred.user.displayName || '';
-        }
+        armMobileTabReturnRelease();
+        toast('Google ile giriş penceresi açılıyor...', 2600);
+        cred = await popPromise;
       } catch (popErr) {
         const errCode = String(popErr?.code || popErr?.message || '');
         console.warn('Popup login failed:', errCode, popErr);
         const fastClose = /popup-closed-by-user/i.test(errCode) && (Date.now() - popStartedAt < 650);
+        const isMob = isMobileUa();
         if (!hadPreloadedFb && (/popup-blocked|cancelled-popup-request/i.test(errCode) || fastClose)) {
           if (btnEl) {
             const lblSpan = btnEl.querySelector('span:nth-child(2)');
@@ -689,15 +768,27 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           showErr('Google giriş servisi hazırlandı — giriş penceresini açmak için butona tekrar dokunun.');
           return;
         }
-        if (fb.signInWithRedirect && /operation-not-supported/i.test(errCode)) {
-          localStorage.setItem('watchlivo_auth_pending_redirect', Date.now().toString());
-          sessionStorage.setItem('watchlivo_auth_pending_pw', cleanPw);
-          toast('Google giriş sayfasına aktarılıyorsunuz...');
-          await fb.signInWithRedirect(fb.auth, gProv);
+        if (isIosStandalonePwa() && (/popup-blocked|operation-not-supported|popup-closed-by-user/i.test(errCode))) {
+          showErr('iPhone Ana Ekran kısayolunda Google açılır penceresi iOS tarafından kısıtlanır. Watchlivo\'yu doğrudan Safari\'de açıp Google ile giriş yapın veya aşağıdan e-posta ile giriş yapın.');
           return;
         }
-        if (/popup-blocked/i.test(errCode) || fastClose) {
-          showErr('Telefon tarayıcınız Google açılır penceresini engelledi. Açılır pencereye (pop-up) izin verip tekrar dokunun veya e-posta ile giriş yapın.');
+        if (fb.signInWithRedirect && /operation-not-supported/i.test(errCode)) {
+          safeStorageSet(localStorage, 'watchlivo_auth_pending_redirect', Date.now().toString());
+          safeStorageSet(sessionStorage, 'watchlivo_auth_pending_pw', cleanPw);
+          toast('Google giriş sayfasına aktarılıyorsunuz...');
+          try {
+            await fb.signInWithRedirect(fb.auth, gProv);
+          } catch (_) {
+            safeStorageRemove(localStorage, 'watchlivo_auth_pending_redirect');
+            safeStorageRemove(sessionStorage, 'watchlivo_auth_pending_pw');
+            showErr('Google yönlendirmesi başlatılamadı. Lütfen tekrar deneyin.');
+          }
+          return;
+        }
+        if (/popup-blocked/i.test(errCode) || (isMob && fastClose)) {
+          showErr(isMob
+            ? 'Telefon tarayıcınız Google açılır penceresini engelledi. Açılır pencereye (pop-up) izin verip tekrar dokunun veya e-posta ile giriş yapın.'
+            : 'Tarayıcınız Google açılır penceresini engelledi. Açılır pencerelere izin verip tekrar deneyin.');
           return;
         }
         if (/unauthorized-domain/i.test(errCode)) {
@@ -708,8 +799,18 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           showErr('Google sunucularına bağlanılamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.');
           return;
         }
-        showErr('Google girişi iptal edildi veya tamamlanmadı. Lütfen tekrar deneyin.');
+        showErr('Google giriş penceresi kapatıldı veya tamamlanmadı. Lütfen tekrar deneyin.');
         return;
+      }
+      if (cred?.user) {
+        try {
+          idToken = await cred.user.getIdToken(true);
+          fbEmail = (cred.user.email || '').trim().toLowerCase();
+          fbName = cred.user.displayName || '';
+        } catch (tokErr) {
+          showErr('Google oturum bileti alınamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.');
+          return;
+        }
       }
       if (!idToken) {
         showErr('Google girişi doğrulanamadı.');
@@ -729,7 +830,9 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     } catch (e) {
       showErr(humanApiError(e, 'Google ile giriş başarısız oldu.', 'Google ile giriş şu an kenar sunucuda kullanılamıyor.'));
     } finally {
-      socialLoginBusy = false;
+      settled = true;
+      clearSocialUnlockWatchers();
+      if (socialAttemptSeq === myAttempt) socialLoginBusy = false;
     }
   };
 
@@ -764,7 +867,6 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           id: 'wl-google-signin-btn',
           class: 'wl-social-btn wl-social-google',
           onpointerdown: () => preloadFirebaseAuth(),
-          ontouchstart: () => preloadFirebaseAuth(),
           onclick: (ev) => {
             const creds = typeof getFormCreds === 'function' ? (getFormCreds() || {}) : {};
             doSocialLogin('google', 'GmailÜyesi', { ...creds, btnEl: ev.currentTarget });
@@ -806,7 +908,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     if (!topNavTabs.some(([id]) => id === activeTab)) {
       activeTab = isLoggedMember ? 'account' : 'login';
     }
-    const tabsBar = h('div', { class: 'wl-auth-tabs' },
+    const tabsBar = h('div', { class: 'wl-auth-tabs', style: { gridTemplateColumns: `repeat(${topNavTabs.length}, minmax(0, 1fr))` } },
       topNavTabs.map(([id, lbl]) =>
         h('button', {
           type: 'button',
@@ -1487,6 +1589,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         if (e.key === 'Enter') doGuestLogin(guestNameInp.value.trim());
       });
 
+      const guestErrBox = h('div', { class: 'wl-auth-err' });
       root.append(
         h('div', { class: 'wl-auth-form' },
           h('div', { style: { fontSize: '.84rem', color: 'rgba(255,255,255,0.78)', lineHeight: '1.45', marginBottom: '2px' } },
@@ -1494,8 +1597,9 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           guestNameInp,
           h('label', { class: 'wl-field-label' }, 'Profil Neon Rengin'),
           renderColorPicker(),
+          guestErrBox,
           guestBtn),
-        renderSocialButtons({ hideGuestBtn: true }));
+        renderSocialButtons({ hideGuestBtn: true, getFormCreds: () => ({ errEl: guestErrBox }) }));
       return;
     }
 
@@ -1622,7 +1726,6 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         h('button', { type: 'submit', class: 'btn primary wl-btn-full wl-btn-primary-gradient' }, '✨ Hesap Oluştur & Başla')),
       renderSocialButtons({
         getFormCreds: () => ({
-          email: emailInp.value.trim(),
           password: pwInp.value,
           errEl: errBox,
         }),
@@ -2625,6 +2728,9 @@ if (typeof window !== 'undefined') {
   window.vortexOpenUserProfile = openUserProfileModal;
 }
 export async function syncGoogleYoutubeOAuth(expectedPassword = '', expectedEmail = '') {
+  if (isEmbeddedInAppWebView()) {
+    throw new Error('Google güvenliği uygulama içi tarayıcıdan girişe izin vermez. Lütfen Chrome veya Safari ile açın.');
+  }
   const cleanPw = String(expectedPassword || '').trim();
   const cleanEmail = String(expectedEmail || '').trim().toLowerCase();
   const fb = (_resolvedFb?.auth && _resolvedFb?.signInWithPopup) ? _resolvedFb : await getFirebaseAuth();

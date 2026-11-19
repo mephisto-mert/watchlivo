@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261119_v226';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261120_v227';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -648,7 +648,7 @@ export class SubtitleDubController {
           title: (media.title || '').split(' — ')[0],
           season: String(media.season || 1),
           episode: String(media.episode || 1),
-          _v: '20261119v225',
+          _v: '20261119v227',
         };
         if (!media.tmdbId && baseUrl) queryParams.url = baseUrl;
         const qs = new URLSearchParams(queryParams);
@@ -1388,6 +1388,8 @@ export class SubtitleDubController {
   clearActiveCue() {
     this.activeCueText = '';
     this.activeSecondaryCueText = '';
+    this._lastFastCueStart = 0;
+    this._lastFastCueEnd = 0;
     this.adapter?.events?.onSubtitleCue?.('', '');
   }
 
@@ -1422,11 +1424,27 @@ export class SubtitleDubController {
 
   onTimeUpdate(t, forceEmit = false) {
     if (!Number.isFinite(t) || this._destroyed) return;
-    this._disableAllNativeTextTracks();
     const v = this.adapter?.video;
+    if (v?.textTracks?.length) {
+      for (let i = 0; i < v.textTracks.length; i += 1) {
+        if (v.textTracks[i].mode === 'showing') {
+          this._disableAllNativeTextTracks();
+          break;
+        }
+      }
+    }
     const nativeVideoFs = this._isNativeSubView(v);
     const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
     const adjT = (t * scale) - (this.offsetSec || 0);
+    if (
+      !forceEmit && !nativeVideoFs && !this.dualSubEnabled && !this.ttsDubActive
+      && this.subCues.length && this.selectedSubId !== 'off'
+      && this._lastFastTrackId === this.selectedSubId
+      && this._lastFastCueEnd > this._lastFastCueStart
+      && adjT >= this._lastFastCueStart && adjT < this._lastFastCueEnd
+    ) {
+      return;
+    }
     const curSubObj = this.subtitleTracks.find((tr) => tr.id === this.selectedSubId);
     if (!this._loadingSubTrack && !this.subCues.length && this.selectedSubId !== 'off' && curSubObj?.source !== 'youtube-native' && this.subtitleTracks.length && (this._emptyReloadCount || 0) < 2) {
       const nowMs = Date.now();
@@ -1455,6 +1473,14 @@ export class SubtitleDubController {
       }
       const cue = this.findCueAt(this.subCues, adjT);
       const txt = cue ? cue.text : '';
+      this._lastFastTrackId = this.selectedSubId;
+      if (cue) {
+        this._lastFastCueStart = Number(cue.start) || 0;
+        this._lastFastCueEnd = Number(cue.end) || 0;
+      } else {
+        this._lastFastCueStart = 0;
+        this._lastFastCueEnd = 0;
+      }
       const secCue = (this.dualSubEnabled && this.secondaryCues.length) ? this.findCueAt(this.secondaryCues, adjT) : null;
       const secTxt = secCue ? secCue.text : '';
       if (forceEmit || txt !== this.activeCueText || secTxt !== this.activeSecondaryCueText) {

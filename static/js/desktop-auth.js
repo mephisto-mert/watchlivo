@@ -126,32 +126,39 @@ emailBtn?.addEventListener('click', async () => {
 });
 
 let _desktopFbReady = null;
-const preloadDesktopFb = () => Promise.all([
-  import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js'),
-  import('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js'),
-]).then(async ([{ initializeApp, getApps }, { getAuth, GoogleAuthProvider, signInWithPopup }]) => {
-  const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
-  const auth = getAuth(app);
-  if (typeof auth.authStateReady === 'function') {
-    await Promise.race([auth.authStateReady().catch(() => {}), new Promise((r) => setTimeout(r, 2500))]);
-  }
-  _desktopFbReady = { auth, GoogleAuthProvider, signInWithPopup };
-  return _desktopFbReady;
-}).catch(() => null);
+let _desktopFbPromise = null;
+const preloadDesktopFb = () => {
+  if (_desktopFbReady?.auth) return Promise.resolve(_desktopFbReady);
+  if (_desktopFbPromise) return _desktopFbPromise;
+  _desktopFbPromise = Promise.all([
+    import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js'),
+    import('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js'),
+  ]).then(([{ initializeApp, getApps }, { getAuth, GoogleAuthProvider, signInWithPopup }]) => {
+    const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
+    const auth = getAuth(app);
+    _desktopFbReady = { auth, GoogleAuthProvider, signInWithPopup };
+    if (typeof auth.authStateReady === 'function') auth.authStateReady().catch(() => {});
+    return _desktopFbReady;
+  }).catch(() => {
+    _desktopFbPromise = null;
+    return null;
+  });
+  return _desktopFbPromise;
+};
 preloadDesktopFb();
 
 formEl?.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const pw = String(pwEl?.value || '');
-  if (pw.length < 6) {
-    setStatus('Lütfen en az 6 karakterli Watchlivo hesap şifrenizi girin.', 'err');
+  if (pw && pw.length < 6) {
+    setStatus('Şifre belirlemek istiyorsanız en az 6 karakter girin (mevcut Google hesabınız için boş bırakabilirsiniz).', 'err');
     pwEl?.focus?.();
     return;
   }
   btn.disabled = true;
   setStatus('Google penceresi açılıyor...', '', true);
   try {
-    const fb = _desktopFbReady || await preloadDesktopFb();
+    const fb = _desktopFbReady?.auth ? _desktopFbReady : await preloadDesktopFb();
     if (!fb?.auth) throw new Error('Google giriş servisi yüklenemedi.');
     const provider = new fb.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });

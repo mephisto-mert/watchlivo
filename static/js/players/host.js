@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261119_v226';
-import { Html5Adapter } from './html5.js?v=20261119_v226';
-import { VimeoAdapter } from './vimeo.js?v=20261119_v226';
-import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261119_v226';
-import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261119_v226';
-import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261119_v226';
+import { YouTubeAdapter } from './youtube.js?v=20261120_v227';
+import { Html5Adapter } from './html5.js?v=20261120_v227';
+import { VimeoAdapter } from './vimeo.js?v=20261120_v227';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261120_v227';
+import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261120_v227';
+import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261120_v227';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -209,8 +209,9 @@ export class PlayerHost {
     const target = wantDuck ? 0.32 : 1.0;
     clearInterval(this._duckTimer);
     if (Math.abs(this.duckGain - target) < 0.015) {
+      const changed = Math.abs(this.duckGain - target) >= 0.001;
       this.duckGain = target;
-      this.adapter?.setVolume(this._effectiveVolume());
+      if (changed) this.adapter?.setVolume(this._effectiveVolume());
       return;
     }
     this._duckTimer = setInterval(() => {

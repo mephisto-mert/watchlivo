@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261119_v226';
+import { isRoomMediaPlaying } from './store.js?v=20261120_v227';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 4.2;
@@ -202,8 +202,8 @@ export class SyncEngine {
     if (mediaIdSig !== this.mediaIdSig || justResolvedUrl) {
       this.mediaIdSig = mediaIdSig;
       this.loadedAt = now;
-      const needsImmediateViewerSnap = !leader && expected >= 0.8 && Math.abs(curr - expected) > 1.5;
-      this.seekUntil = needsImmediateViewerSnap ? 0 : (now + (leader ? 1800 : 1200));
+      const needsImmediateViewerSnap = !leader && expected >= 0.8 && Math.abs(curr - expected) > 2.4 && !(this.seekUntil > now);
+      this.seekUntil = needsImmediateViewerSnap ? 0 : Math.max(this.seekUntil || 0, now + (leader ? 1800 : 1600));
       this.lastSeekTarget = needsImmediateViewerSnap ? curr : expected;
       this.lastSeekWallAt = needsImmediateViewerSnap ? 0 : now;
       this.lastStatus = status;
@@ -211,6 +211,7 @@ export class SyncEngine {
       this.lastStepAt = now;
       this.didInitialSeek = false;
       this.didInitialSync = false;
+      this.initialSyncAttempts = 0;
       this.didAnchorPlay = false;
       this.isRateNudging = false;
     }
@@ -325,10 +326,13 @@ export class SyncEngine {
     }
 
     if (!this.didInitialSync) {
-      if (abs <= 2.4 && curr >= Math.max(0, expected - 2.4)) {
+      const initElapsedMs = this.loadedAt ? (now - this.loadedAt) : 0;
+      const attempts = this.initialSyncAttempts || 0;
+      if ((abs <= 2.4 && curr >= Math.max(0, expected - 2.4)) || (attempts >= 1 && abs <= JUMP_DELTA) || attempts >= 2 || initElapsedMs > 12000) {
         this.didInitialSync = true;
-      } else if (expected >= 0.8 && abs > 2.2 && now >= this.seekUntil) {
+      } else if (expected >= 0.8 && abs > 2.4 && now >= this.seekUntil) {
         const inBufInit = buffered(expected);
+        this.initialSyncAttempts = attempts + 1;
         this.deferStartedAt = 0;
         this.isRateNudging = false;
         if (Math.abs(ad.getRate() - base) >= 0.005) ad.setRate(base);
@@ -355,6 +359,10 @@ export class SyncEngine {
       && (now - this.lastSeekWallAt < 12000)
     );
     if (activelySeekingToTarget || now < this.seekUntil || (curr < 0.1 && now - (this.loadedAt || 0) < 4000 && expected < 2.0)) {
+      if (this.isRateNudging) {
+        this.isRateNudging = false;
+        if (Math.abs(ad.getRate() - base) >= 0.005) ad.setRate(base);
+      }
       this.mode = 'inSync';
       this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: ad.getRate() });
       return 900;

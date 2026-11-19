@@ -1,17 +1,17 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261119_v226';
-import { api } from '../api.js?v=20261119_v226';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261119_v226';
-import { resolveMusicItem } from './selection-kinds.js?v=20261119_v226';
-import { MeshConnection } from '../realtime.js?v=20261119_v226';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261119_v226';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261119_v226';
-import { buildLayout } from './mesh-layout.js?v=20261119_v226';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261119_v226';
-import { Voice } from '../voice.js?v=20261119_v226';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261119_v226';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261119_v226';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261119_v226';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261120_v227';
+import { api } from '../api.js?v=20261120_v227';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261120_v227';
+import { resolveMusicItem } from './selection-kinds.js?v=20261120_v227';
+import { MeshConnection } from '../realtime.js?v=20261120_v227';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261120_v227';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261120_v227';
+import { buildLayout } from './mesh-layout.js?v=20261120_v227';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261120_v227';
+import { Voice } from '../voice.js?v=20261120_v227';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261120_v227';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261120_v227';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261120_v227';
 
 let ctx = null;
 
@@ -459,8 +459,15 @@ async function loadMedia(media) {
     }
     if ((!isTimeKeeper() || !ctx.sync?.didInitialSync) && !state.mesh?.curated && !media?.live) {
       const liveExp = expectedPosition(state.mesh?.media || media);
-      if (liveExp >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - liveExp) > 1.5) {
+      const vEl = ctx.host.adapter.video;
+      const nowP = performance.now();
+      if (liveExp >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - liveExp) > 2.4 && (!vEl || (!vEl.seeking && vEl.readyState >= 1)) && (!ctx.sync || nowP >= (ctx.sync.seekUntil || 0))) {
         ctx.host.adapter.seek?.(liveExp);
+        if (ctx.sync) {
+          ctx.sync.lastSeekTarget = liveExp;
+          ctx.sync.lastSeekWallAt = nowP;
+          ctx.sync.seekUntil = nowP + 4500;
+        }
       }
     }
     ctx.sync?.kick();
@@ -615,7 +622,7 @@ async function loadMedia(media) {
     }
   }
   if (ctx.sync) {
-    ctx.sync.seekUntil = performance.now() + (isTimeKeeper() ? 1800 : 2800);
+    ctx.sync.seekUntil = Math.max(ctx.sync.seekUntil || 0, performance.now() + (isTimeKeeper() ? 1800 : 2800));
     ctx.sync.deferStartedAt = 0;
     ctx.sync.kick(false);
   }
@@ -625,6 +632,11 @@ async function loadMedia(media) {
 function onMessage(data) {
   const room = state.mesh;
   switch (data.type) {
+    case 'client_id_sync':
+      if (data.clientId && data.clientId !== state.clientId) {
+        set({ clientId: data.clientId });
+      }
+      break;
     case 'init': {
       if (ctx?.initFallbackTimer) {
         clearTimeout(ctx.initFallbackTimer);
@@ -733,11 +745,13 @@ function onMessage(data) {
             ctx.sync.seekUntil = 0;
           }
         } else if (data.action === 'seek') {
-          const target = Number(mergedMedia.meshStatePosition || 0);
+          const target = isRoomMediaPlaying(mergedMedia)
+            ? expectedPosition(mergedMedia)
+            : Number(mergedMedia.meshStatePosition || 0);
           if (ctx?.sync) {
             ctx.sync.lastSeekTarget = target;
             ctx.sync.lastSeekWallAt = performance.now();
-            ctx.sync.seekUntil = performance.now() + 2600;
+            ctx.sync.seekUntil = performance.now() + 3200;
           }
           ctx?.host?.adapter?.seek?.(target);
         } else if (data.action === 'rate') {
@@ -786,7 +800,7 @@ function onMessage(data) {
         const chatList = (room.chat || []).map((m) => (m.id === data.msgId ? { ...m, reactions: data.reactions || {} } : m));
         set({ mesh: { ...room, chat: chatList } });
         ctx.layout.reactionsUpdated?.();
-        if (data.emoji && data.cid && data.cid !== state.clientId && !ctx?.voice?.deafened) {
+        if (data.added !== false && data.emoji && data.cid && data.cid !== state.clientId && !ctx?.voice?.deafened) {
           playEmojiSfx(data.emoji);
         }
       }
@@ -1494,7 +1508,7 @@ export async function enterMesh(app, params) {
     getAdapter: () => (host.loading ? null : host.adapter),
     isLeader: () => isTimeKeeper(),
     isSolo: () => !state.mesh?.curated && (state.mesh?.participants || []).length <= 1,
-    onLeaderSync: (t) => actions.heartbeat(t, true),
+    onLeaderSync: (t) => actions.heartbeat(t, false),
     onStatus: (s) => ctx?.layout.syncStatus(s),
   });
   ctx = { host, sync, actions, conn: null, layout: null, voice: null, isNew: params.new === '1' };
@@ -1616,7 +1630,8 @@ function onPlayerEvent(ev, arg) {
         const curTime = ctx.host?.adapter?.getTime?.() || 0;
         const vEl = ctx.host?.adapter?.video;
         const nowP = performance.now();
-        if (liveExp >= 0.8 && Math.abs(curTime - liveExp) > 2.4 && ctx.host?.adapter && (!vEl || (!vEl.seeking && vEl.readyState >= 1)) && (!ctx.sync || nowP >= (ctx.sync.seekUntil || 0))) {
+        const snapThreshold = (ev === 'play' && ctx.sync?.didInitialSync) ? 4.2 : 2.4;
+        if (liveExp >= 0.8 && Math.abs(curTime - liveExp) > snapThreshold && ctx.host?.adapter && (!vEl || (!vEl.seeking && vEl.readyState >= 1)) && (!ctx.sync || nowP >= (ctx.sync.seekUntil || 0))) {
           ctx.host.adapter.seek?.(liveExp);
           if (ctx.sync) {
             ctx.sync.lastSeekTarget = liveExp;

@@ -1,12 +1,12 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261119_v226';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession, preloadFirebaseAuth } from './profile.js?v=20261119_v226';
-import { renderHome, destroyHome } from './views/home.js?v=20261119_v226';
-import { api, getEdgeToken, humanApiError } from './api.js?v=20261119_v226';
-import { h, toast } from './ui.js?v=20261119_v226';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261120_v227';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession, preloadFirebaseAuth } from './profile.js?v=20261120_v227';
+import { renderHome, destroyHome } from './views/home.js?v=20261120_v227';
+import { api, getEdgeToken, humanApiError } from './api.js?v=20261120_v227';
+import { h, toast } from './ui.js?v=20261120_v227';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261119_v226'; } catch (_) { return '20261119_v226'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261120_v227'; } catch (_) { return '20261120_v227'; }
 })();
 
 let _meshMod = null;
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261119_v226')
+    _meshModPromise = import('./views/mesh.js?v=20261120_v227')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -350,7 +350,9 @@ async function boot() {
       }
     }
   }
-  const isRedirectPending = Boolean(localStorage.getItem('watchlivo_auth_pending_redirect'));
+  let pendingTs = 0;
+  try { pendingTs = Number(localStorage.getItem('watchlivo_auth_pending_redirect') || 0); } catch (_) {}
+  const isRedirectPending = Number.isFinite(pendingTs) && pendingTs > 0 && (Date.now() - pendingTs < 5 * 60 * 1000);
   if (isRedirectPending) {
     toast('Google hesabınız doğrulanıyor, lütfen bekleyin...', 8000);
   }
@@ -459,7 +461,7 @@ async function boot() {
     if (redirectProf) start(redirectProf);
   }).catch(() => {});
   if (!initialProfile || initialProfile.isGuest) {
-    setTimeout(() => preloadFirebaseAuth(), 600);
+    setTimeout(() => preloadFirebaseAuth(), 150);
   }
   initPresenceLifecycle();
   initRaveNotifications();
@@ -537,6 +539,13 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
+    const hadSwController = Boolean(navigator.serviceWorker.controller);
+    let swReloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadSwController || swReloading || /^#?\/mesh\//i.test(location.hash || '')) return;
+      swReloading = true;
+      window.location.reload();
+    });
     navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(MODULE_VER)}`, { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});

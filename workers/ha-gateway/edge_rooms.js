@@ -987,11 +987,12 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       const baseName = String(uname || "").split("#")[0].trim();
       const prevArr = Array.isArray(targetMsg.reactions[emo]) ? [...targetMsg.reactions[emo]] : [];
       const existingIdx = prevArr.findIndex((u) => u === reactTag || u === cid || (!String(u).includes("#") && baseName && u === baseName));
+      let addedReact = false;
       if (existingIdx >= 0) prevArr.splice(existingIdx, 1);
-      else prevArr.push(reactTag);
+      else { prevArr.push(reactTag); addedReact = true; }
       if (prevArr.length) targetMsg.reactions[emo] = prevArr;
       else delete targetMsg.reactions[emo];
-      pushEv({ type: "msg_reacted", msgId: mid, emoji: emo, reactions: targetMsg.reactions });
+      pushEv({ type: "msg_reacted", msgId: mid, emoji: emo, added: addedReact, reactions: targetMsg.reactions });
     }
   } else if (act === "poll_create") {
     const question = String(body.question || "").trim().slice(0, 140);
@@ -1247,7 +1248,8 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     pushEv({ type: "chat_cleared" });
   } else if (act === "reaction" || act === "typing" || act === "soundfx") {
     const actId = String(body.actionId || "").trim().slice(0, 64);
-    pushEv({ ...(actId ? { id: actId } : {}), type: act, emoji: String(body.emoji || "❤️").slice(0, 16), typing: Boolean(body.typing), sfx: body.sfx });
+    const validSfx = ["clap", "laugh", "suspense", "fanfare"].includes(String(body.sfx || "")) ? String(body.sfx) : "fanfare";
+    pushEv({ ...(actId ? { id: actId } : {}), type: act, emoji: String(body.emoji || "❤️").slice(0, 16), typing: Boolean(body.typing), ...(act === "soundfx" ? { sfx: validSfx } : {}) });
   } else if (["webrtc_offer", "webrtc_answer", "webrtc_ice"].includes(act) && body.targetId) {
     const sig = {
       id: String(body.signalId || `sg_${Date.now()}_${makeHexNonce(3)}`).slice(0, 64),

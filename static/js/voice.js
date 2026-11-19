@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261119_v226';
-import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261119_v226';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261119_v226';
+import { toast } from './ui.js?v=20261120_v227';
+import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext, ensureIosPlaybackAudioSession } from './players/audio-gain.js?v=20261120_v227';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261120_v227';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -67,10 +67,10 @@ export class Voice {
           st.audio.play().catch(() => {});
         }
       }
-      if (this.audioCtx && this.audioCtx.state === 'suspended') {
+      if (this.audioCtx && (this.audioCtx.state === 'suspended' || this.audioCtx.state === 'interrupted')) {
         this.audioCtx.resume().catch(() => {});
       }
-      if (this.relayPlayCtx && this.relayPlayCtx.state === 'suspended') {
+      if (this.relayPlayCtx && (this.relayPlayCtx.state === 'suspended' || this.relayPlayCtx.state === 'interrupted')) {
         this.relayPlayCtx.resume().catch(() => {});
       }
     };
@@ -275,9 +275,13 @@ export class Voice {
   }
 
   _updateDuckState() {
-    const peerSpeaking = (this.participants || []).some((p) => p.speaking && p.id !== this.getSelfId());
+    const peerSpeakingIds = (this.participants || []).filter((p) => p && p.speaking && p.id !== this.getSelfId()).map((p) => p.id).sort().join(',');
+    const peerSpeaking = Boolean(peerSpeakingIds);
     const activeVoice = Boolean((this.inCall || this.micOn || this.camOn || this.screenOn) && !this.deafened);
     const anySpeaking = Boolean(activeVoice && (this.selfSpeaking || peerSpeaking));
+    const duckSig = `${anySpeaking ? 1 : 0}|${this.selfSpeaking ? 1 : 0}|${peerSpeakingIds}`;
+    if (this._lastDuckSig === duckSig) return;
+    this._lastDuckSig = duckSig;
     if (typeof window !== 'undefined') {
       window.__kinoxVoiceDuckFactor = anySpeaking ? 0.32 : 1.0;
       window.__kinoxSyncDuckVolume?.();
@@ -1459,6 +1463,8 @@ export class Voice {
     this._mutedByDeafen = false;
     if (typeof window !== 'undefined') window.__vortexVoiceDeafened = false;
     this.selfSpeaking = false;
+    this._lastDuckSig = '';
+    ensureIosPlaybackAudioSession();
     this._removeVideoBubble('self');
     this._removeVideoBubble('self-screen');
     if (typeof window !== 'undefined') {

@@ -180,7 +180,7 @@ async function getBootstrap(env) {
     } catch {}
   }
   _curatedMap = new Map(DEFAULT_CURATED_LIVE_ROOMS.map((rm) => [rm.id, rm]));
-  return { version: "20261119_v226", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
+  return { version: "20261120_v227", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
 }
 
 function makeNonce() {
@@ -1810,6 +1810,30 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const rv = env?.ASSETS ? await env.ASSETS.fetch(new Request("https://assets.local/ios_version.json")) : null;
     if (rv?.ok) return edgeJson(await rv.json());
   }
+  if (safePath === "/desktop-auth.html" || safePath === "/static/desktop-auth.html") {
+    if (env?.ASSETS) {
+      const ar = await env.ASSETS.fetch(new Request("https://assets.local/static/desktop-auth.html"));
+      if (ar.ok) {
+        const nonce = makeNonce();
+        const rawHtml = await ar.text();
+        const html = rawHtml.replace(/<script(?![^>]*\bsrc=)/gi, `<script nonce="${nonce}"`);
+        return new Response(request.method === "HEAD" ? null : html, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Content-Security-Policy": buildAppCsp(nonce),
+            "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "SAMEORIGIN",
+            "X-Watchlivo-Origin": "cf-autonomous-edge",
+          },
+        });
+      }
+    }
+  }
   if (
     safePath.startsWith("/static/") ||
     safePath === "/manifest.json" ||
@@ -2736,7 +2760,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
         const fbData = await fbResp.json().catch(() => ({}));
         const u0 = Array.isArray(fbData?.users) ? fbData.users[0] : null;
         if (u0) {
-          if (u0.email && u0.emailVerified === true) {
+          const hasGoogleProv = Array.isArray(u0.providerUserInfo) && u0.providerUserInfo.some((p) => p?.providerId === "google.com" && p?.email);
+          if (u0.email && (u0.emailVerified === true || hasGoogleProv)) {
             fbEmail = String(u0.email).trim().toLowerCase();
           }
           fbName = String(u0.displayName || "").trim().slice(0, 40);

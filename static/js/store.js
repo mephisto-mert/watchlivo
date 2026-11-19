@@ -1,5 +1,5 @@
 // Minimal reactive store (mirrors Rave's redux slices: self, view, mesh, selection, uiPrefs/theme schemas).
-import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261119_v226';
+import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261120_v227';
 const _STORE_SINGLETON = (typeof window !== 'undefined' && window.__wlStoreSingleton) || null;
 const listeners = _STORE_SINGLETON ? _STORE_SINGLETON.listeners : new Set();
 const UI_PREFS_KEY = 'vortex_ui_prefs_v1';

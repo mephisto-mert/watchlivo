@@ -12,7 +12,10 @@ export function isIosWebKit() {
 }
 
 export function ensureIosPlaybackAudioSession() {
-  if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS) return;
+  if (typeof window !== 'undefined') {
+    if (window.isWatchlivoNativeIOS) return;
+    if (window.__kinoxVoice?.inCall || window.__kinoxVoice?.micOn || window.__wlVoiceRecActive) return;
+  }
   if (typeof navigator === 'undefined' || !navigator.audioSession) return;
   try {
     if (navigator.audioSession.type !== 'playback') {

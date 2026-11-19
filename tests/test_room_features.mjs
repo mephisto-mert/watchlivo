@@ -762,19 +762,134 @@ test("v226: chat playEmojiSfx and playRoomSfx wait for suspended AudioContext.re
       removeEventListener() {},
     };
     const { playEmojiSfx, playRoomSfx } = await import(`../static/js/views/chat.js?t=${Date.now()}`);
-    for (const em of ["❤️", "😂", "😮", "😢", "🔥", "👏", "🍿", "☕", "👍"]) {
+    // Burst coalescing check: 5 simultaneous calls while suspended coalesce cleanly (no audio blast)
+    for (let i = 0; i < 5; i += 1) playEmojiSfx("❤️");
+    await new Promise((r) => setTimeout(r, 45));
+    const afterBurstCount = startedWhileRunning.length;
+    assert.equal(startedWhileSuspended.length, 0, "NO audio nodes may be scheduled while AudioContext is suspended");
+    assert.ok(afterBurstCount > 0 && afterBurstCount <= 8, `burst must coalesce instead of blasting (got ${afterBurstCount} nodes)`);
+
+    // Normal spaced calls: all distinct emojis + bare heart + soundboard play cleanly
+    for (const em of ["❤", "😂", "😮", "😢", "🔥", "👏", "🍿", "☕", "👍"]) {
+      await new Promise((r) => setTimeout(r, 45));
       playEmojiSfx(em);
     }
+    await new Promise((r) => setTimeout(r, 45));
     playRoomSfx("suspense");
+    await new Promise((r) => setTimeout(r, 45));
     playRoomSfx("fanfare");
     await new Promise((r) => setTimeout(r, 30));
 
     assert.ok(resumeCalled >= 1, "suspended AudioContext must call resume()");
     assert.equal(startedWhileSuspended.length, 0, "NO audio nodes may be scheduled while AudioContext is suspended");
-    assert.ok(startedWhileRunning.length >= 20, `expected all emoji/soundboard nodes scheduled after resume, got ${startedWhileRunning.length}`);
-    assert.ok(startedWhileRunning.every((t) => t >= 0.25), "scheduled times must use post-resume ac.currentTime");
+    assert.ok(startedWhileRunning.length >= 25, `expected all emoji/soundboard nodes scheduled after resume, got ${startedWhileRunning.length}`);
+    assert.ok(startedWhileRunning.every((t) => t === 0 || t >= 0.25), "scheduled times must use post-resume ac.currentTime (or 1-sample silent primer)");
   } finally {
     if (prevWin === undefined) delete globalThis.window;
     else globalThis.window = prevWin;
+  }
+});
+
+test("v227: SyncEngine didInitialSync finite-attempt cap, edge_rooms msg_reacted added flag, and iOS audioSession call guard", async () => {
+  // 1. edge_rooms.js msg_react includes added=true on add and added=false on remove
+  const env = makeMemEnv();
+  const cRes = await handleEdgeRoomCreate(
+    new Request("https://watchlivo.online/api/rooms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "v227 React Test", username: "Host", clientId: "h_r227" }),
+    }),
+    env,
+    jsonResp
+  );
+  const created = await cRes.json();
+  const roomId = created.room.id;
+  const hostCid = created.clientId;
+  const hostTok = created.clientToken;
+  const chatRes = await syncPost(env, roomId, { type: "chat", clientId: hostCid, clientToken: hostTok, text: "Test msg" });
+  const msgId = chatRes.data.room.chat.at(-1).id;
+  const addRes = await syncPost(env, roomId, { type: "msg_react", clientId: hostCid, clientToken: hostTok, msgId, emoji: "🔥" });
+  const addEv = addRes.data.room.events.filter((e) => e.type === "msg_reacted").at(-1);
+  assert.equal(addEv?.added, true, "adding reaction must emit added=true");
+  const remRes = await syncPost(env, roomId, { type: "msg_react", clientId: hostCid, clientToken: hostTok, msgId, emoji: "🔥" });
+  const remEv = remRes.data.room.events.filter((e) => e.type === "msg_reacted").at(-1);
+  assert.equal(remEv?.added, false, "removing reaction must emit added=false");
+
+  // 2. SyncEngine does NOT loop forever in !didInitialSync on coarse-GOP HLS (3.0s keyframe snap)
+  const { SyncEngine, clock } = await import("../static/js/sync.js");
+  clock.offset = 0;
+  clock.samples = 10;
+  clock.bestRtt = 0.05;
+  let seeks = 0;
+  let curTime = 50.0;
+  const fakeAd = {
+    caps: { seek: true, rate: true, live: false },
+    video: { readyState: 4, seeking: false, ended: false },
+    getTime: () => curTime,
+    getDuration: () => 5000,
+    getBuffered: () => curTime + 30,
+    isBuffered: () => true,
+    isPaused: () => false,
+    isBuffering: () => false,
+    isEnded: () => false,
+    // Simulate coarse 6s HLS keyframe: seeking to 100 lands at 97.0 (3.0s behind expected, < JUMP_DELTA=4.2s)
+    seek: (t) => { seeks += 1; curTime = Math.max(0, t - 3.0); },
+    getRate: () => 1.0,
+    setRate: () => {},
+    play: () => {},
+    pause: () => {},
+  };
+  const media = {
+    provider: "hls",
+    url: "https://cdn.example/coarse-gop.m3u8",
+    meshStateStatus: "PLAYING",
+    meshStatePosition: 100.0,
+    meshStateTime: Date.now() / 1000,
+    meshStatePlaybackSpeed: 1,
+    duration: 5000,
+  };
+  const eng = new SyncEngine({
+    getMedia: () => media,
+    getAdapter: () => fakeAd,
+    isLeader: () => false,
+    isSolo: () => false,
+  });
+  eng.enabled = true;
+  eng.mediaIdSig = "hls||https://cdn.example/coarse-gop.m3u8|1|1";
+  eng.lastStatus = "PLAYING";
+  eng.lastExpected = 100.0;
+  eng.loadedAt = performance.now();
+  eng.seekUntil = 0;
+
+  for (let i = 0; i < 6; i += 1) {
+    media.meshStatePosition = 100.0 + i * 5;
+    media.meshStateTime = Date.now() / 1000;
+    if (i > 0) curTime += 5;
+    eng.seekUntil = 0;
+    eng.lastStepAt = performance.now() - 1000;
+    eng.lastExpected = media.meshStatePosition;
+    eng.step();
+  }
+  assert.equal(seeks, 1, "coarse-GOP 3.0s keyframe snap must NOT cause infinite initial-sync re-seek loop");
+  assert.equal(eng.didInitialSync, true, "didInitialSync must settle true after first snap within JUMP_DELTA");
+
+  // 3. ensureIosPlaybackAudioSession MUST NOT clobber play-and-record while voice call is active
+  const prevWin = globalThis.window;
+  const origAudioSessionDesc = Object.getOwnPropertyDescriptor(globalThis.navigator, "audioSession");
+  try {
+    const fakeSession = { type: "play-and-record" };
+    Object.defineProperty(globalThis.navigator, "audioSession", { configurable: true, value: fakeSession });
+    globalThis.window = { __kinoxVoice: { inCall: true, micOn: true } };
+    const { ensureIosPlaybackAudioSession } = await import(`../static/js/players/audio-gain.js?t=${Date.now()}`);
+    ensureIosPlaybackAudioSession();
+    assert.equal(fakeSession.type, "play-and-record", "active voice call must NOT be overwritten to playback");
+    globalThis.window.__kinoxVoice = { inCall: false, micOn: false };
+    ensureIosPlaybackAudioSession();
+    assert.equal(fakeSession.type, "playback", "leaving voice call must allow returning to playback");
+  } finally {
+    if (prevWin === undefined) delete globalThis.window;
+    else globalThis.window = prevWin;
+    if (origAudioSessionDesc) Object.defineProperty(globalThis.navigator, "audioSession", origAudioSessionDesc);
+    else delete globalThis.navigator.audioSession;
   }
 });
