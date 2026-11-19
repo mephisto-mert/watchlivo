@@ -175,7 +175,7 @@ async function getBootstrap(env) {
     } catch {}
   }
   _curatedMap = new Map(DEFAULT_CURATED_LIVE_ROOMS.map((rm) => [rm.id, rm]));
-  return { version: "20261119_v221", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
+  return { version: "20261119_v222", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
 }
 
 function makeNonce() {
@@ -2823,28 +2823,63 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const { user } = await resolveMemberUser(request, env);
     if (!user) return edgeJson({ ok: false, authenticated: false, error: "Oturum gerekli." }, 401);
     const kvKey = `ulist:${user.id}:${safePath.split("/").pop()}`;
+    const readList = async () => {
+      if (!env?.WATCHLIVO_KV) return [];
+      const raw = await env.WATCHLIVO_KV.get(kvKey, "json").catch(() => null);
+      if (Array.isArray(raw)) return raw;
+      if (raw && Array.isArray(raw.items)) return raw.items;
+      return [];
+    };
+    const writeListSafe = async (arr) => {
+      if (!env?.WATCHLIVO_KV) return true;
+      const serialized = JSON.stringify(arr);
+      try {
+        await env.WATCHLIVO_KV.put(kvKey, serialized);
+        return true;
+      } catch {
+        await new Promise((r) => setTimeout(r, 260));
+        try {
+          await env.WATCHLIVO_KV.put(kvKey, serialized);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+    };
     if (request.method === "GET") {
-      const items = (env?.WATCHLIVO_KV ? await env.WATCHLIVO_KV.get(kvKey, "json") : null) || [];
+      const items = await readList();
       return edgeJson({ ok: true, authenticated: true, uid: user.id, items });
     }
     const body = await request.json().catch(() => ({}));
     if (body.action === "clear") {
-      if (env?.WATCHLIVO_KV) await env.WATCHLIVO_KV.put(kvKey, "[]");
-      return edgeJson({ ok: true, authenticated: true, uid: user.id, items: [] });
+      const saved = await writeListSafe([]);
+      return edgeJson({ ok: true, authenticated: true, uid: user.id, items: [], ...(saved ? {} : { kvBusy: true }) });
     }
-    const cur = (env?.WATCHLIVO_KV ? await env.WATCHLIVO_KV.get(kvKey, "json") : null) || [];
-    const item = body.item || body;
-    const itemKey = String(item.key || item.videoId || item.tmdbId || Date.now());
-    const prev = cur.find((x) => String(x.key || x.videoId || x.tmdbId) === itemKey);
-    const mergedEp = (prev?.epProgress || item?.epProgress)
-      ? { ...(prev?.epProgress || {}), ...(item?.epProgress || {}) }
-      : undefined;
-    const nextItem = { ...prev, ...item, key: itemKey, ...(mergedEp ? { epProgress: mergedEp } : {}) };
-    const next = body.action === "remove"
-      ? cur.filter((x) => String(x.key || x.videoId || x.tmdbId) !== itemKey)
-      : [nextItem, ...cur.filter((x) => String(x.key || x.videoId || x.tmdbId) !== itemKey)].slice(0, 100);
-    if (env?.WATCHLIVO_KV) await env.WATCHLIVO_KV.put(kvKey, JSON.stringify(next));
-    return edgeJson({ ok: true, authenticated: true, uid: user.id, items: next });
+    const cur = await readList();
+    const mergeEntry = (list, rawItem) => {
+      if (!rawItem || typeof rawItem !== "object") return list;
+      const itemKey = String(rawItem.key || rawItem.videoId || rawItem.tmdbId || Date.now());
+      const prev = list.find((x) => x && String(x.key || x.videoId || x.tmdbId) === itemKey);
+      const mergedEp = (prev?.epProgress || rawItem?.epProgress)
+        ? { ...(prev?.epProgress || {}), ...(rawItem?.epProgress || {}) }
+        : undefined;
+      const nextItem = { ...prev, ...rawItem, key: itemKey, ...(mergedEp ? { epProgress: mergedEp } : {}) };
+      return [nextItem, ...list.filter((x) => x && String(x.key || x.videoId || x.tmdbId) !== itemKey)].slice(0, 100);
+    };
+    let next = cur;
+    if (body.action === "bulk_upsert" && Array.isArray(body.items)) {
+      for (const rawIt of body.items.slice(0, 30).reverse()) {
+        next = mergeEntry(next, rawIt);
+      }
+    } else if (body.action === "remove") {
+      const item = body.item || body;
+      const itemKey = String(item.key || item.videoId || item.tmdbId || "");
+      next = cur.filter((x) => x && String(x.key || x.videoId || x.tmdbId) !== itemKey);
+    } else {
+      next = mergeEntry(cur, body.item || body);
+    }
+    const saved = await writeListSafe(next);
+    return edgeJson({ ok: true, authenticated: true, uid: user.id, items: next, ...(saved ? {} : { kvBusy: true }) });
   }
   if (safePath === "/api/user/yt-preferences") {
     const { user } = await resolveMemberUser(request, env);

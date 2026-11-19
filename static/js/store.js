@@ -1,5 +1,5 @@
 // Minimal reactive store (mirrors Rave's redux slices: self, view, mesh, selection, uiPrefs/theme schemas).
-import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261119_v221';
+import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261119_v222';
 const _STORE_SINGLETON = (typeof window !== 'undefined' && window.__wlStoreSingleton) || null;
 const listeners = _STORE_SINGLETON ? _STORE_SINGLETON.listeners : new Set();
 const UI_PREFS_KEY = 'vortex_ui_prefs_v1';
@@ -520,41 +520,41 @@ export async function syncCloudUserMedia(force = false) {
           historyChanged = true;
         }
       }
-      for (const item of toPush.slice(0, 20)) {
+      if (toPush.length) {
+        const batchItems = toPush.slice(0, 20).map((item) => ({
+          key: item.key,
+          tmdbId: String(item.tmdbId || ''),
+          imdbId: String(item.imdbId || ''),
+          mediaType: item.mediaType === 'tv' ? 'tv' : 'movie',
+          provider: item.catalogProvider || item.provider || 'cinema',
+          catalogProvider: item.catalogProvider || item.provider || 'cinema',
+          streamType: item.streamType || '',
+          videoId: String(item.videoId || ''),
+          title: item.title || 'Video',
+          originalTitle: item.originalTitle || '',
+          seriesTitle: item.seriesTitle || '',
+          channel: String(item.channel || ''),
+          channelId: String(item.channelId || ''),
+          channelAvatar: String(item.channelAvatar || ''),
+          thumbnail: item.thumbnail || item.poster || '',
+          poster: item.poster || item.thumbnail || '',
+          backdrop: item.backdrop || '',
+          year: String(item.year || ''),
+          season: Number(item.season || 1),
+          episode: Number(item.episode || 1),
+          position: Math.max(0, Math.floor(Number(item.currentTime ?? item.position ?? 0))),
+          currentTime: Math.max(0, Math.floor(Number(item.currentTime ?? item.position ?? 0))),
+          duration: Math.max(0, Math.floor(Number(item.duration || 0))),
+          percent: Number(item.percent || 0),
+          completed: Boolean(item.completed),
+          epProgress: item.epProgress || {},
+          url: item.url || '',
+          sourceUrl: item.officialUrl || item.url || '',
+        }));
         fetch('/api/user/progress', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ..._authHdrs() },
-          body: JSON.stringify({
-            action: 'upsert',
-            key: item.key,
-            tmdbId: String(item.tmdbId || ''),
-            imdbId: String(item.imdbId || ''),
-            mediaType: item.mediaType === 'tv' ? 'tv' : 'movie',
-            provider: item.catalogProvider || item.provider || 'cinema',
-            catalogProvider: item.catalogProvider || item.provider || 'cinema',
-            streamType: item.streamType || '',
-            videoId: String(item.videoId || ''),
-            title: item.title || 'Video',
-            originalTitle: item.originalTitle || '',
-            seriesTitle: item.seriesTitle || '',
-            channel: String(item.channel || ''),
-            channelId: String(item.channelId || ''),
-            channelAvatar: String(item.channelAvatar || ''),
-            thumbnail: item.thumbnail || item.poster || '',
-            poster: item.poster || item.thumbnail || '',
-            backdrop: item.backdrop || '',
-            year: String(item.year || ''),
-            season: Number(item.season || 1),
-            episode: Number(item.episode || 1),
-            position: Math.max(0, Math.floor(Number(item.currentTime ?? item.position ?? 0))),
-            currentTime: Math.max(0, Math.floor(Number(item.currentTime ?? item.position ?? 0))),
-            duration: Math.max(0, Math.floor(Number(item.duration || 0))),
-            percent: Number(item.percent || 0),
-            completed: Boolean(item.completed),
-            epProgress: item.epProgress || {},
-            url: item.url || '',
-            sourceUrl: item.officialUrl || item.url || '',
-          }),
+          body: JSON.stringify({ action: 'bulk_upsert', items: batchItems }),
           keepalive: true,
         }).catch(() => {});
       }

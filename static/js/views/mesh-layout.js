@@ -1,13 +1,18 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261119_v221';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261119_v221';
-import { navIcon, logo } from './home.js?v=20261119_v221';
-import { createSelection } from './selection.js?v=20261119_v221';
-import { buildControls } from './controls.js?v=20261119_v221';
-import { buildChat } from './chat.js?v=20261119_v221';
-import { PANELS } from './panels.js?v=20261119_v221';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261119_v222';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261119_v222';
+import { navIcon, logo } from './home.js?v=20261119_v222';
+import { createSelection } from './selection.js?v=20261119_v222';
+import { buildControls } from './controls.js?v=20261119_v222';
+import { buildChat } from './chat.js?v=20261119_v222';
+import { PANELS } from './panels.js?v=20261119_v222';
 
-const PRIVACY_LABEL = { public: '🌐 Herkese Açık', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
+const PRIVACY_META = {
+  public: ['🌐', 'Herkese Açık'],
+  friends: ['👥', 'Sadece Arkadaşlar'],
+  private: ['🔒', 'Gizli Oda'],
+  hidden: ['🔒', 'Gizli Oda'],
+};
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
 
 export function buildLayout(app, ctx) {
@@ -158,12 +163,18 @@ export function buildLayout(app, ctx) {
               !m.curated && m.id ? h('span', { class: 'mesh-title-code', style: { opacity: '0.55', fontSize: '11px', marginLeft: '5px', fontWeight: '600' } }, `#${String(m.id).split('-').pop()}`) : null
             );
           })() : null,
-          m ? h('span', {
-            class: `privacy-chip is-${m.privacy || 'public'} ${L === 'Settings' ? 'selected' : ''}`.trim(),
-            'data-privacy': m.privacy || 'public',
-            title: 'Oda gizliliği ve oda ayarlarını aç',
-            onclick: () => openSide('left', 'Settings'),
-          }, `${PRIVACY_LABEL[m.privacy] || '🌐 Herkese Açık'} ▾`) : null,
+          m ? (() => {
+            const [pIco, pTxt] = PRIVACY_META[m.privacy] || PRIVACY_META.public;
+            return h('span', {
+              class: `privacy-chip is-${m.privacy || 'public'} ${L === 'Settings' ? 'selected' : ''}`.trim(),
+              'data-privacy': m.privacy || 'public',
+              title: `${pTxt} — Oda gizliliği ve oda ayarlarını aç`,
+              'aria-label': `${pTxt} — Oda ayarlarını aç`,
+              onclick: () => openSide('left', 'Settings'),
+            },
+              h('span', { class: 'priv-ico' }, pIco),
+              h('span', { class: 'priv-txt' }, ` ${pTxt} ▾`));
+          })() : null,
           (!m && state.connection !== 'online') || state.connection === 'denied'
             ? h('span', { class: 'privacy-chip conn-chip', style: { borderColor: '#f59e0b' } }, state.connection === 'denied' ? 'Erişim yok' : 'Bağlanıyor…')
             : null)),

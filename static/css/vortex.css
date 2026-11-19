@@ -8021,6 +8021,16 @@ body.in-room:not(.mesh-minimized) .floating-dock {
   }
 }
 @media (max-width: 520px) {
+  .wl-app-banner-icon,
+  .wl-app-banner-extra {
+    display: none !important;
+  }
+  .wl-app-banner-name {
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
   .home-search input::placeholder {
     font-size: 0.78rem !important;
   }

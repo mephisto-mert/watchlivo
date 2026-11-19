@@ -1,17 +1,17 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261119_v221';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261119_v222';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261119_v221';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261119_v221';
-import { api } from '../api.js?v=20261119_v221';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261119_v221';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v221';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261119_v221';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261119_v221';
+} from '../store.js?v=20261119_v222';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261119_v222';
+import { api } from '../api.js?v=20261119_v222';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261119_v222';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v222';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261119_v222';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261119_v222';
 
 let refreshTimer = null;
 let homeDrawTimer = null;
@@ -62,7 +62,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261119_v221', alt: 'Watchlivo', width: '28', height: '28' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261119_v222', alt: 'Watchlivo', width: '28', height: '28' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -297,7 +297,7 @@ export function renderHome(app) {
     h('div', { class: 'wl-app-banner-text' },
       h('div', { class: 'wl-app-banner-title' },
         h('span', { class: 'wl-app-banner-badge' }, 'NATIVE v2.0.2'),
-        h('b', {}, 'Watchlivo Android Uygulaması (Otomatik Güncellemeli)')),
+        h('b', { class: 'wl-app-banner-name' }, 'Watchlivo Android', h('span', { class: 'wl-app-banner-extra' }, ' Uygulaması (Otomatik Güncellemeli)'))),
       h('span', { class: 'wl-app-banner-sub' }, 'Gerçek donanım oynatıcı, otomatik PiP ve Rave.io tarzı otomatik güncellemeli yeni sürüm.')),
     h('div', { class: 'wl-app-banner-actions' },
       h('a', {

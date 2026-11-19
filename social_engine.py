@@ -2520,66 +2520,72 @@ async def user_progress_save(request: Request) -> JSONResponse:
         rm_key = _norm_prog_key(rm_raw)
         items = [it for it in items if str(it.get("key") or "") not in (rm_key, rm_raw[:120]) and str(it.get("tmdbId") or "") != rm_key]
     else:
-        mtype = "tv" if _clean(body.get("mediaType"), 12).lower() == "tv" else "movie"
-        tid = _clean(body.get("tmdbId") or body.get("id"), 40)
-        vid = _clean(body.get("videoId"), 32)
-        title = _clean(body.get("title"), 160)
-        if not title and not tid and not vid:
-            return JSONResponse({"ok": False, "error": "title or tmdbId required"}, status_code=400)
-        season = _safe_int(body.get("season"), 1, lo=1, hi=999) if mtype == "tv" else 0
-        episode = _safe_int(body.get("episode"), 1, lo=1, hi=9999) if mtype == "tv" else 0
-        raw_pos = body.get("position") if body.get("position") is not None else body.get("currentTime")
-        pos = _finite_float(raw_pos, 0.0, lo=0.0, hi=86400.0)
-        dur = _finite_float(body.get("duration"), 0.0, lo=0.0, hi=86400.0)
-        pct = min(100.0, round((pos / dur) * 100.0, 1)) if dur > 30.0 else _finite_float(body.get("percent"), 5.0, lo=0.0, hi=100.0)
-        is_completed = bool(body.get("completed")) or bool(dur > 180 and pct >= 95.0)
-        raw_ikey = str(body.get("key") or "").strip() or f"{mtype}:{tid or re.sub(r'[^a-z0-9]+', '-', title.lower())}"
-        ikey = _norm_prog_key(raw_ikey)
-        prev_entry = next((it for it in items if isinstance(it, dict) and str(it.get("key") or "") == ikey), None)
-        items = [it for it in items if str(it.get("key") or "") != ikey]
-        ep_map: Dict[str, Any] = dict((prev_entry or {}).get("epProgress") or {}) if mtype == "tv" else {}
-        if isinstance(body.get("epProgress"), dict) and mtype == "tv":
-            for ek, ev in list(body["epProgress"].items())[:120]:
-                if isinstance(ev, dict):
-                    ep_map[str(ek)[:16]] = {
-                        "pos": round(_finite_float(ev.get("pos") if ev.get("pos") is not None else ev.get("currentTime"), 0.0, lo=0.0, hi=86400.0), 1),
-                        "dur": round(_finite_float(ev.get("dur") if ev.get("dur") is not None else ev.get("duration"), 0.0, lo=0.0, hi=86400.0), 1),
-                        "pct": round(_finite_float(ev.get("pct") if ev.get("pct") is not None else ev.get("percent"), 0.0, lo=0.0, hi=100.0), 1),
-                    }
-        if mtype == "tv" and season > 0 and episode > 0:
-            ep_map[f"{season}:{episode}"] = {"pos": round(pos, 1), "dur": round(dur, 1), "pct": round(pct, 1)}
-        entry = {
-            "key": ikey,
-            "tmdbId": tid,
-            "videoId": vid or _clean((prev_entry or {}).get("videoId"), 32),
-            "imdbId": _clean(body.get("imdbId") or (prev_entry or {}).get("imdbId"), 32),
-            "mediaType": mtype,
-            "provider": _clean(body.get("provider") or (prev_entry or {}).get("provider") or "cinema", 32),
-            "catalogProvider": _clean(body.get("catalogProvider") or body.get("provider") or (prev_entry or {}).get("catalogProvider") or "cinema", 32),
-            "streamType": _clean(body.get("streamType") or (prev_entry or {}).get("streamType"), 24),
-            "title": title or "Sinema",
-            "originalTitle": _clean(body.get("originalTitle") or (prev_entry or {}).get("originalTitle"), 160),
-            "seriesTitle": _clean(body.get("seriesTitle") or (prev_entry or {}).get("seriesTitle"), 160),
-            "channel": _clean(body.get("channel") or (prev_entry or {}).get("channel"), 120),
-            "channelId": _clean(body.get("channelId") or (prev_entry or {}).get("channelId"), 48),
-            "channelAvatar": _clean(body.get("channelAvatar") or (prev_entry or {}).get("channelAvatar"), 800),
-            "thumbnail": _clean(body.get("thumbnail") or body.get("poster") or (prev_entry or {}).get("thumbnail") or (prev_entry or {}).get("poster"), 800),
-            "poster": _clean(body.get("poster") or body.get("thumbnail") or (prev_entry or {}).get("poster"), 800),
-            "backdrop": _clean(body.get("backdrop") or (prev_entry or {}).get("backdrop"), 800),
-            "year": _clean(body.get("year") or (prev_entry or {}).get("year"), 10),
-            "season": season,
-            "episode": episode,
-            "position": round(pos, 1),
-            "currentTime": round(pos, 1),
-            "duration": round(dur, 1),
-            "percent": pct,
-            "completed": is_completed,
-            "url": _clean(body.get("url") or (prev_entry or {}).get("url"), 800),
-            "sourceUrl": _clean(body.get("sourceUrl") or (prev_entry or {}).get("sourceUrl"), 600),
-            "epProgress": ep_map if mtype == "tv" else {},
-            "updatedAt": _now(),
-        }
-        items.insert(0, entry)
+        raw_batch = body.get("items") if (action == "bulk_upsert" and isinstance(body.get("items"), list)) else [body]
+        for raw_rec in reversed(raw_batch[:30]):
+            if not isinstance(raw_rec, dict):
+                continue
+            mtype = "tv" if _clean(raw_rec.get("mediaType"), 12).lower() == "tv" else "movie"
+            tid = _clean(raw_rec.get("tmdbId") or raw_rec.get("id"), 40)
+            vid = _clean(raw_rec.get("videoId"), 32)
+            title = _clean(raw_rec.get("title"), 160)
+            if not title and not tid and not vid:
+                if action != "bulk_upsert":
+                    return JSONResponse({"ok": False, "error": "title or tmdbId required"}, status_code=400)
+                continue
+            season = _safe_int(raw_rec.get("season"), 1, lo=1, hi=999) if mtype == "tv" else 0
+            episode = _safe_int(raw_rec.get("episode"), 1, lo=1, hi=9999) if mtype == "tv" else 0
+            raw_pos = raw_rec.get("position") if raw_rec.get("position") is not None else raw_rec.get("currentTime")
+            pos = _finite_float(raw_pos, 0.0, lo=0.0, hi=86400.0)
+            dur = _finite_float(raw_rec.get("duration"), 0.0, lo=0.0, hi=86400.0)
+            pct = min(100.0, round((pos / dur) * 100.0, 1)) if dur > 30.0 else _finite_float(raw_rec.get("percent"), 5.0, lo=0.0, hi=100.0)
+            is_completed = bool(raw_rec.get("completed")) or bool(dur > 180 and pct >= 95.0)
+            raw_ikey = str(raw_rec.get("key") or "").strip() or f"{mtype}:{tid or re.sub(r'[^a-z0-9]+', '-', title.lower())}"
+            ikey = _norm_prog_key(raw_ikey)
+            prev_entry = next((it for it in items if isinstance(it, dict) and str(it.get("key") or "") == ikey), None)
+            items = [it for it in items if str(it.get("key") or "") != ikey]
+            ep_map: Dict[str, Any] = dict((prev_entry or {}).get("epProgress") or {}) if mtype == "tv" else {}
+            if isinstance(raw_rec.get("epProgress"), dict) and mtype == "tv":
+                for ek, ev in list(raw_rec["epProgress"].items())[:120]:
+                    if isinstance(ev, dict):
+                        ep_map[str(ek)[:16]] = {
+                            "pos": round(_finite_float(ev.get("pos") if ev.get("pos") is not None else ev.get("currentTime"), 0.0, lo=0.0, hi=86400.0), 1),
+                            "dur": round(_finite_float(ev.get("dur") if ev.get("dur") is not None else ev.get("duration"), 0.0, lo=0.0, hi=86400.0), 1),
+                            "pct": round(_finite_float(ev.get("pct") if ev.get("pct") is not None else ev.get("percent"), 0.0, lo=0.0, hi=100.0), 1),
+                        }
+            if mtype == "tv" and season > 0 and episode > 0:
+                ep_map[f"{season}:{episode}"] = {"pos": round(pos, 1), "dur": round(dur, 1), "pct": round(pct, 1)}
+            entry = {
+                "key": ikey,
+                "tmdbId": tid,
+                "videoId": vid or _clean((prev_entry or {}).get("videoId"), 32),
+                "imdbId": _clean(raw_rec.get("imdbId") or (prev_entry or {}).get("imdbId"), 32),
+                "mediaType": mtype,
+                "provider": _clean(raw_rec.get("provider") or (prev_entry or {}).get("provider") or "cinema", 32),
+                "catalogProvider": _clean(raw_rec.get("catalogProvider") or raw_rec.get("provider") or (prev_entry or {}).get("catalogProvider") or "cinema", 32),
+                "streamType": _clean(raw_rec.get("streamType") or (prev_entry or {}).get("streamType"), 24),
+                "title": title or "Sinema",
+                "originalTitle": _clean(raw_rec.get("originalTitle") or (prev_entry or {}).get("originalTitle"), 160),
+                "seriesTitle": _clean(raw_rec.get("seriesTitle") or (prev_entry or {}).get("seriesTitle"), 160),
+                "channel": _clean(raw_rec.get("channel") or (prev_entry or {}).get("channel"), 120),
+                "channelId": _clean(raw_rec.get("channelId") or (prev_entry or {}).get("channelId"), 48),
+                "channelAvatar": _clean(raw_rec.get("channelAvatar") or (prev_entry or {}).get("channelAvatar"), 800),
+                "thumbnail": _clean(raw_rec.get("thumbnail") or raw_rec.get("poster") or (prev_entry or {}).get("thumbnail") or (prev_entry or {}).get("poster"), 800),
+                "poster": _clean(raw_rec.get("poster") or raw_rec.get("thumbnail") or (prev_entry or {}).get("poster"), 800),
+                "backdrop": _clean(raw_rec.get("backdrop") or (prev_entry or {}).get("backdrop"), 800),
+                "year": _clean(raw_rec.get("year") or (prev_entry or {}).get("year"), 10),
+                "season": season,
+                "episode": episode,
+                "position": round(pos, 1),
+                "currentTime": round(pos, 1),
+                "duration": round(dur, 1),
+                "percent": pct,
+                "completed": is_completed,
+                "url": _clean(raw_rec.get("url") or (prev_entry or {}).get("url"), 800),
+                "sourceUrl": _clean(raw_rec.get("sourceUrl") or (prev_entry or {}).get("sourceUrl"), 600),
+                "epProgress": ep_map if mtype == "tv" else {},
+                "updatedAt": _now(),
+            }
+            items.insert(0, entry)
         items = items[:50]
     _USER_PROGRESS[ukey] = items
     _kv_set(f"wl:user:prog:{ukey}", items, ttl_sec=2592000)
