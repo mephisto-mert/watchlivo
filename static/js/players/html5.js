@@ -1,10 +1,10 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261119_v225';
-import { api } from '../api.js?v=20261119_v225';
-import { expectedPosition } from '../sync.js?v=20261119_v225';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261119_v225';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261119_v225';
-import { ensureHlsJs } from './hls-loader.js?v=20261119_v225';
+import { SubtitleDubController } from './subtitles.js?v=20261119_v226';
+import { api } from '../api.js?v=20261119_v226';
+import { expectedPosition } from '../sync.js?v=20261119_v226';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261119_v226';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261119_v226';
+import { ensureHlsJs } from './hls-loader.js?v=20261119_v226';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -886,11 +886,12 @@ export class Html5Adapter {
       const effStart = Number(customStart ?? startAt) || 0;
       const uaStr = navigator.userAgent || '';
       const isAndroid = /Android/i.test(uaStr);
+      const isAndroidWebView = isAndroid && /WatchlivoApp|;\s*wv\)/i.test(uaStr);
       const isTouchDev = Boolean(navigator.maxTouchPoints > 0 || (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches));
       const isIpadDesktop = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
       const isMobileScreen = isAndroid || isIpadDesktop || /iPhone|iPad|iPod|Mobile/i.test(uaStr) || (isTouchDev && typeof window !== 'undefined' && window.innerWidth <= 900);
       this.hls = new window.Hls({
-        enableWorker: !isAndroid,
+        enableWorker: typeof Worker === 'function' && !isAndroidWebView,
         lowLatencyMode: false,
         subtitleDisplay: false,
         enableWebVTT: false,

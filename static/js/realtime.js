@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261119_v225';
-import { api } from './api.js?v=20261119_v225';
-import { state } from './store.js?v=20261119_v225';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261119_v225';
+import { clock } from './sync.js?v=20261119_v226';
+import { api } from './api.js?v=20261119_v226';
+import { state } from './store.js?v=20261119_v226';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261119_v226';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -306,7 +306,7 @@ export class MeshConnection {
       const pCnt = Math.max(this.participantCount || 1, this.lastRoom?.largeRoomMode ? 25 : 1);
       const inFastBurst = Boolean(this._fastPollUntil && Date.now() < this._fastPollUntil);
       const inActiveCall = Boolean(state.voice?.inCall && pCnt >= 2 && pCnt < 25);
-      const rawBaseMs = inFastBurst ? 320 : (inActiveCall ? 550 : (pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt >= 25 ? 1450 : 950));
+      const rawBaseMs = inFastBurst ? 320 : (inActiveCall ? 600 : (pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt >= 25 ? 1550 : 1300));
       const baseMs = (typeof document !== 'undefined' && document.hidden) ? Math.round(rawBaseMs * 1.6) : rawBaseMs;
       const backoffMs = Math.min(4000, (this.httpFailCount || 0) * 650);
       const jitterMs = inFastBurst ? Math.floor(Math.random() * 60) : (pCnt >= 25 ? Math.floor(Math.random() * 550) : Math.floor(Math.random() * 140));
@@ -554,7 +554,7 @@ export class MeshConnection {
           const nextExp = Number(res.media.meshStatePosition ?? res.media.currentTime ?? 0) + (nextPlaying ? Math.max(0, nowSec - nextT0) * Number(res.media.meshStatePlaybackSpeed ?? res.media.rate ?? 1) : 0);
           const posDiff = Math.abs(nextExp - prevExp);
           const isPaused = !nextPlaying;
-          const significantJump = isPaused ? (posDiff > 0.35) : (posDiff > 0.85);
+          const significantJump = isPaused ? (posDiff > 0.4) : (posDiff > 2.5);
           const speedChanged = Boolean(res.media.meshStatePlaybackSpeed && Math.abs(Number(res.media.meshStatePlaybackSpeed) - Number(prevMedia.meshStatePlaybackSpeed || prevMedia.rate || 1)) > 0.01);
           this.lastRoom.media = normalizeRoomMediaState(this.lastRoom.media, res.media);
           if (statusChanged || significantJump || speedChanged || urlChanged) {
@@ -593,6 +593,7 @@ export class MeshConnection {
         return true;
       }
       if (res.room) {
+        const prevRoomMedia = this.lastRoom?.media || state.mesh?.media || null;
         if ((isInit || payload.type === 'init') && reqSeq !== this.actionSeq && this.lastRoom?.media && (this.lastRoom.media.url || this.lastRoom.media.videoId)) {
           res.room = { ...res.room, media: this.lastRoom.media };
         }
@@ -607,9 +608,36 @@ export class MeshConnection {
         }
         const srvLastChatId = Array.isArray(res.room.chat) && res.room.chat.length ? String(res.room.chat[res.room.chat.length - 1]?.id || '') : '';
         const pVoiceSig = (res.room.participants || []).map((p) => `${p.id}:${p.muted}:${p.cam}:${p.screen}:${p.inCall}:${p.speaking}:${p.handRaised}:${p.isStageSpeaker}`).join(',');
-        const stamp = `${res.room.rev}|${res.room.privacy}|${res.room.playMode}|${res.room.voipMode}|${res.room.name}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateTime}|${res.room.media?.meshStateStatus}|${res.room.media?.url}|${res.room.chat?.length}|${srvLastChatId}|${res.room.host_id}|${(res.room.polls || []).length}|${(res.room.queue || []).length}|${(res.room.skip_votes || []).length}|${pVoiceSig}`;
-        if (isInit) this.onMessage?.({ type: 'init', clientId: this.clientId, room: res.room });
-        else if (stamp !== this.lastRoomStamp) this.onMessage?.({ type: 'room_state', room: res.room, viaHttp: isPoll });
+        const mSpeed = Number(res.room.media?.meshStatePlaybackSpeed ?? res.room.media?.rate ?? 1).toFixed(2);
+        const stamp = `${res.room.rev}|${res.room.privacy}|${res.room.playMode}|${res.room.voipMode}|${res.room.name}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateStatus}|${mSpeed}|${res.room.media?.url}|${res.room.media?.videoId || ''}|${res.room.media?.title || ''}|${res.room.chat?.length}|${srvLastChatId}|${res.room.host_id}|${(res.room.polls || []).length}|${(res.room.queue || []).length}|${(res.room.skip_votes || []).length}|${pVoiceSig}`;
+        if (isInit) {
+          this.onMessage?.({ type: 'init', clientId: this.clientId, room: res.room });
+        } else if (stamp !== this.lastRoomStamp) {
+          this.onMessage?.({ type: 'room_state', room: res.room, viaHttp: isPoll });
+        } else if (isPoll && res.room.media && prevRoomMedia) {
+          const nowSec = clock.now();
+          const normNext = normalizeRoomMediaState(prevRoomMedia, res.room.media);
+          const prevPlaying = isRoomMediaPlaying(prevRoomMedia);
+          const nextPlaying = isRoomMediaPlaying(normNext);
+          const rawPrevT0 = Number(prevRoomMedia.meshStateTime ?? prevRoomMedia.updatedAt ?? nowSec);
+          const prevT0 = rawPrevT0 > 1e11 ? rawPrevT0 / 1000 : rawPrevT0;
+          const rawNextT0 = Number(normNext.meshStateTime ?? normNext.updatedAt ?? nowSec);
+          const nextT0 = rawNextT0 > 1e11 ? rawNextT0 / 1000 : rawNextT0;
+          const prevExp = Number(prevRoomMedia.meshStatePosition ?? prevRoomMedia.currentTime ?? 0) + (prevPlaying ? Math.max(0, nowSec - prevT0) * Number(prevRoomMedia.meshStatePlaybackSpeed ?? prevRoomMedia.rate ?? 1) : 0);
+          const nextExp = Number(normNext.meshStatePosition ?? normNext.currentTime ?? 0) + (nextPlaying ? Math.max(0, nowSec - nextT0) * Number(normNext.meshStatePlaybackSpeed ?? normNext.rate ?? 1) : 0);
+          const posDiff = Math.abs(nextExp - prevExp);
+          const isSelfHost = Boolean(res.room.isHost || (res.room.host_id && this.clientId && res.room.host_id === this.clientId));
+          if ((nextPlaying !== prevPlaying) || (nextPlaying ? posDiff > 2.5 : posDiff > 0.4)) {
+            this.onMessage?.({ type: 'sync', action: 'poll_sync', media: normNext });
+          } else if (state.mesh?.media && !isSelfHost) {
+            state.mesh.media.meshStatePosition = normNext.meshStatePosition;
+            state.mesh.media.meshStateTime = normNext.meshStateTime;
+            state.mesh.media.currentTime = normNext.currentTime;
+            state.mesh.media.liveTime = normNext.liveTime;
+            state.mesh.media.serverNow = normNext.serverNow;
+            state.mesh.media.updatedAt = normNext.updatedAt;
+          }
+        }
         this.lastRoomStamp = stamp;
       }
       return true;

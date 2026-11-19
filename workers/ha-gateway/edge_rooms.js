@@ -888,7 +888,12 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       });
     }
   } else if (act === "heartbeat" && isHostOrCreator(rm, cid) && body.currentTime !== undefined) {
-    rm.media.currentTime = Math.max(0, Number(body.currentTime) || 0);
+    const rawPos = Math.max(0, Number(body.currentTime) || 0);
+    if (body.playing !== undefined) rm.media.playing = Boolean(body.playing);
+    const rawAt = Number(body.atTime || 0);
+    const transit = (rm.media.playing && rawAt > 1e9 && t - rawAt > 0 && t - rawAt < 0.85) ? (t - rawAt) : 0;
+    const rate = Number(rm.media.rate) || 1;
+    rm.media.currentTime = rawPos + transit * rate;
     rm.media.updatedAt = t;
     dirty = true;
   } else if (act === "change_media" || act === "resolve_media") {
@@ -1241,7 +1246,8 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     rm.polls = [];
     pushEv({ type: "chat_cleared" });
   } else if (act === "reaction" || act === "typing" || act === "soundfx") {
-    pushEv({ type: act, emoji: String(body.emoji || "❤️").slice(0, 16), typing: Boolean(body.typing), sfx: body.sfx });
+    const actId = String(body.actionId || "").trim().slice(0, 64);
+    pushEv({ ...(actId ? { id: actId } : {}), type: act, emoji: String(body.emoji || "❤️").slice(0, 16), typing: Boolean(body.typing), sfx: body.sfx });
   } else if (["webrtc_offer", "webrtc_answer", "webrtc_ice"].includes(act) && body.targetId) {
     const sig = {
       id: String(body.signalId || `sg_${Date.now()}_${makeHexNonce(3)}`).slice(0, 64),

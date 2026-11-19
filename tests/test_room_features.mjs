@@ -564,3 +564,217 @@ test("v225 audit fixes: friends privacy, customName rename, voteEndsAt countdown
     globalThis.Response = OrigResponse;
   }
 });
+
+test("v226: guest SyncEngine zero-stutter tolerance, heartbeat transit/playing sync, and reaction actionId dedup", async () => {
+  // 1. Edge room heartbeat & reaction actionId preservation
+  const env = makeMemEnv();
+  const createRes = await handleEdgeRoomCreate(
+    new Request("https://watchlivo.online/api/rooms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Sync Test", username: "Host", clientId: "h_hsync1" }),
+    }),
+    env,
+    jsonResp
+  );
+  const created = await createRes.json();
+  const roomId = created.room.id;
+  const hostCid = created.clientId;
+  const hostTok = created.clientToken;
+
+  // Heartbeat with slight transit delay + playing flag updates server anchor smoothly
+  const tSent = Date.now() / 1000 - 0.25;
+  const hbPlay = await syncPost(env, roomId, {
+    type: "heartbeat",
+    clientId: hostCid,
+    clientToken: hostTok,
+    currentTime: 120.0,
+    playing: true,
+    atTime: tSent,
+  });
+  assert.equal(hbPlay.status, 200);
+  assert.ok(hbPlay.data.room.media.currentTime >= 120.15 && hbPlay.data.room.media.currentTime <= 120.9, "heartbeat should compensate small upload transit delay");
+
+  // Reaction with explicit actionId preserves id so P2P + HTTP poll dedupe cleanly
+  const rAct = await syncPost(env, roomId, {
+    type: "reaction",
+    clientId: hostCid,
+    clientToken: hostTok,
+    emoji: "🍿",
+    actionId: "ev_popcorn_dedup_1",
+  });
+  assert.equal(rAct.status, 200);
+  assert.ok(rAct.data.room.events.some((e) => e.id === "ev_popcorn_dedup_1" && e.emoji === "🍿"), "reaction event must keep actionId");
+
+  // 2. SyncEngine follower stability test (zero seeks & zero playbackRate thrashing under <=1.0s drift!)
+  const { SyncEngine, clock } = await import("../static/js/sync.js");
+  clock.offset = 0;
+  clock.samples = 10;
+  clock.bestRtt = 0.05;
+
+  const seeks = [];
+  const rateChanges = [];
+  let curTime = 100.0;
+  let curRate = 1.0;
+  let isBuf = false;
+  const fakeAd = {
+    caps: { seek: true, rate: true, live: false },
+    video: { readyState: 4, seeking: false, ended: false },
+    getTime: () => curTime,
+    getDuration: () => 5400,
+    getBuffered: () => curTime + 25,
+    isBuffered: (t) => t >= curTime - 5 && t <= curTime + 25,
+    isPaused: () => false,
+    isBuffering: () => isBuf,
+    isEnded: () => false,
+    seek: (t) => { seeks.push(t); curTime = t; },
+    getRate: () => curRate,
+    setRate: (r) => { rateChanges.push(r); curRate = r; },
+    play: () => {},
+    pause: () => {},
+  };
+  let media = {
+    provider: "hls",
+    url: "https://cdn.example/movie.m3u8",
+    meshStateStatus: "PLAYING",
+    meshStatePosition: 100.0,
+    meshStateTime: Date.now() / 1000,
+    meshStatePlaybackSpeed: 1,
+    duration: 5400,
+  };
+  const eng = new SyncEngine({
+    getMedia: () => media,
+    getAdapter: () => fakeAd,
+    isLeader: () => false,
+    isSolo: () => false,
+  });
+  eng.enabled = true;
+  eng.didInitialSync = true;
+  eng.mediaIdSig = "hls||https://cdn.example/movie.m3u8|1|1";
+  eng.lastStatus = "PLAYING";
+  eng.lastExpected = 100.0;
+  eng.lastStepAt = performance.now() - 1000;
+
+  // Simulate 10 steps with 0.9s drift (previously triggered hard-seek every 2.6s AND 380ms rate thrashing!)
+  for (let i = 0; i < 10; i += 1) {
+    const nowS = Date.now() / 1000;
+    media.meshStatePosition = 100.9 + i;
+    media.meshStateTime = nowS;
+    curTime = 100.0 + i;
+    eng.lastStepAt = performance.now() - 1000;
+    eng.lastExpected = 99.9 + i;
+    const nextMs = eng.step();
+    assert.ok(nextMs >= 900, `steady sync step must NOT drop to 380ms thrashing (got ${nextMs}ms)`);
+  }
+  assert.equal(seeks.length, 0, "guest MUST NOT hard-seek for 0.9s drift");
+  assert.equal(rateChanges.length, 0, "guest MUST NOT thrash playbackRate for 0.9s drift");
+
+  // Brief buffering recovery with 1.2s drift MUST NOT trigger a hard seek
+  isBuf = true;
+  eng.step();
+  isBuf = false;
+  media.meshStatePosition = curTime + 1.2;
+  media.meshStateTime = Date.now() / 1000;
+  eng.step();
+  assert.equal(seeks.length, 0, "recovering from brief buffer with 1.2s drift must NOT hard-seek");
+
+  // Large host seek (+45s) MUST still snap guest promptly
+  media.meshStatePosition = curTime + 45;
+  media.meshStateTime = Date.now() / 1000;
+  eng.seekUntil = 0;
+  eng.step();
+  assert.equal(seeks.length, 1, "explicit large host seek (+45s) must sync guest");
+  assert.ok(Math.abs(seeks[0] - media.meshStatePosition) < 1.0);
+});
+
+test("v226: chat playEmojiSfx and playRoomSfx wait for suspended AudioContext.resume() before scheduling nodes", async () => {
+  const prevWin = globalThis.window;
+  const startedWhileSuspended = [];
+  const startedWhileRunning = [];
+  let resumeCalled = 0;
+
+  class MockAudioContext {
+    constructor() {
+      this.state = "suspended";
+      this.currentTime = 0;
+      this.sampleRate = 44100;
+      this.destination = {};
+    }
+    resume() {
+      resumeCalled += 1;
+      return Promise.resolve().then(() => {
+        this.state = "running";
+        this.currentTime = 0.25;
+      });
+    }
+    createOscillator() {
+      const ctx = this;
+      return {
+        type: "sine",
+        frequency: { setValueAtTime() {}, exponentialRampToValueAtTime() {} },
+        connect(n) { return n; },
+        disconnect() {},
+        start(t) {
+          if (ctx.state !== "running") startedWhileSuspended.push(t);
+          else startedWhileRunning.push(t);
+        },
+        stop() {},
+      };
+    }
+    createGain() {
+      return {
+        gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} },
+        connect(n) { return n; },
+        disconnect() {},
+      };
+    }
+    createBiquadFilter() {
+      return {
+        type: "bandpass",
+        frequency: { setValueAtTime() {} },
+        Q: { setValueAtTime() {} },
+        connect(n) { return n; },
+        disconnect() {},
+      };
+    }
+    createBuffer(_ch, len) {
+      return { getChannelData: () => new Float32Array(len) };
+    }
+    createBufferSource() {
+      const ctx = this;
+      return {
+        buffer: null,
+        connect(n) { return n; },
+        disconnect() {},
+        start(t) {
+          if (ctx.state !== "running") startedWhileSuspended.push(t);
+          else startedWhileRunning.push(t);
+        },
+      };
+    }
+  }
+
+  try {
+    globalThis.window = {
+      AudioContext: MockAudioContext,
+      __vortexVoiceDeafened: false,
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    const { playEmojiSfx, playRoomSfx } = await import(`../static/js/views/chat.js?t=${Date.now()}`);
+    for (const em of ["❤️", "😂", "😮", "😢", "🔥", "👏", "🍿", "☕", "👍"]) {
+      playEmojiSfx(em);
+    }
+    playRoomSfx("suspense");
+    playRoomSfx("fanfare");
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.ok(resumeCalled >= 1, "suspended AudioContext must call resume()");
+    assert.equal(startedWhileSuspended.length, 0, "NO audio nodes may be scheduled while AudioContext is suspended");
+    assert.ok(startedWhileRunning.length >= 20, `expected all emoji/soundboard nodes scheduled after resume, got ${startedWhileRunning.length}`);
+    assert.ok(startedWhileRunning.every((t) => t >= 0.25), "scheduled times must use post-resume ac.currentTime");
+  } finally {
+    if (prevWin === undefined) delete globalThis.window;
+    else globalThis.window = prevWin;
+  }
+});

@@ -125,6 +125,21 @@ emailBtn?.addEventListener('click', async () => {
   }
 });
 
+let _desktopFbReady = null;
+const preloadDesktopFb = () => Promise.all([
+  import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js'),
+  import('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js'),
+]).then(async ([{ initializeApp, getApps }, { getAuth, GoogleAuthProvider, signInWithPopup }]) => {
+  const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
+  const auth = getAuth(app);
+  if (typeof auth.authStateReady === 'function') {
+    await Promise.race([auth.authStateReady().catch(() => {}), new Promise((r) => setTimeout(r, 2500))]);
+  }
+  _desktopFbReady = { auth, GoogleAuthProvider, signInWithPopup };
+  return _desktopFbReady;
+}).catch(() => null);
+preloadDesktopFb();
+
 formEl?.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const pw = String(pwEl?.value || '');
@@ -136,15 +151,11 @@ formEl?.addEventListener('submit', async (ev) => {
   btn.disabled = true;
   setStatus('Google penceresi açılıyor...', '', true);
   try {
-    const [{ initializeApp, getApps }, { getAuth, GoogleAuthProvider, signInWithPopup }] = await Promise.all([
-      import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js'),
-      import('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js'),
-    ]);
-    const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
-    const auth = getAuth(app);
-    const provider = new GoogleAuthProvider();
+    const fb = _desktopFbReady || await preloadDesktopFb();
+    if (!fb?.auth) throw new Error('Google giriş servisi yüklenemedi.');
+    const provider = new fb.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
-    const cred = await signInWithPopup(auth, provider);
+    const cred = await fb.signInWithPopup(fb.auth, provider);
     if (!cred?.user) throw new Error('Google girişi tamamlanmadı.');
 
     setStatus('Hesap doğrulanıyor...', '', true);

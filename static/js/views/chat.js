@@ -1,10 +1,11 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261119_v225';
-import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261119_v225';
-import { avatar } from '../profile.js?v=20261119_v225';
-import { api, qs, humanApiError } from '../api.js?v=20261119_v225';
-import { resolveMusicItem } from './selection-kinds.js?v=20261119_v225';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261119_v225';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261119_v226';
+import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261119_v226';
+import { avatar } from '../profile.js?v=20261119_v226';
+import { api, qs, humanApiError } from '../api.js?v=20261119_v226';
+import { resolveMusicItem } from './selection-kinds.js?v=20261119_v226';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261119_v226';
+import { ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v226';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -15,158 +16,222 @@ const SOUNDBOARD = [
 ];
 
 let _sfxAudioCtx = null;
+let _sfxUnlockWired = false;
+let _sfxSilentPrimed = false;
 
-export function playRoomSfx(sfx) {
+function getOrCreateSfxContext() {
+  if (typeof window === 'undefined') return null;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  if (!_sfxAudioCtx || _sfxAudioCtx.state === 'closed') {
+    _sfxAudioCtx = new Ctx();
+    _sfxSilentPrimed = false;
+  }
+  return _sfxAudioCtx;
+}
+
+export function unlockSfxAudio() {
+  try {
+    ensureIosPlaybackAudioSession?.();
+    const ac = getOrCreateSfxContext();
+    if (!ac) return null;
+    if (ac.state === 'suspended' || ac.state === 'interrupted') {
+      ac.resume().catch(() => {});
+    }
+    if (!_sfxSilentPrimed) {
+      _sfxSilentPrimed = true;
+      try {
+        const silentBuf = ac.createBuffer(1, 1, Math.max(8000, ac.sampleRate || 44100));
+        const src = ac.createBufferSource();
+        src.buffer = silentBuf;
+        src.connect(ac.destination);
+        src.onended = () => { try { src.disconnect(); } catch (_) {} };
+        src.start(0);
+      } catch (_) {}
+    }
+    return ac;
+  } catch (_) {
+    return null;
+  }
+}
+
+function wireGlobalSfxUnlock() {
+  if (_sfxUnlockWired || typeof window === 'undefined') return;
+  _sfxUnlockWired = true;
+  const onGesture = () => {
+    const ac = unlockSfxAudio();
+    if (ac && ac.state === 'running' && _sfxSilentPrimed) {
+      window.removeEventListener('pointerdown', onGesture, true);
+      window.removeEventListener('touchstart', onGesture, true);
+      window.removeEventListener('keydown', onGesture, true);
+    }
+  };
+  window.addEventListener('pointerdown', onGesture, { capture: true, passive: true });
+  window.addEventListener('touchstart', onGesture, { capture: true, passive: true });
+  window.addEventListener('keydown', onGesture, { capture: true, passive: true });
+}
+wireGlobalSfxUnlock();
+
+function withRunningSfxContext(renderFn) {
   if (typeof window !== 'undefined' && window.__vortexVoiceDeafened) return;
   try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    if (!_sfxAudioCtx || _sfxAudioCtx.state === 'closed') {
-      _sfxAudioCtx = new Ctx();
+    ensureIosPlaybackAudioSession?.();
+    const ac = getOrCreateSfxContext();
+    if (!ac) return;
+    const invoke = () => {
+      if (!ac || ac.state === 'closed') return;
+      try {
+        renderFn(ac, ac.currentTime + 0.015);
+      } catch (_) {}
+    };
+    if (ac.state === 'running') {
+      invoke();
+      return;
     }
-    const ac = _sfxAudioCtx;
-    if (ac.state === 'suspended') ac.resume().catch(() => {});
-    const now = ac.currentTime;
+    if (typeof ac.resume === 'function') {
+      let fired = false;
+      const runOnce = () => {
+        if (fired) return;
+        fired = true;
+        invoke();
+      };
+      Promise.resolve(ac.resume()).then(() => {
+        if (ac.state === 'running') runOnce();
+      }).catch(() => {});
+    }
+  } catch (_) {}
+}
+
+function scheduleTone(ac, { type = 'sine', freqStart, freqEnd = null, gainPeak = 0.24, startAt, dur = 0.18 }) {
+  const osc = ac.createOscillator();
+  const g = ac.createGain();
+  osc.type = type;
+  const f0 = Math.max(40, Number(freqStart) || 440);
+  osc.frequency.setValueAtTime(f0, startAt);
+  if (freqEnd && Number.isFinite(freqEnd)) {
+    osc.frequency.exponentialRampToValueAtTime(Math.max(40, freqEnd), startAt + Math.max(0.02, dur * 0.85));
+  }
+  const peak = Math.max(0.01, Math.min(0.45, Number(gainPeak) || 0.24));
+  g.gain.setValueAtTime(0.0008, startAt);
+  g.gain.linearRampToValueAtTime(peak, startAt + Math.min(0.015, dur * 0.2));
+  g.gain.exponentialRampToValueAtTime(0.001, startAt + dur);
+  osc.onended = () => { try { osc.disconnect(); g.disconnect(); } catch (_) {} };
+  osc.connect(g).connect(ac.destination);
+  osc.start(startAt);
+  osc.stop(startAt + dur + 0.02);
+}
+
+function scheduleNoiseBurst(ac, { startAt, dur = 0.065, decay = 0.02, gainPeak = 0.3, filterFreq = 1350, filterQ = 1.1 }) {
+  const sr = Math.max(8000, ac.sampleRate || 44100);
+  const frameCount = Math.max(64, Math.round(sr * dur));
+  const buf = ac.createBuffer(1, frameCount, sr);
+  const data = buf.getChannelData(0);
+  for (let j = 0; j < data.length; j += 1) {
+    data[j] = (Math.random() * 2 - 1) * Math.exp(-j / (sr * decay));
+  }
+  const src = ac.createBufferSource();
+  src.buffer = buf;
+  const filt = ac.createBiquadFilter();
+  filt.type = 'bandpass';
+  filt.frequency.setValueAtTime(filterFreq, startAt);
+  filt.Q.setValueAtTime(filterQ, startAt);
+  const g = ac.createGain();
+  g.gain.setValueAtTime(gainPeak, startAt);
+  g.gain.exponentialRampToValueAtTime(0.001, startAt + dur);
+  src.onended = () => { try { src.disconnect(); filt.disconnect(); g.disconnect(); } catch (_) {} };
+  src.connect(filt).connect(g).connect(ac.destination);
+  src.start(startAt);
+}
+
+export function playRoomSfx(sfx) {
+  withRunningSfxContext((ac, now) => {
     if (sfx === 'clap') {
       for (let i = 0; i < 6; i += 1) {
-        const buf = ac.createBuffer(1, ac.sampleRate * 0.06, ac.sampleRate);
-        const data = buf.getChannelData(0);
-        for (let j = 0; j < data.length; j += 1) data[j] = (Math.random() * 2 - 1) * Math.exp(-j / (ac.sampleRate * 0.018));
-        const src = ac.createBufferSource();
-        const g = ac.createGain();
-        g.gain.setValueAtTime(0.18, now + i * 0.075);
-        src.buffer = buf;
-        src.onended = () => { try { src.disconnect(); g.disconnect(); } catch (_) {} };
-        src.connect(g).connect(ac.destination);
-        src.start(now + i * 0.075);
+        const jitter = (i % 2) * 0.012;
+        scheduleNoiseBurst(ac, {
+          startAt: now + i * 0.078 + jitter,
+          dur: 0.075,
+          decay: 0.022,
+          gainPeak: 0.34,
+          filterFreq: 1150 + i * 90,
+          filterQ: 0.9,
+        });
       }
     } else if (sfx === 'laugh') {
-      [520, 480, 440, 400, 360].forEach((freq, i) => {
-        const osc = ac.createOscillator();
-        const g = ac.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, now + i * 0.11);
-        osc.frequency.exponentialRampToValueAtTime(freq * 0.78, now + i * 0.11 + 0.09);
-        g.gain.setValueAtTime(0.16, now + i * 0.11);
-        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.11 + 0.095);
-        osc.connect(g).connect(ac.destination);
-        osc.start(now + i * 0.11);
-        osc.stop(now + i * 0.11 + 0.1);
+      [540, 495, 450, 410, 370].forEach((freq, i) => {
+        scheduleTone(ac, {
+          type: 'triangle',
+          freqStart: freq,
+          freqEnd: freq * 0.76,
+          gainPeak: 0.28,
+          startAt: now + i * 0.105,
+          dur: 0.095,
+        });
       });
     } else if (sfx === 'suspense') {
-      [110, 116.5].forEach((freq) => {
-        const osc = ac.createOscillator();
-        const g = ac.createGain();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(freq, now);
-        g.gain.setValueAtTime(0.12, now);
-        g.gain.exponentialRampToValueAtTime(0.001, now + 0.9);
-        osc.connect(g).connect(ac.destination);
-        osc.start(now);
-        osc.stop(now + 0.92);
+      [110, 116.54, 164.81].forEach((freq, idx) => {
+        scheduleTone(ac, {
+          type: idx < 2 ? 'sawtooth' : 'triangle',
+          freqStart: freq,
+          freqEnd: freq * 0.94,
+          gainPeak: idx < 2 ? 0.16 : 0.12,
+          startAt: now,
+          dur: 0.88,
+        });
       });
     } else {
       [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
-        const osc = ac.createOscillator();
-        const g = ac.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + i * 0.09);
-        g.gain.setValueAtTime(0.15, now + i * 0.09);
-        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.09 + 0.25);
-        osc.connect(g).connect(ac.destination);
-        osc.start(now + i * 0.09);
-        osc.stop(now + i * 0.09 + 0.26);
+        scheduleTone(ac, {
+          type: 'triangle',
+          freqStart: freq,
+          gainPeak: 0.26,
+          startAt: now + i * 0.085,
+          dur: 0.25,
+        });
       });
     }
-  } catch (e) { /* ignore */ }
+  });
 }
 
 export function playEmojiSfx(emoji) {
   if (typeof window !== 'undefined' && window.__vortexVoiceDeafened) return;
-  try {
-    if (emoji === '👏') { playRoomSfx('clap'); return; }
-    if (emoji === '😂') { playRoomSfx('laugh'); return; }
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    if (!_sfxAudioCtx || _sfxAudioCtx.state === 'closed') {
-      _sfxAudioCtx = new Ctx();
-    }
-    const ac = _sfxAudioCtx;
-    if (ac.state === 'suspended') ac.resume().catch(() => {});
-    const now = ac.currentTime;
+  if (emoji === '👏') { playRoomSfx('clap'); return; }
+  if (emoji === '😂') { playRoomSfx('laugh'); return; }
+  withRunningSfxContext((ac, now) => {
     if (emoji === '❤️') {
-      [523.25, 659.25, 783.99].forEach((freq, i) => {
-        const osc = ac.createOscillator();
-        const g = ac.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + i * 0.065);
-        g.gain.setValueAtTime(0.14, now + i * 0.065);
-        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.065 + 0.22);
-        osc.connect(g).connect(ac.destination);
-        osc.start(now + i * 0.065);
-        osc.stop(now + i * 0.065 + 0.24);
+      [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+        scheduleTone(ac, { type: 'sine', freqStart: freq, gainPeak: 0.25, startAt: now + i * 0.06, dur: 0.22 });
       });
     } else if (emoji === '😮') {
-      const osc = ac.createOscillator();
-      const g = ac.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(310, now);
-      osc.frequency.exponentialRampToValueAtTime(720, now + 0.26);
-      g.gain.setValueAtTime(0.15, now);
-      g.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-      osc.connect(g).connect(ac.destination);
-      osc.start(now);
-      osc.stop(now + 0.32);
+      scheduleTone(ac, { type: 'sine', freqStart: 300, freqEnd: 760, gainPeak: 0.28, startAt: now, dur: 0.28 });
     } else if (emoji === '😢') {
-      [440, 392, 329.63].forEach((freq, i) => {
-        const osc = ac.createOscillator();
-        const g = ac.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, now + i * 0.12);
-        g.gain.setValueAtTime(0.12, now + i * 0.12);
-        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.22);
-        osc.connect(g).connect(ac.destination);
-        osc.start(now + i * 0.12);
-        osc.stop(now + i * 0.12 + 0.24);
+      [440, 392, 329.63, 293.66].forEach((freq, i) => {
+        scheduleTone(ac, { type: 'triangle', freqStart: freq, gainPeak: 0.22, startAt: now + i * 0.11, dur: 0.22 });
       });
     } else if (emoji === '🔥') {
+      scheduleNoiseBurst(ac, { startAt: now, dur: 0.16, decay: 0.05, gainPeak: 0.22, filterFreq: 2100, filterQ: 0.7 });
       [587.33, 880, 1174.66].forEach((freq, i) => {
-        const osc = ac.createOscillator();
-        const g = ac.createGain();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(freq, now + i * 0.05);
-        g.gain.setValueAtTime(0.09, now + i * 0.05);
-        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.05 + 0.16);
-        osc.connect(g).connect(ac.destination);
-        osc.start(now + i * 0.05);
-        osc.stop(now + i * 0.05 + 0.18);
+        scheduleTone(ac, { type: 'sawtooth', freqStart: freq, gainPeak: 0.17, startAt: now + i * 0.05, dur: 0.17 });
+      });
+    } else if (emoji === '🍿') {
+      [0, 0.085, 0.16].forEach((off, i) => {
+        scheduleNoiseBurst(ac, { startAt: now + off, dur: 0.045, decay: 0.012, gainPeak: 0.3, filterFreq: 950 + i * 240, filterQ: 1.6 });
+        scheduleTone(ac, { type: 'sine', freqStart: 420 + i * 160, freqEnd: 880 + i * 180, gainPeak: 0.22, startAt: now + off, dur: 0.075 });
+      });
+    } else if (emoji === '👍') {
+      [587.33, 880].forEach((freq, i) => {
+        scheduleTone(ac, { type: 'sine', freqStart: freq, gainPeak: 0.24, startAt: now + i * 0.055, dur: 0.12 });
       });
     } else if (emoji === '☕') {
       [587.33, 880, 1046.5].forEach((freq, i) => {
-        const osc = ac.createOscillator();
-        const g = ac.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, now + i * 0.085);
-        g.gain.setValueAtTime(0.16, now + i * 0.085);
-        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.085 + 0.22);
-        osc.connect(g).connect(ac.destination);
-        osc.start(now + i * 0.085);
-        osc.stop(now + i * 0.085 + 0.24);
+        scheduleTone(ac, { type: 'triangle', freqStart: freq, gainPeak: 0.26, startAt: now + i * 0.085, dur: 0.23 });
       });
     } else {
-      [640, 920].forEach((freq, i) => {
-        const osc = ac.createOscillator();
-        const g = ac.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + i * 0.055);
-        g.gain.setValueAtTime(0.15, now + i * 0.055);
-        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.055 + 0.09);
-        osc.connect(g).connect(ac.destination);
-        osc.start(now + i * 0.055);
-        osc.stop(now + i * 0.055 + 0.1);
+      [640, 960].forEach((freq, i) => {
+        scheduleTone(ac, { type: 'sine', freqStart: freq, gainPeak: 0.24, startAt: now + i * 0.055, dur: 0.12 });
       });
     }
-  } catch (e) { /* ignore */ }
+  });
 }
 const PRIVACY = [
   ['public', 'Herkese Açık', 'globe', 'Herkes odaya katılabilir'],
@@ -326,7 +391,9 @@ export function buildChat(ctx) {
       ...REACTIONS.map((e) => h('button', {
         type: 'button',
         class: 'react-emoji-btn',
+        onpointerdown: () => unlockSfxAudio(),
         onclick: (ev) => {
+          unlockSfxAudio();
           spawnReactionBurst(ev.currentTarget, e);
           spawnEmojiFountain(ev.currentTarget, e);
           actions.reaction(e);
@@ -344,7 +411,8 @@ export function buildChat(ctx) {
       ...SOUNDBOARD.map(([k, lbl]) => h('button', {
         type: 'button',
         class: 'sfx-pill',
-        onclick: () => { actions.soundfx?.(k); closeToolsPopover(); },
+        onpointerdown: () => unlockSfxAudio(),
+        onclick: () => { unlockSfxAudio(); actions.soundfx?.(k); closeToolsPopover(); },
         title: `Sesli Efekt: ${lbl}`,
       }, lbl))));
 

@@ -1,17 +1,17 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261119_v225';
-import { api } from '../api.js?v=20261119_v225';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261119_v225';
-import { resolveMusicItem } from './selection-kinds.js?v=20261119_v225';
-import { MeshConnection } from '../realtime.js?v=20261119_v225';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261119_v225';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261119_v225';
-import { buildLayout } from './mesh-layout.js?v=20261119_v225';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261119_v225';
-import { Voice } from '../voice.js?v=20261119_v225';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261119_v225';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261119_v225';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261119_v225';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261119_v226';
+import { api } from '../api.js?v=20261119_v226';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261119_v226';
+import { resolveMusicItem } from './selection-kinds.js?v=20261119_v226';
+import { MeshConnection } from '../realtime.js?v=20261119_v226';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261119_v226';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261119_v226';
+import { buildLayout } from './mesh-layout.js?v=20261119_v226';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261119_v226';
+import { Voice } from '../voice.js?v=20261119_v226';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261119_v226';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261119_v226';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261119_v226';
 
 let ctx = null;
 
@@ -411,13 +411,24 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
         } else {
           ctx.userPaused = false;
           if (ctx.host.adapter.isPaused?.() && !ctx.host.adapter.autoplayHardBlocked) ctx.host.adapter.play?.();
-          if (!room.curated && !room.media.live && (fromInit || !ctx.sync?.didInitialSync) && target >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - target) > 1.5) {
+          const vEl = ctx.host.adapter.video;
+          const nowP = performance.now();
+          if (!room.curated && !room.media.live && fromInit && target >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - target) > 2.4 && (!vEl || (!vEl.seeking && vEl.readyState >= 1)) && nowP >= (ctx.sync?.seekUntil || 0)) {
             ctx.host.adapter.seek?.(target);
+            if (ctx.sync) {
+              ctx.sync.lastSeekTarget = target;
+              ctx.sync.lastSeekWallAt = nowP;
+              ctx.sync.seekUntil = nowP + 4500;
+            }
           }
         }
       }
     }
-    ctx?.sync.kick();
+    const prevPlaying = isRoomMediaPlaying(curRoom?.media);
+    const nextPlaying = isRoomMediaPlaying(room.media);
+    if (!viaPoll || prevPlaying !== nextPlaying || fromInit) {
+      ctx?.sync.kick(false);
+    }
   }
   setBackground(thumbFor(room.media));
   ctx?.layout.update();
@@ -560,16 +571,27 @@ async function loadMedia(media) {
   if (!isTimeKeeper()) {
     const ad = ctx.host?.adapter;
     const vEl = ad?.video;
+    let guestSnapped = false;
     const snapGuestToLive = () => {
-      if (!ctx || ctx.loadSeq !== mySeq || isTimeKeeper() || media?.live) return;
+      if (guestSnapped || !ctx || ctx.loadSeq !== mySeq || isTimeKeeper() || media?.live) return;
+      const nowP = performance.now();
+      if (ctx.sync && nowP < (ctx.sync.seekUntil || 0)) return;
       const liveExp = expectedPosition(state.mesh?.media || media);
       const curPos = ad?.getTime?.() || 0;
-      if (liveExp >= 0.6 && Math.abs(liveExp - curPos) > 1.0 && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
+      if (liveExp >= 0.8 && Math.abs(liveExp - curPos) > 2.2 && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
+        guestSnapped = true;
         ad?.seek?.(liveExp);
+        if (ctx.sync) {
+          ctx.sync.lastSeekTarget = liveExp;
+          ctx.sync.lastSeekWallAt = nowP;
+          ctx.sync.seekUntil = nowP + 4500;
+        }
+      } else if (vEl && vEl.readyState >= 2 && Math.abs(liveExp - curPos) <= 2.2) {
+        guestSnapped = true;
       }
     };
     snapGuestToLive();
-    if (vEl) {
+    if (vEl && !guestSnapped) {
       vEl.addEventListener('loadedmetadata', snapGuestToLive, { once: true });
       vEl.addEventListener('canplay', snapGuestToLive, { once: true });
       vEl.addEventListener('playing', snapGuestToLive, { once: true });
@@ -764,6 +786,9 @@ function onMessage(data) {
         const chatList = (room.chat || []).map((m) => (m.id === data.msgId ? { ...m, reactions: data.reactions || {} } : m));
         set({ mesh: { ...room, chat: chatList } });
         ctx.layout.reactionsUpdated?.();
+        if (data.emoji && data.cid && data.cid !== state.clientId && !ctx?.voice?.deafened) {
+          playEmojiSfx(data.emoji);
+        }
       }
       break;
     case 'typing': ctx?.layout.showTyping(data.user); break;
@@ -1216,8 +1241,10 @@ const actions = {
             return s === state.clientId || (!s.includes('#') && s.trim() === myBaseName);
           });
         }
+        let addedReaction = false;
         if (idx >= 0) users.splice(idx, 1);
-        else users.push(myReactTag);
+        else { users.push(myReactTag); addedReaction = true; }
+        if (addedReaction && !ctx?.voice?.deafened) playEmojiSfx(emoji);
         if (users.length) reacts[emoji] = users;
         else delete reacts[emoji];
         return { ...m, reactions: reacts };
@@ -1588,16 +1615,17 @@ function onPlayerEvent(ev, arg) {
         const liveExp = expectedPosition(m);
         const curTime = ctx.host?.adapter?.getTime?.() || 0;
         const vEl = ctx.host?.adapter?.video;
-        if (liveExp >= 0.8 && Math.abs(curTime - liveExp) > 1.5 && ctx.host?.adapter && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
+        const nowP = performance.now();
+        if (liveExp >= 0.8 && Math.abs(curTime - liveExp) > 2.4 && ctx.host?.adapter && (!vEl || (!vEl.seeking && vEl.readyState >= 1)) && (!ctx.sync || nowP >= (ctx.sync.seekUntil || 0))) {
           ctx.host.adapter.seek?.(liveExp);
           if (ctx.sync) {
             ctx.sync.lastSeekTarget = liveExp;
-            ctx.sync.lastSeekWallAt = performance.now();
-            ctx.sync.seekUntil = performance.now() + 1800;
+            ctx.sync.lastSeekWallAt = nowP;
+            ctx.sync.seekUntil = nowP + 4500;
             ctx.sync.deferStartedAt = 0;
           }
         }
-        if (ctx.sync) {
+        if (ctx.sync && ev === 'loaded') {
           ctx.sync.deferStartedAt = 0;
           ctx.sync.kick(false);
         }

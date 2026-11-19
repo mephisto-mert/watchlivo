@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v225';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v225';
-import { api, qs, humanApiError } from '../api.js?v=20261119_v225';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v225';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v225';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v225';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v225';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v226';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v226';
+import { api, qs, humanApiError } from '../api.js?v=20261119_v226';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v226';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v226';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v226';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v226';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261119_v225';
+} from '../store.js?v=20261119_v226';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;

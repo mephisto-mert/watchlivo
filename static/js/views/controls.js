@@ -1,15 +1,15 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261119_v225';
-import { api, qs as buildQs } from '../api.js?v=20261119_v225';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261119_v225';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v225';
-import { getProvider } from '../providers.js?v=20261119_v225';
-import { expectedPosition } from '../sync.js?v=20261119_v225';
-import { thumbFor } from './lobby.js?v=20261119_v225';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261119_v225';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261119_v225';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261119_v225';
-import { avatar } from '../profile.js?v=20261119_v225';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261119_v226';
+import { api, qs as buildQs } from '../api.js?v=20261119_v226';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261119_v226';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v226';
+import { getProvider } from '../providers.js?v=20261119_v226';
+import { expectedPosition } from '../sync.js?v=20261119_v226';
+import { thumbFor } from './lobby.js?v=20261119_v226';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261119_v226';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261119_v226';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261119_v226';
+import { avatar } from '../profile.js?v=20261119_v226';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -2926,7 +2926,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261119_v225',
+            v: '20261119_v226',
           });
           api(`/api/rave/seasons?${q.toString()}`, { timeout: 8000 })
             .then((inf) => {
