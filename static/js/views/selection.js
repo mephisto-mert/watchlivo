@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v219';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v219';
-import { api, qs, humanApiError } from '../api.js?v=20261119_v219';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v219';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v219';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v219';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v219';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v220';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v220';
+import { api, qs, humanApiError } from '../api.js?v=20261119_v220';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v220';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v220';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v220';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v220';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261119_v219';
+} from '../store.js?v=20261119_v220';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -1125,20 +1125,22 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 const resolvedMediaType = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(String(item.title || '')) ? 'tv' : 'movie');
 
                 let resolved = null;
+                const resolvePayload = {
+                  id: item.id || '',
+                  tmdbId: item.tmdbId || '',
+                  imdbId: item.imdbId || '',
+                  officialUrl: item.officialUrl || '',
+                  mediaType: resolvedMediaType,
+                  title: cleanHistTitle,
+                  originalTitle: item.originalTitle || cleanHistTitle,
+                  backdrop: item.backdrop || item.thumbnail || item.poster || '',
+                  poster: item.poster || item.thumbnail || '',
+                  year: histYear,
+                };
                 if (!item.isMusic) {
-                  const resolvePayload = {
-                    tmdbId: item.tmdbId || '',
-                    imdbId: item.imdbId || '',
-                    mediaType: resolvedMediaType,
-                    title: cleanHistTitle,
-                    originalTitle: item.originalTitle || cleanHistTitle,
-                    backdrop: item.backdrop || item.thumbnail || item.poster || '',
-                    poster: item.poster || item.thumbnail || '',
-                    year: histYear,
-                  };
                   try {
                     resolved = await Promise.race([
-                      resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1),
+                      resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1, '', { silentErrors: true }),
                       new Promise((r) => setTimeout(() => r(null), 12000)),
                     ]);
                   } catch (e) {
@@ -1151,7 +1153,12 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                   await pickSafe(resolved);
                   return;
                 }
-                toast('Yayın kaynağı şu an yanıt vermiyor, lütfen tekrar deneyin');
+                if (resolvedMediaType === 'tv' && (resolvePayload.tmdbId || resolvePayload.title)) {
+                  toast(`⚠️ S${item.season || 1}:B${item.episode || 1} kaynağı henüz bulunamadı — mevcut bölümler açılıyor...`);
+                  openTvSeriesModal(resolvePayload, targetProv);
+                  return;
+                }
+                toast('Bu içerik için doğrudan yayın kaynağı şu an bulunamadı.');
                 return;
               } finally {
                 cardEl.classList.remove('busy');
@@ -1914,20 +1921,22 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
     const resolvedMediaType = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(String(item.title || '')) ? 'tv' : 'movie');
     const targetProv = (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' };
     let resolved = null;
+    const resolvePayload = {
+      id: item.id || '',
+      tmdbId: item.tmdbId || '',
+      imdbId: item.imdbId || '',
+      officialUrl: item.officialUrl || '',
+      mediaType: resolvedMediaType,
+      title: cleanHistTitle,
+      originalTitle: item.originalTitle || cleanHistTitle,
+      backdrop: item.backdrop || item.thumbnail || item.poster || '',
+      poster: item.poster || item.thumbnail || '',
+      year: histYear,
+    };
     if (!item.isMusic) {
       try {
-        const resolvePayload = {
-          tmdbId: item.tmdbId || '',
-          imdbId: item.imdbId || '',
-          mediaType: resolvedMediaType,
-          title: cleanHistTitle,
-          originalTitle: item.originalTitle || cleanHistTitle,
-          backdrop: item.backdrop || item.thumbnail || item.poster || '',
-          poster: item.poster || item.thumbnail || '',
-          year: histYear,
-        };
         resolved = await Promise.race([
-          resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1),
+          resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1, '', { silentErrors: true }),
           new Promise((r) => setTimeout(() => r(null), 12000)),
         ]);
       } catch (err) {
@@ -1940,7 +1949,12 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
       await pickFn(resolved);
       return;
     }
-    toast('Yayın kaynağı şu an yanıt vermiyor, lütfen tekrar deneyin');
+    if (resolvedMediaType === 'tv' && (resolvePayload.tmdbId || resolvePayload.title)) {
+      toast(`⚠️ S${item.season || 1}:B${item.episode || 1} kaynağı henüz bulunamadı — mevcut bölümler açılıyor...`);
+      openTvSeriesModal(resolvePayload, targetProv);
+      return;
+    }
+    toast('Bu içerik için doğrudan yayın kaynağı şu an bulunamadı.');
   };
 
   const renderHub = () => {

@@ -167,7 +167,9 @@ function inferReferer(url, explicitRef) {
   if (url.includes("lightspeed.st") || url.includes("nexa.mov")) return "https://cinejoy.pk/";
   if (url.includes("dplayer")) return "https://dizipal1511.com/";
   if (url.includes("archive.org")) return "https://archive.org/";
-  if (url.includes("tau-video") || url.includes("irtau1.")) return "https://tau-video.xyz/";
+  if (url.includes("tau-video") || url.includes("irtau1.") || url.includes("niko-")) return "https://tau-video.xyz/";
+  if (url.includes("imgsapi.pro") || url.includes("ytenconline.xyz") || url.includes("filmmodu.")) return "https://www.filmmodu.one/";
+  if (url.includes("ddizimag.")) return "https://ddizimag.icu/";
   if (url.includes("fastplay.") || url.includes(".cfd/")) {
     return url.includes("ag2m5.cfd") ? "https://x.ag2m5.cfd/" : "https://fastplay.mom/";
   }
@@ -377,13 +379,20 @@ async function fetchPublicWithRedirects(initialUrl, baseHeaders, maxHops = 4, me
     if (!isPublicHttpUrl(curUrl)) {
       throw new Error("Blocked redirect target");
     }
-    const resp = await fetch(curUrl, {
-      method: curMethod,
-      headers: baseHeaders,
-      body: curMethod === "POST" ? curBody : undefined,
-      redirect: "manual",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
+    let resp;
+    try {
+      resp = await fetch(curUrl, {
+        method: curMethod,
+        headers: baseHeaders,
+        body: curMethod === "POST" ? curBody : undefined,
+        redirect: "manual",
+        signal: ac.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
     if ([301, 302, 303, 307, 308].includes(resp.status)) {
       const loc = resp.headers.get("Location");
       if (!loc) return { resp, finalUrl: curUrl };

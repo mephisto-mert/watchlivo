@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261119_v219';
-import { api, qs, isEdgeUnavailable, humanApiError } from '../api.js?v=20261119_v219';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261119_v219';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261119_v219';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261119_v219';
-import { profileSetup } from '../profile.js?v=20261119_v219';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v219';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261119_v220';
+import { api, qs, isEdgeUnavailable, humanApiError } from '../api.js?v=20261119_v220';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261119_v220';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261119_v220';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261119_v220';
+import { profileSetup } from '../profile.js?v=20261119_v220';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v220';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261119_v219';
+} from '../store.js?v=20261119_v220';
 
 const _resolveMemCache = new Map();
 
@@ -29,6 +29,7 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
     }
   }
   const query = qs({
+    id: it.id || '',
     provider: provId,
     title: it.originalTitle || it.title || prov?.name || provId,
     originalTitle: it.originalTitle || '',
@@ -63,7 +64,12 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
         if (mediaType === 'tv') {
           res.title = epName ? `${disp} — S${s}:B${e} · ${epName}` : `${disp} — ${s}. Sezon ${e}. Bölüm`;
           res.seriesTitle = it.seriesTitle || String(disp || '').split(' — ')[0].trim();
+        } else if (it.title) {
+          res.title = it.title;
         }
+        res.poster = res.poster || it.poster || it.backdrop || '';
+        res.thumbnail = res.thumbnail || it.poster || it.backdrop || '';
+        res.backdrop = res.backdrop || it.backdrop || it.poster || '';
         res.originalTitle = res.originalTitle || it.originalTitle || '';
         res.catalogProvider = prov?.id || it.catalogProvider || it.provider || 'cinema';
         if (it.streamUrl && !res.streamUrl) res.streamUrl = it.streamUrl;
@@ -93,8 +99,8 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
         if (targetProv) openProviderLoginModal(targetProv);
         return null;
       }
-      if (attempt === 1) {
-        if (!it.streamUrl) {
+      if (err.status === 404 || attempt === 1) {
+        if (!it.streamUrl && !opts?.silentErrors) {
           toast(humanApiError(err, 'Bu bölüm şu an açılamadı, lütfen tekrar dene.'));
           toastedErr = true;
         }

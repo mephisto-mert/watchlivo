@@ -1,10 +1,10 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261119_v219';
-import { api } from '../api.js?v=20261119_v219';
-import { expectedPosition } from '../sync.js?v=20261119_v219';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261119_v219';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261119_v219';
-import { ensureHlsJs } from './hls-loader.js?v=20261119_v219';
+import { SubtitleDubController } from './subtitles.js?v=20261119_v220';
+import { api } from '../api.js?v=20261119_v220';
+import { expectedPosition } from '../sync.js?v=20261119_v220';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261119_v220';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261119_v220';
+import { ensureHlsJs } from './hls-loader.js?v=20261119_v220';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -732,12 +732,18 @@ export class Html5Adapter {
             if (Array.isArray(fresh.servers) && fresh.servers.length) media.servers = fresh.servers;
             if (Array.isArray(fresh.altUrls) && fresh.altUrls.length) media.altUrls = fresh.altUrls;
             const freshList = [fresh.url, ...(fresh.altUrls || []), ...((fresh.servers || []).map((s) => s?.url))].filter(Boolean);
-            seenUrls.clear();
+            const normDedupUrl = (u) => String(u || '').replace(/([?&])proxy_segs=1(&|$)/g, '$1').replace(/[?&]$/, '');
+            const curNorm = normDedupUrl(this.currentUrl);
+            const seenNorm = new Set([...seenUrls].map(normDedupUrl));
+            seenNorm.add(curNorm);
             const prevLen = alts.length;
             for (const fu of freshList) {
-              if (fu !== this.currentUrl) pushAlt(fu);
+              const fn = normDedupUrl(fu);
+              if (fn && !seenNorm.has(fn)) {
+                seenNorm.add(fn);
+                pushAlt(fu);
+              }
             }
-            if (fresh.url && fresh.url !== this.currentUrl && !alts.includes(fresh.url)) alts.push(fresh.url);
             const addedAny = alts.length > prevLen;
             if (addedAny && nativeAltIdx < alts.length) {
               triedProxySegs = false;
@@ -960,11 +966,17 @@ export class Html5Adapter {
       });
       let netRetries = 0;
       let mediaRetries = 0;
+      let totalMediaErrors = 0;
+      let lastMediaErrPos = -1;
       let singleLevelStalls = 0;
       let firstSingleStallAt = 0;
       this.hls.on(window.Hls.Events.FRAG_BUFFERED, (_e, data) => {
         netRetries = 0;
-        mediaRetries = 0;
+        const curPos = Number(v.currentTime || 0);
+        if (lastMediaErrPos >= 0 && curPos - lastMediaErrPos >= 2.0) {
+          mediaRetries = 0;
+          lastMediaErrPos = -1;
+        }
         if (data?.frag?.type === 'audio' && !this.isMusic && v.readyState < 3) {
           return;
         }
@@ -976,6 +988,15 @@ export class Html5Adapter {
         const errCode = Number(data?.response?.code || 0);
         const isHardUpstreamDead = [401, 403, 404, 410, 451, 502, 504].includes(errCode);
         if (!data?.fatal) {
+          if (isHardUpstreamDead && (data?.details === 'fragLoadError' || data?.details === 'levelLoadError' || data?.details === 'manifestLoadError')) {
+            this._reportStreamHealth?.(srcUrl, false, { stalled: false, status: errCode });
+            if (nativeAltIdx < alts.length) {
+              loadCandidateUrl(alts[nativeAltIdx++], doneCb);
+              return;
+            }
+            handleExhaustedCandidates(srcUrl, doneCb);
+            return;
+          }
           if ((data?.details === 'fragLoadError' || data?.details === 'fragLoadTimeOut' || data?.details === 'levelLoadError') && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
             this._switchedToProxySegs = true;
             const proxied = withProxySegs(srcUrl);
@@ -984,10 +1005,17 @@ export class Html5Adapter {
               return;
             }
           }
-          if (isHardUpstreamDead && (data?.details === 'fragLoadError' || data?.details === 'levelLoadError' || data?.details === 'manifestLoadError') && nativeAltIdx < alts.length) {
-            this._reportStreamHealth?.(srcUrl, false, { stalled: false, status: errCode });
-            loadCandidateUrl(alts[nativeAltIdx++], doneCb);
-            return;
+          if ((data?.details === 'bufferAppendError' || data?.details === 'fragParsingError' || data?.details === 'bufferIncompatibleCodecsError')) {
+            totalMediaErrors += 1;
+            lastMediaErrPos = Number(v.currentTime || 0);
+            if (totalMediaErrors >= 3) {
+              if (nativeAltIdx < alts.length) {
+                loadCandidateUrl(alts[nativeAltIdx++], doneCb);
+                return;
+              }
+              handleExhaustedCandidates(srcUrl, doneCb);
+              return;
+            }
           }
           if ((data?.details === 'decryptError' || data?.details === 'keyLoadError') && nativeAltIdx < alts.length) {
             loadCandidateUrl(alts[nativeAltIdx++], doneCb);
@@ -1082,9 +1110,11 @@ export class Html5Adapter {
             }
           } else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
             mediaRetries += 1;
-            if (mediaRetries === 1) {
+            totalMediaErrors += 1;
+            lastMediaErrPos = Number(v.currentTime || 0);
+            if (mediaRetries === 1 && totalMediaErrors <= 2) {
               try { this.hls.recoverMediaError(); } catch (err) { /* ignore */ }
-            } else if (mediaRetries === 2) {
+            } else if (mediaRetries === 2 && totalMediaErrors <= 3) {
               try { this.hls.swapAudioCodec?.(); this.hls.recoverMediaError(); } catch (err) { /* ignore */ }
             } else if (canNativeHls && !triedHlsFallback) {
               triedHlsFallback = true;
@@ -1120,7 +1150,9 @@ export class Html5Adapter {
 
     v.addEventListener('error', () => {
       if (this._destroyed || this.video !== v || this.hls) return;
-      if (v.hasAttribute('crossorigin') && !v._retriedNoCors && this.currentUrl) {
+      const errCode = Number(v.error?.code || 0);
+      const isFirstPartyProxy = /^\/api\/rave\//i.test(String(this.currentUrl || ''));
+      if (!isFirstPartyProxy && errCode !== 3 && errCode !== 4 && v.hasAttribute('crossorigin') && !v._retriedNoCors && this.currentUrl) {
         v._retriedNoCors = true;
         v.removeAttribute('crossorigin');
         v.src = this.currentUrl;
@@ -1166,7 +1198,7 @@ export class Html5Adapter {
           resolve();
           return;
         }
-        if ((v.readyState >= 1 && !v.seeking) || v.paused) {
+        if (v.readyState >= 1 && (!v.seeking || v.paused)) {
           clearBuf();
           this.events.onReady?.();
         } else {
@@ -1310,8 +1342,8 @@ export class Html5Adapter {
       const isStuck = v.readyState < 2 || (this.wantPlaying && !v.paused && v.currentTime <= 0.15 && v.readyState < 3);
       if (isStuck && stallChecks < 6) {
         stallChecks += 1;
-        const activelyLoadingMedia = Boolean(v.networkState === 2 || (v.buffered && v.buffered.length > 0));
-        if (stallChecks === 1 && ((this.hls && this.hls.levels?.length > 0) || (!this.hls && activelyLoadingMedia))) {
+        const hasAnyBuffer = Boolean(v.buffered && v.buffered.length > 0);
+        if (stallChecks === 1 && hasAnyBuffer && (this.hls?.levels?.length > 0 || v.networkState === 2)) {
           try {
             if (this.hls && this.hls.levels?.length > 1) this.hls.nextAutoLevel = 0;
             if (v.readyState >= 2 && this.wantPlaying && v.paused) this.tryPlay();
@@ -1325,10 +1357,13 @@ export class Html5Adapter {
           v.removeAttribute('src');
           attachHlsJs(this.currentUrl || url);
           this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
-        } else if (this.hls) {
+        } else if (stallChecks < 2 && this.hls) {
           try {
             if (this.hls.levels?.length > 1) this.hls.nextAutoLevel = 0;
           } catch (e) { /* ignore */ }
+          this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
+        } else {
+          handleExhaustedCandidates(this.currentUrl);
         }
       }
     };
@@ -1350,7 +1385,8 @@ export class Html5Adapter {
         lastWatchdogPos = curT;
         return;
       }
-      if (Math.abs(curT - lastWatchdogPos) < 0.08 && curT > 0.5) {
+      const isStartupStall = v.readyState < 2 && Date.now() - (this.loadedAtMs || 0) > 8000;
+      if ((Math.abs(curT - lastWatchdogPos) < 0.08 && curT > 0.5) || isStartupStall) {
         consecutiveMidStalls += 1;
         if (v.paused && v.readyState >= 2) {
           this.tryPlay();

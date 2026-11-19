@@ -425,8 +425,8 @@ async function safeFetchSecondary(
   }
   const ua = request.headers.get("user-agent") || "";
   const isBotUa = BOT_UA_RE.test(ua);
-  const rootCacheKey = isIdempotent && safePath === "/" && !isBotUa ? new Request("https://edge-cache-v216.watchlivo.internal/__root_shell__", { method: "GET" }) : null;
-  const staticCacheKey = isIdempotent && isStaticCacheablePath(safePath) ? new Request(`https://edge-cache-v216.watchlivo.internal${safePath}${url.search}`, { method: "GET" }) : null;
+  const rootCacheKey = isIdempotent && safePath === "/" && !isBotUa ? new Request("https://edge-cache-v220.watchlivo.internal/__root_shell__", { method: "GET" }) : null;
+  const staticCacheKey = isIdempotent && isStaticCacheablePath(safePath) ? new Request(`https://edge-cache-v220.watchlivo.internal${safePath}${url.search}`, { method: "GET" }) : null;
 
   let sawExplicitSuspension = false;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -566,7 +566,7 @@ export default {
       const edgeCache = getEdgeCache();
       if (edgeCache && (request.method === "GET" || request.method === "HEAD") && isStaticCacheablePath(safePath)) {
         try {
-          const staticKey = new Request(`https://edge-cache-v216.watchlivo.internal${safePath}${url.search}`, { method: "GET" });
+          const staticKey = new Request(`https://edge-cache-v220.watchlivo.internal${safePath}${url.search}`, { method: "GET" });
           const cachedStatic = await edgeCache.match(staticKey);
           if (cachedStatic) {
             const h = new Headers(cachedStatic.headers);
@@ -603,7 +603,15 @@ export default {
               return pat.endsWith(".") ? rawHost.includes(pat) : (rawHost === pat || rawHost.endsWith(`.${pat}`) || rawHost.includes(pat));
             });
           }
-          if (!bypassWorker && (rawTarget.includes("/sheila_") || (url.searchParams.get("referer") || "").includes("molystream.org"))) {
+          const reqRef = url.searchParams.get("referer") || "";
+          if (
+            !bypassWorker &&
+            (rawTarget.includes("/sheila_") ||
+              rawTarget.includes("/file/tau-video/") ||
+              reqRef.includes("molystream.org") ||
+              reqRef.includes("tau-video.xyz") ||
+              reqRef.includes("filmmodu."))
+          ) {
             bypassWorker = true;
           }
         }

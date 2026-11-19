@@ -1,15 +1,15 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261119_v219';
-import { api, qs as buildQs } from '../api.js?v=20261119_v219';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261119_v219';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v219';
-import { getProvider } from '../providers.js?v=20261119_v219';
-import { expectedPosition } from '../sync.js?v=20261119_v219';
-import { thumbFor } from './lobby.js?v=20261119_v219';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261119_v219';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261119_v219';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261119_v219';
-import { avatar } from '../profile.js?v=20261119_v219';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261119_v220';
+import { api, qs as buildQs } from '../api.js?v=20261119_v220';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261119_v220';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v220';
+import { getProvider } from '../providers.js?v=20261119_v220';
+import { expectedPosition } from '../sync.js?v=20261119_v220';
+import { thumbFor } from './lobby.js?v=20261119_v220';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261119_v220';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261119_v220';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261119_v220';
+import { avatar } from '../profile.js?v=20261119_v220';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -20,7 +20,7 @@ const VIDEO_FILTERS = {
 };
 
 const SN_ICONS = {
-  fit: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M7 9h3M7 9v3M17 15h-3M17 15v-3"/></svg>',
+  fit: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M7 9h3M7 9v3M17 15h-3M17 15v-3"/></svg>',
 };
 
 export function buildControls(frame, ctx) {
@@ -201,7 +201,24 @@ export function buildControls(frame, ctx) {
 
   const stageBackdrop = h('div', { class: 'stage-ambient-poster', id: 'stage-ambient-poster' });
   const kickerBadge = h('div', { class: 'ctl-kicker-badge' }, h('span', { class: 'ctl-kicker-dot' }), 'ŞİMDİ OYNATILIYOR');
-  const thumb = h('img', { class: 'ctl-thumb', alt: '' });
+  const thumb = h('img', {
+    class: 'ctl-thumb',
+    alt: '',
+    src: '/static/watchlivo-poster.svg',
+    referrerpolicy: 'no-referrer',
+    onerror: (ev) => {
+      const img = ev.currentTarget;
+      const mNow = state.mesh?.media;
+      const step = Number(img.dataset.errStep || 0);
+      if (step === 0 && mNow?.tmdbId && /^\d+$/.test(String(mNow.tmdbId))) {
+        img.dataset.errStep = '1';
+        img.src = `/api/rave/poster?tid=${encodeURIComponent(String(mNow.tmdbId))}&mt=${encodeURIComponent(mNow.mediaType === 'tv' ? 'tv' : 'movie')}`;
+        return;
+      }
+      img.onerror = null;
+      img.src = '/static/watchlivo-poster.svg';
+    },
+  });
   const title = h('div', { class: 'ctl-title' });
   const artist = h('div', { class: 'ctl-artist' });
   const provLogo = h('img', { class: 'ctl-prov', id: 'video-provider-logo', alt: '' });
@@ -451,6 +468,10 @@ export function buildControls(frame, ctx) {
     toast('Tarayıcı menüsünden "Yansıt / Cast" veya AirPlay seçeneğini kullanabilirsiniz.');
   };
   const toggleFitMode = () => {
+    if (!host.adapter?.video) {
+      toast('Ekran oranı yalnızca doğrudan video oynatıcıda değiştirilebilir.');
+      return;
+    }
     const nextFit = frame.dataset.fit === 'cover' ? 'contain' : 'cover';
     frame.dataset.fit = nextFit;
     fitBtn.classList.toggle('on', nextFit === 'cover');
@@ -2849,7 +2870,11 @@ export function buildControls(frame, ctx) {
     updateUnmuteVisibility();
     const prov = getProvider(m.catalogProvider || m.provider);
     const t = thumbFor(m);
-    if (thumb.getAttribute('src') !== t) thumb.src = t || '/static/watchlivo-logo.svg';
+    const nextThumbSrc = t || '/static/watchlivo-poster.svg';
+    if (thumb.getAttribute('src') !== nextThumbSrc) {
+      thumb.dataset.errStep = '0';
+      thumb.setAttribute('src', nextThumbSrc);
+    }
     const backdropImg = m.backdrop || m.backdropUrl || t;
     const bgUrl = backdropImg ? `url("${backdropImg}")` : 'none';
     if (stageBackdrop.style.backgroundImage !== bgUrl) stageBackdrop.style.backgroundImage = bgUrl;
@@ -2857,7 +2882,13 @@ export function buildControls(frame, ctx) {
     if (!syncText.textContent) syncText.textContent = '0ms · Senkron';
     title.textContent = m.title || 'Video';
     artist.textContent = m.channel || prov?.name || '';
-    provLogo.src = prov?.logo || ''; provLogo.style.display = prov?.logo ? '' : 'none';
+    if (prov?.logo) {
+      if (provLogo.getAttribute('src') !== prov.logo) provLogo.src = prov.logo;
+      provLogo.style.display = '';
+    } else {
+      provLogo.removeAttribute('src');
+      provLogo.style.display = 'none';
+    }
     const parsedTitleEp = String(m.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm/i);
     const curSeasonNum = Number(m.season || parsedTitleEp?.[1] || parsedTitleEp?.[3] || 0);
     const curEpNum = Number(m.episode || parsedTitleEp?.[2] || parsedTitleEp?.[4] || 0);
@@ -2883,7 +2914,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261119_v219',
+            v: '20261119_v220',
           });
           api(`/api/rave/seasons?${q.toString()}`, { timeout: 8000 })
             .then((inf) => {

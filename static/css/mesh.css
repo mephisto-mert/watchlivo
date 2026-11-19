@@ -6193,32 +6193,115 @@ html.is-android-pip .rave-subtitle-cue {
   }
 }
 
-@media (max-width: 430px) {
+/* Hide center play HUD when stage-error overlay is active + scroll safety on short mobile player */
+.video-frame:has(.stage-error:not(.hidden)) .ctl-center-hud {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.stage-error {
+  overflow-y: auto !important;
+}
+
+@media (max-width: 600px) {
   #mesh-root > .navbar .nav-icon.room-nav-pill {
     width: 36px !important;
     height: 36px !important;
     min-width: 36px !important;
     min-height: 36px !important;
   }
+  #mesh-root > .navbar .room-brand-capsule .logo {
+    display: none !important;
+  }
   #mesh-root > .navbar .mesh-title,
   #mesh-root > .navbar #room-header-title {
-    min-width: 0 !important;
-    flex: 1 1 60px !important;
-    font-size: 0.75rem !important;
+    min-width: 56px !important;
+    max-width: none !important;
+    flex: 1 1 70px !important;
+    font-size: 0.76rem !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
   }
   #mesh-root > .navbar .privacy-chip {
-    max-width: none !important;
+    max-width: 96px !important;
     width: auto !important;
-    min-height: 32px !important;
-    padding: 4px 8px !important;
-    font-size: 0.68rem !important;
+    min-height: 36px !important;
+    height: 36px !important;
+    padding: 0 7px !important;
+    font-size: 0.66rem !important;
     white-space: nowrap !important;
-    flex-shrink: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    flex-shrink: 1 !important;
   }
+  /* High-specificity overrides beating L5646 / L5844 / L5925 / L5957 */
   .video-frame .ctl-bar-row .ctl-action,
-  .video-frame .ctl-bar-row #ctl-play,
-  .video-frame .ctl-top .ctl-pill {
+  .video-frame:not(.fullscreen) .ctl-bar-row .ctl-action,
+  .video-frame:not(.fullscreen) #ctl-sub-btn,
+  .video-frame .ctl-bar-row #ctl-sub-btn,
+  .video-frame .ctl-bar-row #ctl-play {
+    width: 36px !important;
+    height: 36px !important;
     min-width: 36px !important;
     min-height: 36px !important;
+    flex: 0 0 36px !important;
+  }
+  .video-frame .ctl-top #ctl-sub-pill:not(.hidden),
+  .video-frame .ctl-top #ctl-ep-btn:not(.hidden),
+  .video-frame .ctl-top #ctl-next-ep-top:not(.hidden),
+  .video-frame .ctl-top #ctl-prev-ep-top:not(.hidden),
+  .video-frame .ctl-top #ctl-orig-btn:not(.hidden) {
+    height: 36px !important;
+    min-height: 36px !important;
+    min-width: 36px !important;
+    padding: 0 8px !important;
+    font-size: 0.7rem !important;
+  }
+  .video-frame .ctl-top-right {
+    max-width: 62% !important;
+  }
+  .video-frame .ctl-top #ctl-sub-pill:not(.hidden) {
+    max-width: 108px !important;
+  }
+  /* Voice / Call / Quick-bar / Reaction / Chat-input >= 36px touch targets */
+  #mesh-root .discord-stage-btn:not(.hidden),
+  #mesh-root .discord-join-btn:not(.hidden),
+  #mesh-root .discord-ctl-pill,
+  #mesh-root .chat-q-pill,
+  #mesh-root .chat-access-seg .privacy-opt,
+  #mesh-root .chat-q-close,
+  #mesh-root .chat-hub-close,
+  #mesh-root .react-emoji-btn,
+  #mesh-root #btn-chat-break:not(.hidden),
+  body:not(.mesh-minimized) #mesh-root:not(.hidden) .chatbar .chat-input .chat-tools-toggle,
+  body:not(.mesh-minimized) #mesh-root:not(.hidden) .chatbar .chat-input .voice-note-btn,
+  body:not(.mesh-minimized) #mesh-root:not(.hidden) .chatbar .chat-input #btn-chat-gif,
+  body:not(.mesh-minimized) #mesh-root:not(.hidden) .chatbar .chat-input .ctl-action {
+    min-height: 36px !important;
+    min-width: 36px !important;
+  }
+  #mesh-root .react-emoji-btn {
+    flex: 0 0 36px !important;
+    width: 36px !important;
+    height: 36px !important;
+  }
+  #mesh-root .chat-q-close,
+  #mesh-root .chat-hub-close {
+    width: 36px !important;
+    height: 36px !important;
+  }
+  #mesh-root .discord-stage-btn:not(.hidden),
+  body:not(.mesh-minimized) #mesh-root:not(.hidden) .chatbar .chat-input .chat-tools-toggle,
+  body:not(.mesh-minimized) #mesh-root:not(.hidden) .chatbar .chat-input .voice-note-btn,
+  body:not(.mesh-minimized) #mesh-root:not(.hidden) .chatbar .chat-input #btn-chat-gif,
+  body:not(.mesh-minimized) #mesh-root:not(.hidden) .chatbar .chat-input .ctl-action {
+    width: 36px !important;
+    height: 36px !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .video-frame .ctl-top #ctl-sub-pill:not(.hidden) {
+    display: none !important;
   }
 }

@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261119_v219';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261119_v220';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -630,7 +630,6 @@ export function openDownloadModal() {
   const inApk = isNativeWatchlivoApp();
   const box = h('div', { class: 'wl-download-modal' },
     h('div', { class: 'wl-download-header' },
-      h('h3', {}, '📱 Watchlivo Cihaz Uygulamaları'),
       h('p', {}, 'Tek tıkla, tam ekran, yüksek performans ve arkadaşlarınla sıfır gecikmeli izle.')
     ),
     h('div', { class: 'wl-download-grid' },

@@ -7824,3 +7824,159 @@ body:has(#popup-root:not(:empty)) .wl-cookie-banner,
 .super-results:empty {
   display: none !important;
 }
+
+/* --- v220 Mobile & Desktop UI Polish (Toast, Continue Watching, Providers, Theme Studio, Download Modal) --- */
+#toast-root,
+.toast-root {
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: min(520px, calc(100vw - 24px)) !important;
+  max-width: calc(100vw - 24px) !important;
+  pointer-events: none;
+}
+.toast,
+.toast.wl-dynamic-toast {
+  max-width: 100% !important;
+  padding: 9px 14px !important;
+  border-radius: 16px !important;
+  gap: 8px !important;
+  font-size: 0.82rem !important;
+  line-height: 1.35 !important;
+  box-sizing: border-box !important;
+  pointer-events: auto;
+}
+.wl-toast-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.wl-continue-card {
+  flex: 0 0 min(264px, 100%) !important;
+  width: min(264px, 100%) !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+.wl-continue-body {
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+.wl-continue-title {
+  white-space: normal !important;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+  line-height: 1.25 !important;
+}
+
+.rave-providers-title-group {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+.rave-providers-actions {
+  flex-wrap: wrap !important;
+  min-width: 0 !important;
+}
+.rave-providers-actions .provider-head-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  white-space: nowrap !important;
+  height: auto !important;
+  min-height: 36px !important;
+  padding: 6px 12px !important;
+}
+
+/* Download modal 3-card layout & iOS card accent */
+.wl-download-card.ios {
+  border-color: rgba(167, 139, 250, 0.35);
+  background: linear-gradient(155deg, rgba(139, 92, 246, 0.14), rgba(15, 20, 34, 0.92));
+}
+.wl-download-card.ios .wl-download-icon {
+  background: rgba(139, 92, 246, 0.22);
+  border-color: rgba(167, 139, 250, 0.4);
+}
+@media (min-width: 640px) {
+  .wl-download-card.windows {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 900px) {
+  .toast.wl-dynamic-toast {
+    padding: 8px 12px !important;
+    font-size: 0.78rem !important;
+    border-radius: 14px !important;
+  }
+  body:has(#mesh-root:not(.hidden)):not(.mesh-minimized) .toast-root {
+    top: calc(58px + env(safe-area-inset-top, 0px)) !important;
+    bottom: auto !important;
+  }
+  .wl-theme-strip-more {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+    min-height: 36px !important;
+    padding: 0 10px !important;
+    font-size: 0.72rem !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .wl-continue-strip {
+    -webkit-mask-image: none !important;
+    mask-image: none !important;
+  }
+  .wl-continue-card {
+    flex: 0 0 min(276px, 100%) !important;
+    width: min(276px, 100%) !important;
+  }
+  .wl-continue-actions .btn.sm {
+    height: auto !important;
+    min-height: 36px !important;
+  }
+  .rave-providers-title-group {
+    flex: 1 1 100% !important;
+    gap: 6px !important;
+  }
+  .rave-providers-title {
+    flex: 0 1 auto !important;
+  }
+  .rave-providers-badge {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+  .rave-providers-actions {
+    width: 100% !important;
+    flex-wrap: wrap !important;
+  }
+  .rave-providers-actions .provider-head-btn {
+    max-width: 100% !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+}
+
+@media (max-width: 365px) {
+  .top-nav-capsule #btn-create-room .create-room-lbl,
+  .top-nav-capsule .btn-create-room .create-room-lbl {
+    display: none !important;
+  }
+  .top-nav-capsule #btn-create-room,
+  .top-nav-capsule .btn-create-room {
+    width: 36px !important;
+    min-width: 36px !important;
+    padding: 0 !important;
+    justify-content: center !important;
+  }
+}

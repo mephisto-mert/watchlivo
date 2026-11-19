@@ -275,15 +275,18 @@ def main() -> None:
     rooms_payload = fetch_local_json("/api/rooms", {"rooms": prev_boot.get("curatedRooms") or []})
     curated_rooms = [r for r in rooms_payload.get("rooms", []) if isinstance(r, dict) and r.get("curated")]
     new_rel = fetch_local_json("/api/rave/new-releases", {"ok": True, "items": prev_boot.get("newReleases") or all_items[:24]})
-    fallback_eps = prev_boot.get("latestEpisodes") or [
+    fallback_eps = [
+        it for it in (prev_boot.get("latestEpisodes") or [])
+        if isinstance(it, dict) and not str(it.get("id") or "").lower().startswith("dbx-")
+    ] or [
         {**it, "season": 1, "episode": 1}
         for it in all_items
-        if isinstance(it, dict) and it.get("mediaType") == "tv"
+        if isinstance(it, dict) and it.get("mediaType") == "tv" and not str(it.get("id") or "").lower().startswith("dbx-")
     ][:16]
     latest_eps = fetch_local_json("/api/rave/latest-episodes", {"ok": True, "items": fallback_eps})
 
     bootstrap = {
-        "version": "20261114_v215",
+        "version": "20261119_v220",
         "catalog": all_items,
         "curatedRooms": curated_rooms,
         "newReleases": new_rel.get("items") or all_items[:24],
