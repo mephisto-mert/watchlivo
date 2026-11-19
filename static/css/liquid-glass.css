@@ -608,6 +608,12 @@ header.navbar.top-nav-capsule {
   font-weight: 800 !important;
   box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 32%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.42) !important;
 }
+#mesh-root .discord-join-btn.active {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.88), rgba(220, 38, 38, 0.88)) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(252, 165, 165, 0.45) !important;
+  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+}
 #mesh-root .chatbar .chat-input {
   background: rgba(255, 255, 255, 0.045) !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;

@@ -121,7 +121,7 @@ body.vortex-fs .panel-video {
 @keyframes danmakuFly { 0% { transform: translate3d(0, 0, 0); } 100% { transform: translate3d(calc(-100vw - 120%), 0, 0); } }
 .skip-intro-pill { position: absolute; right: 20px; bottom: 72px; z-index: 16; padding: .52em 1.05em; border-radius: 99px; font-size: .84em; font-weight: 800; box-shadow: 0 8px 24px rgba(0,0,0,.65); pointer-events: auto; cursor: pointer; }
 .next-ep-banner { position: absolute; right: 20px; bottom: 72px; z-index: 16; display: flex; align-items: center; gap: .65em; padding: .55em .95em; border-radius: 14px; font-size: .84em; font-weight: 700; border: 1px solid rgba(99, 102, 241,.35); box-shadow: 0 10px 28px rgba(0,0,0,.75); pointer-events: auto; }
-.cam-dock { position: absolute; inset: 0; z-index: 14; display: block; pointer-events: none; overflow: hidden; }
+.cam-dock { position: absolute; inset: 0; z-index: 34; display: block; pointer-events: none; overflow: hidden; }
 .cam-bubble {
   position: absolute; left: 12px; top: 52px; width: 132px; aspect-ratio: 4/3;
   border-radius: 13px; overflow: hidden; border: 1.5px solid rgba(99, 102, 241,.6);
@@ -131,7 +131,7 @@ body.vortex-fs .panel-video {
 .cam-bubble:not(.is-dragging) {
   transition: left .22s cubic-bezier(.16, 1, .3, 1), top .22s cubic-bezier(.16, 1, .3, 1), width .2s ease, height .2s ease, transform .18s ease, box-shadow .18s ease;
 }
-.cam-bubble.is-dragging { cursor: grabbing; z-index: 26 !important; transform: scale(1.04); box-shadow: 0 14px 34px rgba(0,0,0,.85), 0 0 16px rgba(99, 102, 241,.45); }
+.cam-bubble.is-dragging { cursor: grabbing; z-index: 37 !important; transform: scale(1.04); box-shadow: 0 14px 34px rgba(0,0,0,.85), 0 0 16px rgba(99, 102, 241,.45); }
 .cam-bubble.swap-target { border-color: #f59e0b !important; box-shadow: 0 0 0 2.5px #f59e0b, 0 0 18px rgba(245,158,11,.8) !important; transform: scale(1.06); }
 .cam-bubble video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
 .cam-bubble-tag { position: absolute; left: 5px; bottom: 4px; max-width: calc(100% - 10px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 1px 6px; border-radius: 6px; font-size: .64em; font-weight: 700; background: rgba(0,0,0,.74); color: #fff; pointer-events: none; }
@@ -1145,7 +1145,7 @@ body.vortex-fs .video-frame .ctl-fs-reactions { display: inline-flex; }
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important;
   gap: 8px !important; align-items: stretch !important;
   background: rgba(6, 9, 16, .86); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-  padding: 8px; border-radius: 14px; z-index: 28 !important; pointer-events: auto !important;
+  padding: 8px; border-radius: 14px; z-index: 34 !important; pointer-events: auto !important;
 }
 .cam-dock.grid-mode .cam-bubble {
   position: relative !important; left: auto !important; top: auto !important;
@@ -1156,7 +1156,7 @@ body.vortex-fs .video-frame .ctl-fs-reactions { display: inline-flex; }
 .cam-bubble.spotlight {
   position: absolute !important; inset: 42px 8px 56px 8px !important;
   left: 8px !important; top: 42px !important;
-  width: auto !important; height: auto !important; z-index: 30 !important;
+  width: auto !important; height: auto !important; z-index: 36 !important;
   border-radius: 14px !important; border: 2px solid #6366f1 !important;
   background: #05070e !important; box-shadow: 0 16px 48px rgba(0, 0, 0, .85) !important;
 }

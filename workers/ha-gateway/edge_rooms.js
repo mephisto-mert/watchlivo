@@ -297,12 +297,16 @@ function makeRoomSkeleton(roomId, opts = {}) {
     creatorCid: cid,
     host_id: cid,
     co_hosts: isCur ? [] : [cid],
+    stage_speakers: [],
     rev: 1,
     curated: isCur,
     media: buildFreshMedia(opts.media, creator, t),
+    queue: [],
+    voteEndsAt: 0,
     participants: {},
     kicked: [],
     skip_votes: [],
+    polls: [],
     pollVotes: {},
     chat: [],
     events: [],
@@ -403,13 +407,22 @@ function pruneStaleParticipants(rm, activeCids = null) {
 async function serializeEdgeRoom(rm, viewerCid = "", env = null) {
   const t = nowSec();
   const isCur = Boolean(rm.curated);
+  const stageSet = new Set(Array.isArray(rm.stage_speakers) ? rm.stage_speakers : []);
   const parts = [];
   for (const [pid, p] of Object.entries(rm.participants || {})) {
     parts.push({
       ...p,
+      muted: p.muted !== undefined ? Boolean(p.muted) : true,
+      speaking: Boolean(p.speaking),
+      cam: Boolean(p.cam),
+      screen: Boolean(p.screen),
+      inCall: Boolean(p.inCall),
+      deafened: Boolean(p.deafened),
+      handRaised: Boolean(p.handRaised),
       isHost: !isCur && pid === rm.host_id,
       isCoHost: !isCur && (rm.co_hosts || []).includes(pid),
       isCreator: !isCur && pid === rm.creatorCid,
+      isStageSpeaker: !isCur && stageSet.has(pid),
     });
   }
   const mediaOut = buildMediaOut(rm);
@@ -429,9 +442,10 @@ async function serializeEdgeRoom(rm, viewerCid = "", env = null) {
   const isViewerCreator = Boolean(!isCur && viewerCid && viewerCid === rm.creatorCid);
   const isViewerHost = Boolean(!isCur && viewerCid && viewerCid === rm.host_id);
   const filteredSignals = (rm.signals || [])
-    .filter((s) => viewerCid && (s.targetId === viewerCid || s.fromId === viewerCid))
-    .slice(-30);
+    .filter((s) => s && (t - Number(s.ts || 0)) < 25 && viewerCid && (s.targetId === viewerCid || s.fromId === viewerCid))
+    .slice(-120);
   const skipNeeded = Math.max(1, Math.ceil(Math.max(1, parts.length) / 2));
+  const skipVotes = Array.isArray(rm.skip_votes) ? rm.skip_votes : [];
   return {
     id: rm.id,
     name: rm.name,
@@ -447,18 +461,21 @@ async function serializeEdgeRoom(rm, viewerCid = "", env = null) {
     co_hosts: isCur ? [] : (rm.co_hosts || []).filter((id) => id === viewerCid),
     isHost: isViewerHost,
     isCreator: isViewerCreator,
-    stage_speakers: [],
+    stage_speakers: isCur ? [] : (Array.isArray(rm.stage_speakers) ? rm.stage_speakers : []),
     curated: isCur,
     rev: rm.rev || 1,
     media: mediaOut,
-    queue: [],
-    skip_votes: rm.skip_votes || [],
+    queue: Array.isArray(rm.queue) ? rm.queue : [],
+    voteEndsAt: Number(rm.voteEndsAt || 0),
+    skip_votes: skipVotes,
+    skipVotes,
     skipNeeded,
+    polls: Array.isArray(rm.polls) ? rm.polls : [],
     pollVotes: rm.pollVotes || {},
     participants: parts,
     participantCount: parts.length,
     chat: (rm.chat || []).slice(-60),
-    events: (rm.events || []).slice(-40),
+    events: (rm.events || []).slice(-50),
     signals: filteredSignals,
     serverNow: t,
     syncToken,
@@ -511,6 +528,142 @@ function sanitizeAvatarUrl(raw) {
   return "";
 }
 
+function sanitizeChatGif(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  if (/^https:\/\//i.test(s)) return s.slice(0, 512);
+  return "";
+}
+
+function sanitizeChatSnapshot(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  if (/^https:\/\//i.test(s)) return s.slice(0, 512);
+  if (/^data:image\/(?:png|jpeg|jpg|gif|webp);base64,[A-Za-z0-9+/=]+$/i.test(s) && s.length <= 240000) return s;
+  return "";
+}
+
+function sanitizeChatAudioNote(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const rawUrl = String(raw.url || "").trim();
+  let url = "";
+  if (/^\/api\/rave\/voice-note\/[a-zA-Z0-9_-]{4,40}$/.test(rawUrl) || /^https:\/\//i.test(rawUrl)) {
+    url = rawUrl.slice(0, 512);
+  }
+  let dataUrl = "";
+  if (!url) {
+    const rawData = String(raw.dataUrl || "").trim();
+    if (/^data:(?:audio\/[a-zA-Z0-9.+-]+|video\/(?:webm|mp4))(?:;[a-zA-Z0-9.=+-]+)*;base64,[A-Za-z0-9+/=]+$/i.test(rawData) && rawData.length <= 360000) {
+      dataUrl = rawData;
+    }
+  }
+  if (!url && !dataUrl) return null;
+  let mime = String(raw.mime || "audio/webm").trim().slice(0, 48);
+  if (!mime.startsWith("audio/")) mime = "audio/webm";
+  const dur = Math.max(0.2, Math.min(120, Number(raw.duration) || 1));
+  const peaks = Array.isArray(raw.peaks)
+    ? raw.peaks.slice(0, 80).map((n) => Math.max(0, Math.min(1, Number(n) || 0)))
+    : [];
+  const out = { mime, duration: Math.round(dur * 10) / 10, peaks };
+  if (url) out.url = url;
+  if (dataUrl) out.dataUrl = dataUrl;
+  return out;
+}
+
+function sanitizeChatReplyTo(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const user = String(raw.user || "").trim().slice(0, 40);
+  const text = String(raw.text || "").trim().slice(0, 140);
+  if (!user && !text) return null;
+  return {
+    id: String(raw.id || "").slice(0, 64),
+    user: user || "Mesaj",
+    text,
+    color: /^#[0-9a-fA-F]{3,8}$/.test(String(raw.color || "")) ? raw.color : "#6366f1",
+  };
+}
+
+function formatIstanbulHHMM() {
+  try {
+    return new Intl.DateTimeFormat("tr-TR", { timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
+  } catch {
+    const d = new Date();
+    return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  }
+}
+
+function sanitizeQueueItem(raw, uname, cid) {
+  if (!raw || typeof raw !== "object") return null;
+  const url = String(raw.url || "").trim().slice(0, 1500);
+  const videoId = String(raw.videoId || "").trim().slice(0, 128);
+  const embedUrl = String(raw.embedUrl || "").trim().slice(0, 1500);
+  const tmdbId = String(raw.tmdbId || "").trim().slice(0, 32);
+  if (!url && !videoId && !embedUrl && !tmdbId) return null;
+  return {
+    id: String(raw.id || `q_${Date.now().toString(36)}_${makeHexNonce(3)}`).slice(0, 64),
+    provider: String(raw.provider || "hls").slice(0, 32),
+    streamType: String(raw.streamType || "hls").slice(0, 32),
+    url,
+    embedUrl,
+    videoId,
+    tmdbId,
+    mediaType: String(raw.mediaType || "movie").slice(0, 24),
+    season: Number(raw.season || 0) || 0,
+    episode: Number(raw.episode || 0) || 0,
+    title: String(raw.title || raw.songTitle || "Video").slice(0, 140),
+    songTitle: String(raw.songTitle || "").slice(0, 140),
+    artist: String(raw.artist || "").slice(0, 100),
+    seriesTitle: String(raw.seriesTitle || "").slice(0, 140),
+    originalTitle: String(raw.originalTitle || "").slice(0, 140),
+    catalogProvider: String(raw.catalogProvider || "").slice(0, 48),
+    poster: String(raw.poster || raw.thumbnail || "").slice(0, 512),
+    backdrop: String(raw.backdrop || raw.poster || raw.thumbnail || "").slice(0, 512),
+    thumbnail: String(raw.thumbnail || raw.poster || "").slice(0, 512),
+    duration: Number(raw.duration || 0) || 0,
+    live: Boolean(raw.live),
+    isMusic: Boolean(raw.isMusic),
+    channel: String(raw.channel || "").slice(0, 80),
+    musicPlatformLabel: String(raw.musicPlatformLabel || "").slice(0, 64),
+    altUrls: Array.isArray(raw.altUrls) ? raw.altUrls.slice(0, 12) : [],
+    servers: Array.isArray(raw.servers) ? raw.servers.slice(0, 16) : [],
+    audioTracks: Array.isArray(raw.audioTracks) ? raw.audioTracks.slice(0, 12) : [],
+    subtitleTracks: Array.isArray(raw.subtitleTracks) ? raw.subtitleTracks.slice(0, 16) : [],
+    addedBy: uname,
+    addedByCid: cid,
+    votes: [],
+  };
+}
+
+function canUserSpeakOrStream(rm, cid) {
+  const mode = String(rm.voipMode || "all");
+  if (mode === "off") return false;
+  if (mode === "leader") return isPrivilegedInRoom(rm, cid);
+  if (mode === "stage") {
+    return isPrivilegedInRoom(rm, cid) || (Array.isArray(rm.stage_speakers) && rm.stage_speakers.includes(cid));
+  }
+  return true;
+}
+
+function enforceVoipModeOnParticipants(rm) {
+  const mode = String(rm.voipMode || "all");
+  if (mode === "all" || mode === "on") return;
+  for (const [pid, p] of Object.entries(rm.participants || {})) {
+    if (!p) continue;
+    if (!canUserSpeakOrStream(rm, pid)) {
+      p.muted = true;
+      p.speaking = false;
+      p.cam = false;
+      p.screen = false;
+    }
+  }
+}
+
+function makeUserTag(uname, cid) {
+  const base = String(uname || "Misafir").split("#")[0].trim() || "Misafir";
+  const tail = String(cid || "").slice(-4);
+  return tail ? `${base}#${tail}` : base;
+}
+
 function applyRoomAction(rm, cid, body, opts = {}) {
   const t = nowSec();
   const act = String(body.type || "poll");
@@ -522,8 +675,29 @@ function applyRoomAction(rm, cid, body, opts = {}) {
   let pendingPassword;
 
   if (act === "batch" && Array.isArray(body.items)) {
+    const sharedMeta = {
+      clientId: body.clientId,
+      clientToken: body.clientToken,
+      uid: body.uid,
+      username: body.username,
+      handle: body.handle,
+      avatarUrl: body.avatarUrl,
+      bio: body.bio,
+      statusText: body.statusText,
+      statusEmoji: body.statusEmoji,
+      medal: body.medal,
+      watchMinutes: body.watchMinutes,
+      hideWatching: body.hideWatching,
+      hideFriends: body.hideFriends,
+      hideLocation: body.hideLocation,
+      color: body.color,
+      device: body.device,
+      country: body.country,
+      activeMedia: body.activeMedia,
+    };
     for (const item of body.items) {
-      const sub = applyRoomAction(rm, cid, { ...body, ...item }, opts);
+      if (!item || typeof item !== "object") continue;
+      const sub = applyRoomAction(rm, cid, { ...sharedMeta, ...item }, opts);
       dirty = dirty || sub.dirty;
       pushedEvents.push(...sub.pushedEvents);
       privateSignals.push(...sub.privateSignals);
@@ -539,6 +713,9 @@ function applyRoomAction(rm, cid, body, opts = {}) {
   if (act === "leave") {
     if (rm.participants?.[cid]) {
       delete rm.participants[cid];
+      if (Array.isArray(rm.stage_speakers)) {
+        rm.stage_speakers = rm.stage_speakers.filter((x) => x !== cid);
+      }
       rm.rev = (rm.rev || 1) + 1;
       dirty = true;
     }
@@ -546,26 +723,80 @@ function applyRoomAction(rm, cid, body, opts = {}) {
   }
 
   const prevP = rm.participants?.[cid];
-  const nextMuted = body.muted !== undefined ? Boolean(body.muted) : Boolean(prevP?.muted ?? true);
-  const nextSpeaking = Boolean(body.speaking);
-  const nextCam = Boolean(body.cam);
+  const isVoicePayload = act === "voice_state";
+  let nextMuted = body.muted !== undefined ? Boolean(body.muted) : Boolean(prevP?.muted ?? true);
+  let nextSpeaking = body.speaking !== undefined ? Boolean(body.speaking) : Boolean(prevP?.speaking ?? false);
+  let nextCam = body.cam !== undefined ? Boolean(body.cam) : Boolean(prevP?.cam ?? false);
+  let nextScreen = body.screen !== undefined ? Boolean(body.screen) : Boolean(prevP?.screen ?? false);
+  let nextInCall = body.inCall !== undefined ? Boolean(body.inCall) : Boolean(prevP?.inCall ?? false);
+  let nextDeafened = body.deafened !== undefined ? Boolean(body.deafened) : Boolean(prevP?.deafened ?? false);
+  const nextHandRaised = body.handRaised !== undefined ? Boolean(body.handRaised) : Boolean(prevP?.handRaised ?? false);
+
+  if (isVoicePayload && !canUserSpeakOrStream(rm, cid)) {
+    nextMuted = true;
+    nextSpeaking = false;
+    nextCam = false;
+    nextScreen = false;
+    if (rm.voipMode === "off") nextInCall = false;
+  }
+  if (nextMuted) nextSpeaking = false;
+  if (nextCam || nextScreen || !nextMuted) nextInCall = true;
+
   const nextAvatar = body.avatarUrl !== undefined ? sanitizeAvatarUrl(body.avatarUrl) : (prevP?.avatarUrl || "");
   const nextColor = /^#[0-9a-fA-F]{3,8}$/.test(String(body.color || "")) ? body.color : (prevP?.color || "#27DCC8");
+  const nextUid = body.uid !== undefined ? String(body.uid || "").slice(0, 64) : (prevP?.uid || "");
+  const nextHandle = body.handle !== undefined ? String(body.handle || "").slice(0, 40) : (prevP?.handle || "");
+  const nextStatusText = body.statusText !== undefined ? String(body.statusText || "").slice(0, 80) : (prevP?.statusText || "");
+  const nextStatusEmoji = body.statusEmoji !== undefined ? String(body.statusEmoji || "🍿").slice(0, 12) : (prevP?.statusEmoji || "🍿");
+  const nextBio = body.bio !== undefined ? String(body.bio || "").slice(0, 160) : (prevP?.bio || "");
+  const nextMedal = body.medal !== undefined ? String(body.medal || "").slice(0, 32) : (prevP?.medal || "");
+  const nextWatchMinutes = body.watchMinutes !== undefined ? Math.max(0, Number(body.watchMinutes) || 0) : Number(prevP?.watchMinutes || 0);
 
-  if (!prevP || prevP.name !== uname || prevP.muted !== nextMuted || prevP.cam !== nextCam || prevP.color !== nextColor || prevP.avatarUrl !== nextAvatar) {
+  const partChanged = Boolean(
+    !prevP ||
+    prevP.name !== uname ||
+    prevP.muted !== nextMuted ||
+    Boolean(prevP.speaking) !== nextSpeaking ||
+    Boolean(prevP.cam) !== nextCam ||
+    Boolean(prevP.screen) !== nextScreen ||
+    Boolean(prevP.inCall) !== nextInCall ||
+    Boolean(prevP.deafened) !== nextDeafened ||
+    Boolean(prevP.handRaised) !== nextHandRaised ||
+    prevP.color !== nextColor ||
+    prevP.avatarUrl !== nextAvatar ||
+    prevP.statusText !== nextStatusText
+  );
+  if (partChanged) {
     dirty = true;
+    rm.rev = (rm.rev || 1) + 1;
   }
+  const nextHostMutedAt = (isVoicePayload && !nextMuted) ? 0 : Number(prevP?.hostMutedAt || 0);
   rm.participants[cid] = {
     ...(prevP || {}),
     id: cid,
+    uid: nextUid,
     name: uname,
+    handle: nextHandle,
     color: nextColor,
     avatarUrl: nextAvatar,
+    bio: nextBio,
+    statusText: nextStatusText,
+    statusEmoji: nextStatusEmoji,
+    medal: nextMedal,
+    watchMinutes: nextWatchMinutes,
+    hideWatching: body.hideWatching !== undefined ? Boolean(body.hideWatching) : Boolean(prevP?.hideWatching),
+    hideFriends: body.hideFriends !== undefined ? Boolean(body.hideFriends) : Boolean(prevP?.hideFriends),
+    hideLocation: body.hideLocation !== undefined ? Boolean(body.hideLocation) : Boolean(prevP?.hideLocation),
     device: String(body.device || prevP?.device || "Web").slice(0, 24),
     country: String(body.country || prevP?.country || "TR").slice(0, 4),
     muted: nextMuted,
     speaking: nextSpeaking,
     cam: nextCam,
+    screen: nextScreen,
+    inCall: nextInCall,
+    deafened: nextDeafened,
+    handRaised: nextHandRaised,
+    hostMutedAt: nextHostMutedAt,
     lastSeen: t,
   };
 
@@ -580,33 +811,67 @@ function applyRoomAction(rm, cid, body, opts = {}) {
   }
 
   const pushEv = (ev, optsEv = {}) => {
-    const fullEv = { id: `ev_${Date.now()}_${makeHexNonce(3)}`, cid, username: uname, ts: t, ...ev };
-    rm.events = [...(rm.events || []).slice(-39), fullEv];
+    const evId = ev.id || `ev_${Date.now()}_${makeHexNonce(3)}`;
+    const fullEv = { id: evId, cid, user: uname, username: uname, ts: t, ...ev };
+    rm.events = [...(rm.events || []).slice(-49), fullEv];
     rm.rev = (rm.rev || 1) + 1;
     pushedEvents.push({ ev: fullEv, attachRoom: Boolean(optsEv.attachRoom) });
     dirty = true;
     return fullEv;
   };
 
-  if (act === "play" || act === "pause" || act === "seek" || act === "rate" || act === "video_ended") {
-    if (rm.playMode === "leader" && !isPrivilegedInRoom(rm, cid)) {
-      return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Lider modunda oynatma kontrolü yalnızca oda yöneticisine aittir." };
+  const advanceQueueItem = (targetIdx = -1, targetId = "") => {
+    rm.queue = Array.isArray(rm.queue) ? rm.queue : [];
+    if (!rm.queue.length) return false;
+    let idx = -1;
+    if (targetId) idx = rm.queue.findIndex((q) => q && q.id === targetId);
+    if (idx < 0 && Number.isInteger(targetIdx) && targetIdx >= 0 && targetIdx < rm.queue.length) idx = targetIdx;
+    if (idx < 0) {
+      if (rm.playMode === "vote") {
+        let bestIdx = 0;
+        let bestVotes = -1;
+        rm.queue.forEach((q, i) => {
+          const cnt = Array.isArray(q?.votes) ? q.votes.length : 0;
+          if (cnt > bestVotes) { bestVotes = cnt; bestIdx = i; }
+        });
+        idx = bestIdx;
+      } else {
+        idx = 0;
+      }
     }
-    if (body.currentTime !== undefined) rm.media.currentTime = Math.max(0, Number(body.currentTime) || 0);
-    if (act === "play") rm.media.playing = true;
-    if (act === "pause" || act === "video_ended") rm.media.playing = false;
-    if (act === "video_ended") rm.media.currentTime = 0;
-    if (body.rate !== undefined) rm.media.rate = Math.min(4, Math.max(0.25, Number(body.rate) || 1));
-    rm.media.updatedAt = t;
-    rm.media.lastActionBy = uname;
-    pushEv({
-      type: act === "video_ended" ? "video_ended" : "sync",
-      action: act,
-      currentTime: rm.media.currentTime,
-      playing: rm.media.playing,
-      rate: rm.media.rate,
-      media: buildMediaOut(rm),
-    });
+    const [picked] = rm.queue.splice(idx, 1);
+    if (!picked) return false;
+    rm.media = buildFreshMedia({ ...picked, currentTime: 0, playing: true }, uname, t);
+    rm.skip_votes = [];
+    rm.voteEndsAt = 0;
+    pushEv({ type: "queue_updated", queue: rm.queue, voteEndsAt: 0 });
+    pushEv({ type: "media_changed", action: "queue_play", media: buildMediaOut(rm) }, { attachRoom: true });
+    return true;
+  };
+
+  if (act === "play" || act === "pause" || act === "seek" || act === "rate" || act === "video_ended") {
+    if (act === "video_ended" && !rm.curated && Array.isArray(rm.queue) && rm.queue.length > 0 && ["autoplay", "vote", "quickplay", "cohost"].includes(rm.playMode || "")) {
+      advanceQueueItem(-1, "");
+    } else {
+      if (rm.playMode === "leader" && !isPrivilegedInRoom(rm, cid)) {
+        return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Lider modunda oynatma kontrolü yalnızca oda yöneticisine aittir." };
+      }
+      if (body.currentTime !== undefined) rm.media.currentTime = Math.max(0, Number(body.currentTime) || 0);
+      if (act === "play") rm.media.playing = true;
+      if (act === "pause" || act === "video_ended") rm.media.playing = false;
+      if (act === "video_ended") rm.media.currentTime = 0;
+      if (body.rate !== undefined) rm.media.rate = Math.min(4, Math.max(0.25, Number(body.rate) || 1));
+      rm.media.updatedAt = t;
+      rm.media.lastActionBy = uname;
+      pushEv({
+        type: act === "video_ended" ? "video_ended" : "sync",
+        action: act,
+        currentTime: rm.media.currentTime,
+        playing: rm.media.playing,
+        rate: rm.media.rate,
+        media: buildMediaOut(rm),
+      });
+    }
   } else if (act === "heartbeat" && isHostOrCreator(rm, cid) && body.currentTime !== undefined) {
     rm.media.currentTime = Math.max(0, Number(body.currentTime) || 0);
     rm.media.updatedAt = t;
@@ -657,55 +922,213 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       };
     }
     pushEv({ type: "media_changed", action: act, media: buildMediaOut(rm) }, { attachRoom: true });
-  } else if (act === "chat" && body.text) {
-    const msgId = String(body.clientMsgId || body.id || `m_${Date.now()}_${makeHexNonce(3)}`).slice(0, 64);
-    if (!(rm.chat || []).some((x) => x && x.id === msgId)) {
-      const msg = {
-        id: msgId,
-        clientMsgId: msgId,
-        cid,
-        user: uname,
-        username: uname,
-        color: rm.participants[cid].color,
-        avatarUrl: rm.participants[cid].avatarUrl || "",
-        text: String(body.text).slice(0, 1000),
-        reactions: {},
-        ts: t,
-      };
-      rm.chat = [...(rm.chat || []).slice(-59), msg];
-      pushEv({ type: "chat", message: msg, ...msg });
+  } else if (act === "chat") {
+    const cleanText = String(body.text || "").trim().slice(0, 1000);
+    const cleanGif = sanitizeChatGif(body.gif);
+    const cleanSnap = sanitizeChatSnapshot(body.snapshot);
+    const cleanAudio = sanitizeChatAudioNote(body.audioNote);
+    if (cleanText || cleanGif || cleanSnap || cleanAudio) {
+      const msgId = String(body.clientMsgId || body.id || `m_${Date.now()}_${makeHexNonce(3)}`).slice(0, 64);
+      if (!(rm.chat || []).some((x) => x && x.id === msgId)) {
+        const videoTime = body.videoTime !== undefined && body.videoTime !== null && Number.isFinite(Number(body.videoTime))
+          ? Math.max(0, Number(body.videoTime))
+          : null;
+        const msg = {
+          id: msgId,
+          clientMsgId: msgId,
+          cid,
+          uid: nextUid,
+          handle: nextHandle,
+          user: uname,
+          username: uname,
+          color: rm.participants[cid].color,
+          avatarUrl: rm.participants[cid].avatarUrl || "",
+          text: cleanText,
+          gif: cleanGif || "",
+          snapshot: cleanSnap || null,
+          audioNote: cleanAudio || null,
+          videoTime,
+          replyTo: sanitizeChatReplyTo(body.replyTo),
+          reactions: {},
+          time: formatIstanbulHHMM(),
+          ts: t,
+        };
+        rm.chat = [...(rm.chat || []).slice(-59), msg];
+        pushEv({ type: "chat", message: msg, ...msg });
+      }
     }
   } else if (act === "msg_react" && body.msgId && body.emoji) {
     const mid = String(body.msgId).slice(0, 64);
     const emo = String(body.emoji).slice(0, 16);
-    const targetMsg = (rm.chat || []).find((x) => x.id === mid);
+    const targetMsg = (rm.chat || []).find((x) => x && x.id === mid);
     if (targetMsg) {
       targetMsg.reactions = targetMsg.reactions || {};
-      const arr = new Set(Array.isArray(targetMsg.reactions[emo]) ? targetMsg.reactions[emo] : []);
-      if (arr.has(cid)) arr.delete(cid); else arr.add(cid);
-      targetMsg.reactions[emo] = Array.from(arr);
-      pushEv({ type: "msg_react", msgId: mid, emoji: emo, reactions: targetMsg.reactions });
+      const reactTag = makeUserTag(uname, cid);
+      const baseName = String(uname || "").split("#")[0].trim();
+      const prevArr = Array.isArray(targetMsg.reactions[emo]) ? [...targetMsg.reactions[emo]] : [];
+      const existingIdx = prevArr.findIndex((u) => u === reactTag || u === cid || (!String(u).includes("#") && baseName && u === baseName));
+      if (existingIdx >= 0) prevArr.splice(existingIdx, 1);
+      else prevArr.push(reactTag);
+      if (prevArr.length) targetMsg.reactions[emo] = prevArr;
+      else delete targetMsg.reactions[emo];
+      pushEv({ type: "msg_reacted", msgId: mid, emoji: emo, reactions: targetMsg.reactions });
     }
-  } else if (act === "poll_vote" && body.option !== undefined) {
-    const opt = String(body.option).slice(0, 80);
-    rm.pollVotes = rm.pollVotes || {};
-    rm.pollVotes[cid] = opt;
-    pushEv({ type: "poll_vote", option: opt, pollVotes: rm.pollVotes });
+  } else if (act === "poll_create") {
+    const question = String(body.question || "").trim().slice(0, 140);
+    const rawOpts = Array.isArray(body.options) ? body.options : [];
+    const optsClean = rawOpts.map((o) => String(o || "").trim().slice(0, 80)).filter(Boolean).slice(0, 6);
+    if (question && optsClean.length >= 2) {
+      const pollId = `poll_${Date.now().toString(36)}_${makeHexNonce(3)}`;
+      const pollObj = {
+        id: pollId,
+        question,
+        options: optsClean.map((text) => ({ text, votes: [] })),
+        createdBy: uname,
+        cid,
+        ts: t,
+      };
+      rm.polls = [...(Array.isArray(rm.polls) ? rm.polls : []).slice(-19), pollObj];
+      const msgId = `m_${pollId}`;
+      const pollMsg = {
+        id: msgId,
+        cid,
+        uid: nextUid,
+        user: uname,
+        username: uname,
+        color: rm.participants[cid].color,
+        avatarUrl: rm.participants[cid].avatarUrl || "",
+        text: "",
+        pollId,
+        reactions: {},
+        time: formatIstanbulHHMM(),
+        ts: t,
+      };
+      rm.chat = [...(rm.chat || []).slice(-59), pollMsg];
+      pushEv({ type: "chat", message: pollMsg, ...pollMsg });
+      pushEv({ type: "poll_updated", pollId, polls: rm.polls });
+    }
+  } else if (act === "poll_vote") {
+    if (body.pollId && Number.isInteger(Number(body.optionIndex))) {
+      const pid = String(body.pollId).slice(0, 64);
+      const optIdx = Number(body.optionIndex);
+      rm.polls = Array.isArray(rm.polls) ? rm.polls : [];
+      const poll = rm.polls.find((p) => p && p.id === pid);
+      if (poll && Array.isArray(poll.options) && optIdx >= 0 && optIdx < poll.options.length) {
+        const voteTag = makeUserTag(uname, cid);
+        const baseName = String(uname || "").split("#")[0].trim();
+        const isMine = (u) => u === voteTag || u === cid || (!String(u).includes("#") && baseName && u === baseName);
+        poll.options = poll.options.map((opt, idx) => {
+          const cur = Array.isArray(opt.votes) ? [...opt.votes] : [];
+          const hadMe = cur.some(isMine);
+          if (idx === optIdx) {
+            return { ...opt, votes: hadMe ? cur.filter((u) => !isMine(u)) : [...cur, voteTag] };
+          }
+          return { ...opt, votes: cur.filter((u) => !isMine(u)) };
+        });
+        pushEv({ type: "poll_updated", pollId: pid, polls: rm.polls });
+      }
+    } else if (body.option !== undefined) {
+      const opt = String(body.option).slice(0, 80);
+      rm.pollVotes = rm.pollVotes || {};
+      rm.pollVotes[cid] = opt;
+      pushEv({ type: "poll_vote", option: opt, pollVotes: rm.pollVotes });
+    }
+  } else if (act === "queue_add") {
+    if (!rm.curated) {
+      const item = sanitizeQueueItem(body.item || body.media || body, uname, cid);
+      if (item) {
+        rm.queue = [...(Array.isArray(rm.queue) ? rm.queue : []).slice(-49), item];
+        pushEv({ type: "queue_updated", queue: rm.queue, voteEndsAt: Number(rm.voteEndsAt || 0) });
+      }
+    }
+  } else if (act === "queue_add_batch" && Array.isArray(body.items)) {
+    if (!rm.curated) {
+      const added = [];
+      for (const rawIt of body.items.slice(0, 25)) {
+        const clean = sanitizeQueueItem(rawIt, uname, cid);
+        if (clean) added.push(clean);
+      }
+      if (added.length) {
+        rm.queue = [...(Array.isArray(rm.queue) ? rm.queue : []), ...added].slice(-50);
+        pushEv({ type: "queue_updated", queue: rm.queue, voteEndsAt: Number(rm.voteEndsAt || 0) });
+      }
+    }
+  } else if (act === "queue_vote" || act === "vote_video") {
+    rm.queue = Array.isArray(rm.queue) ? rm.queue : [];
+    const targetId = String(body.id || "");
+    const targetIdx = Number.isInteger(Number(body.index)) ? Number(body.index) : -1;
+    let idx = targetId ? rm.queue.findIndex((q) => q && q.id === targetId) : -1;
+    if (idx < 0 && targetIdx >= 0 && targetIdx < rm.queue.length) idx = targetIdx;
+    if (idx >= 0) {
+      const item = rm.queue[idx];
+      const votes = new Set(Array.isArray(item.votes) ? item.votes : []);
+      if (votes.has(cid)) votes.delete(cid); else votes.add(cid);
+      item.votes = Array.from(votes);
+      pushEv({ type: "queue_updated", queue: rm.queue, voteEndsAt: Number(rm.voteEndsAt || 0) });
+    }
+  } else if (act === "queue_play" || act === "queue_play_index") {
+    if (!rm.curated) {
+      const canPlayQ = isPrivilegedInRoom(rm, cid) || ["cohost", "quickplay", "free"].includes(rm.playMode || "");
+      if (!canPlayQ) {
+        return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Sıradaki videoyu yalnızca oda lideri başlatabilir." };
+      }
+      const targetId = String(body.id || "");
+      const targetIdx = Number.isInteger(Number(body.index)) ? Number(body.index) : 0;
+      advanceQueueItem(targetIdx, targetId);
+    }
+  } else if (act === "queue_remove") {
+    rm.queue = Array.isArray(rm.queue) ? rm.queue : [];
+    const targetId = String(body.id || "");
+    const targetIdx = Number.isInteger(Number(body.index)) ? Number(body.index) : -1;
+    let idx = targetId ? rm.queue.findIndex((q) => q && q.id === targetId) : -1;
+    if (idx < 0 && targetIdx >= 0 && targetIdx < rm.queue.length) idx = targetIdx;
+    if (idx >= 0) {
+      const item = rm.queue[idx];
+      if (!isPrivilegedInRoom(rm, cid) && item?.addedByCid !== cid) {
+        return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Bu öğeyi sıradan kaldırma yetkiniz yok." };
+      }
+      rm.queue.splice(idx, 1);
+      pushEv({ type: "queue_updated", queue: rm.queue, voteEndsAt: Number(rm.voteEndsAt || 0) });
+    }
   } else if (act === "vote_skip") {
     const votes = new Set(rm.skip_votes || []);
     if (votes.has(cid)) votes.delete(cid); else votes.add(cid);
     rm.skip_votes = Array.from(votes);
     const skipNeeded = Math.max(1, Math.ceil(Math.max(1, Object.keys(rm.participants || {}).length) / 2));
-    pushEv({ type: "vote_skip", skip_votes: rm.skip_votes, skipNeeded });
-  } else if (act === "voice_state") {
-    pushEv({ type: "voice_state", muted: nextMuted, speaking: nextSpeaking, cam: nextCam });
-  } else if (act === "host_action") {
-    if (!tokenVerified || !isHostOrCreator(rm, cid)) {
-      return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Bu yönetici işlemi için geçerli host doğrulaması gerekli." };
+    pushEv({ type: "skip_votes", votes: rm.skip_votes, needed: skipNeeded, skip_votes: rm.skip_votes, skipNeeded });
+    if (!rm.curated && rm.skip_votes.length >= skipNeeded && Array.isArray(rm.queue) && rm.queue.length > 0) {
+      advanceQueueItem(-1, "");
     }
+  } else if (act === "voice_state") {
+    pushEv({
+      type: "voice_state",
+      muted: nextMuted,
+      speaking: nextSpeaking,
+      cam: nextCam,
+      screen: nextScreen,
+      inCall: nextInCall,
+      deafened: nextDeafened,
+    });
+  } else if (act === "break_request") {
+    if (!rm.curated) {
+      const brkId = String(body.actionId || `brk_${Date.now().toString(36)}_${makeHexNonce(3)}`).slice(0, 64);
+      pushEv({ type: "break_request", id: brkId, videoTime: Math.max(0, Number(body.videoTime) || 0) });
+    }
+  } else if (act === "hand_raise") {
+    const raised = Boolean(body.raised);
+    rm.participants[cid].handRaised = raised;
+    pushEv({ type: "hand_raised", raised });
+  } else if (act === "host_action") {
     const subAct = String(body.subAction || body.action || "");
     const targetCid = String(body.targetId || body.targetCid || "");
-    if (subAct === "set_play_mode" && ["leader", "cohost", "vote", "free"].includes(body.playMode)) {
+    const allowCoHostSub = ["toggle_stage_mode", "toggle_stage_speaker"].includes(subAct);
+    const permitted = allowCoHostSub ? isPrivilegedInRoom(rm, cid) : isHostOrCreator(rm, cid);
+    if (!tokenVerified || !permitted) {
+      return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Bu yönetici işlemi için geçerli host doğrulaması gerekli." };
+    }
+    const validPlayModes = ["leader", "cohost", "autoplay", "quickplay", "vote", "free"];
+    const validVoipModes = ["all", "stage", "leader", "off", "on"];
+    if (subAct === "set_play_mode" && validPlayModes.includes(body.playMode)) {
       rm.playMode = body.playMode;
       pushEv({ type: "host_action", subAction: subAct, playMode: rm.playMode }, { attachRoom: true });
     } else if (subAct === "set_privacy" && !rm.curated) {
@@ -714,12 +1137,14 @@ function applyRoomAction(rm, cid, body, opts = {}) {
         rm.privacy = body.privacy;
         changed = true;
       }
-      if (["leader", "cohost", "vote", "free"].includes(body.playMode)) {
+      if (validPlayModes.includes(body.playMode)) {
         rm.playMode = body.playMode;
         changed = true;
       }
-      if (["all", "stage", "off", "on"].includes(body.voipMode)) {
+      if (validVoipModes.includes(body.voipMode)) {
         rm.voipMode = body.voipMode === "on" ? "all" : body.voipMode;
+        if (rm.voipMode !== "stage") rm.stage_speakers = [];
+        enforceVoipModeOnParticipants(rm);
         changed = true;
       }
       if (typeof body.name === "string" && body.name.trim()) {
@@ -735,9 +1160,36 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       if (changed) {
         pushEv({ type: "host_action", subAction: "set_privacy", privacy: rm.privacy, playMode: rm.playMode, voipMode: rm.voipMode, name: rm.name }, { attachRoom: true });
       }
+    } else if (subAct === "toggle_stage_mode") {
+      rm.voipMode = rm.voipMode === "stage" ? "all" : "stage";
+      if (rm.voipMode !== "stage") {
+        rm.stage_speakers = [];
+        for (const p of Object.values(rm.participants || {})) {
+          if (p) p.handRaised = false;
+        }
+      } else {
+        enforceVoipModeOnParticipants(rm);
+      }
+      pushEv({ type: "host_action", subAction: "toggle_stage_mode", voipMode: rm.voipMode }, { attachRoom: true });
+    } else if (subAct === "toggle_stage_speaker" && targetCid && rm.participants?.[targetCid]) {
+      const curSpk = Array.isArray(rm.stage_speakers) ? rm.stage_speakers : [];
+      if (curSpk.includes(targetCid)) {
+        rm.stage_speakers = curSpk.filter((x) => x !== targetCid);
+        if (!isPrivilegedInRoom(rm, targetCid)) {
+          rm.participants[targetCid].muted = true;
+          rm.participants[targetCid].speaking = false;
+          rm.participants[targetCid].cam = false;
+          rm.participants[targetCid].screen = false;
+        }
+      } else {
+        rm.stage_speakers = Array.from(new Set([...curSpk, targetCid]));
+      }
+      rm.participants[targetCid].handRaised = false;
+      pushEv({ type: "host_action", subAction: "toggle_stage_speaker", targetCid, stage_speakers: rm.stage_speakers }, { attachRoom: true });
     } else if (subAct === "kick" && targetCid && targetCid !== rm.creatorCid) {
       rm.kicked = Array.from(new Set([...(rm.kicked || []), targetCid])).slice(-100);
       delete rm.participants[targetCid];
+      rm.stage_speakers = (rm.stage_speakers || []).filter((x) => x !== targetCid);
       pushEv({ type: "host_action", subAction: "kick", targetCid }, { attachRoom: true });
     } else if (subAct === "promote" && targetCid) {
       rm.co_hosts = Array.from(new Set([...(rm.co_hosts || []), targetCid]));
@@ -760,6 +1212,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     } else if (subAct === "mute" && targetCid && rm.participants?.[targetCid]) {
       rm.participants[targetCid].muted = true;
       rm.participants[targetCid].speaking = false;
+      rm.participants[targetCid].hostMutedAt = t;
       pushEv({ type: "host_action", subAction: "mute", targetCid }, { attachRoom: true });
     }
   } else if (act === "clear_chat") {
@@ -767,12 +1220,13 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Sohbeti temizleme yetkisi yok." };
     }
     rm.chat = [];
-    pushEv({ type: "clear_chat" });
+    rm.polls = [];
+    pushEv({ type: "chat_cleared" });
   } else if (act === "reaction" || act === "typing" || act === "soundfx") {
     pushEv({ type: act, emoji: String(body.emoji || "❤️").slice(0, 16), typing: Boolean(body.typing), sfx: body.sfx });
   } else if (["webrtc_offer", "webrtc_answer", "webrtc_ice"].includes(act) && body.targetId) {
     const sig = {
-      id: `sg_${Date.now()}_${makeHexNonce(3)}`,
+      id: String(body.signalId || `sg_${Date.now()}_${makeHexNonce(3)}`).slice(0, 64),
       type: act,
       fromId: cid,
       targetId: String(body.targetId).slice(0, 64),
@@ -780,7 +1234,8 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       candidate: body.candidate,
       ts: t,
     };
-    rm.signals = [...(rm.signals || []).slice(-29), sig];
+    const freshSigs = (rm.signals || []).filter((s) => s && (t - Number(s.ts || 0)) < 25);
+    rm.signals = [...freshSigs.slice(-179), sig];
     rm.rev = (rm.rev || 1) + 1;
     privateSignals.push(sig);
     dirty = true;
@@ -840,6 +1295,7 @@ export class WatchlivoRoomDO {
     this.env = env;
     this.room = null;
     this.sockets = new Map();
+    this.voiceRelay = [];
   }
 
   async _load(roomId, seed = null, curatedSeed = null) {
@@ -915,6 +1371,50 @@ export class WatchlivoRoomDO {
       return Response.json({ ok: true, room: serializeRoomInfo(this.room, tokVerified) });
     }
 
+    if (u.pathname === "/voice-relay") {
+      const closedMark = await this.state.storage.get("closed");
+      if (closedMark) {
+        return Response.json({ ok: false, error: "Oda kapatıldı.", roomClosed: true }, { status: 410 });
+      }
+      const stored = this.room || (await this.state.storage.get("room"));
+      const curatedSeed = getCuratedSeed(roomId, null, headerSeed);
+      if (stored) this.room = stored;
+      const rmInfo = this.room || (curatedSeed ? makeRoomSkeleton(roomId, curatedSeed) : null);
+      if (!rmInfo) {
+        return Response.json({ ok: false, error: "Oda bulunamadı" }, { status: 404 });
+      }
+      const b = request.method === "POST" ? await request.json().catch(() => null) : null;
+      const cidRaw = String((request.method === "POST" ? b?.clientId : u.searchParams.get("clientId")) || "");
+      const cid = /^[a-zA-Z0-9_-]{1,64}$/.test(cidRaw) ? cidRaw : "";
+      const ctok = String((request.method === "POST" ? b?.clientToken : u.searchParams.get("clientToken")) || "").trim();
+      if (!cid || !ctok || !(await verifyRoomClientToken(ctok, roomId, cid, this.env))) {
+        return Response.json({ ok: false, error: "Yetkisiz istemci" }, { status: 403 });
+      }
+      const tNow = nowSec();
+      if (String(rmInfo.voipMode || "all") === "off") {
+        if (request.method === "GET") return Response.json({ ok: true, serverTime: Math.round(tNow * 10000) / 10000, packets: [] });
+        return Response.json({ ok: false, error: "Ses kanalı kapalı" }, { status: 403 });
+      }
+      this.voiceRelay = (Array.isArray(this.voiceRelay) ? this.voiceRelay : []).filter((p) => p && (tNow - Number(p.ts || 0)) < 10.0);
+      if (request.method === "POST") {
+        if (!canUserSpeakOrStream(rmInfo, cid)) {
+          return Response.json({ ok: false, error: "Bu modda ses gönderme yetkiniz yok" }, { status: 403 });
+        }
+        const b64 = String(b?.b64 || "").replace(/\s+/g, "");
+        if (!b64 || b64.length > 80000) return Response.json({ ok: false, error: "Geçersiz ses paketi" }, { status: 400 });
+        const seq = Math.max(0, Math.min(999999999, Number(b?.seq || 0) || 0));
+        let mime = String(b?.mime || "audio/wav").trim().slice(0, 32);
+        if (!mime.startsWith("audio/")) mime = "audio/wav";
+        const pkt = { id: `${cid}_${seq}_${Date.now()}`, fromId: cid, seq, ts: Math.round(tNow * 10000) / 10000, mime, b64 };
+        this.voiceRelay.push(pkt);
+        if (this.voiceRelay.length > 64) this.voiceRelay = this.voiceRelay.slice(-64);
+        return Response.json({ ok: true, ts: pkt.ts });
+      }
+      const sinceTs = Number(u.searchParams.get("sinceTs") || 0) || 0;
+      const outPkts = this.voiceRelay.filter((p) => p.fromId !== cid && Number(p.ts || 0) > sinceTs);
+      return Response.json({ ok: true, serverTime: Math.round(tNow * 10000) / 10000, packets: outPkts });
+    }
+
     if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
       const curatedSeed = getCuratedSeed(roomId, null, headerSeed);
       if (curatedSeed) {
@@ -959,7 +1459,21 @@ export class WatchlivoRoomDO {
       }
       const uname = u.searchParams.get("username") || u.searchParams.get("name") || "Misafir";
       const pruned = pruneStaleParticipants(rm, this._activeWsCids());
-      const initAct = applyRoomAction(rm, cid, { type: "init", username: uname, color: u.searchParams.get("color") || "#27DCC8" }, { tokenVerified: true });
+      const initAct = applyRoomAction(rm, cid, {
+        type: "init",
+        username: uname,
+        uid: u.searchParams.get("uid") || "",
+        handle: u.searchParams.get("handle") || "",
+        avatarUrl: u.searchParams.get("avatarUrl") || "",
+        bio: u.searchParams.get("bio") || "",
+        statusText: u.searchParams.get("statusText") || "",
+        statusEmoji: u.searchParams.get("statusEmoji") || "🍿",
+        medal: u.searchParams.get("medal") || "",
+        watchMinutes: Number(u.searchParams.get("watchMinutes") || 0) || 0,
+        device: u.searchParams.get("device") || "Web",
+        country: u.searchParams.get("country") || "TR",
+        color: u.searchParams.get("color") || "#27DCC8",
+      }, { tokenVerified: true });
       if (initAct.dirty || pruned) await this._save();
 
       const pair = new WebSocketPair();
@@ -1009,7 +1523,8 @@ export class WatchlivoRoomDO {
           const pkt = item.attachRoom
             ? { ...item.ev, room: await serializeEdgeRoom(rm, "", this.env) }
             : item.ev;
-          this._broadcast(pkt, item.ev.type === "chat" ? null : server);
+          const echoToSender = ["chat", "chat_cleared", "poll_updated", "msg_reacted", "queue_updated", "skip_votes", "hand_raised", "host_action", "media_changed"].includes(item.ev.type);
+          this._broadcast(pkt, echoToSender ? null : server);
         }
         for (const sig of res.privateSignals) {
           this._unicast(sig.targetId, sig);
@@ -1381,4 +1896,24 @@ export async function handleEdgeRoomWs(roomId, request, url, env, curatedMap = n
     hdrs.set("x-watchlivo-curated-seed", b64EncodeUtf8(JSON.stringify(seed)));
   }
   return stub.fetch(new Request(doUrl.toString(), { method: request.method, headers: hdrs }));
+}
+
+export async function handleEdgeRoomVoiceRelay(roomId, request, env, jsonResp, curatedMap = null, relayHdrs = {}) {
+  if (!env?.ROOM_DO) return null;
+  const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
+  const srcUrl = new URL(request.url);
+  const doUrl = new URL("https://do.local/voice-relay");
+  srcUrl.searchParams.forEach((v, k) => doUrl.searchParams.set(k, v));
+  doUrl.searchParams.set("roomId", roomId);
+  const seed = getCuratedSeed(roomId, curatedMap);
+  const hdrs = new Headers();
+  if (seed) hdrs.set("x-watchlivo-curated-seed", b64EncodeUtf8(JSON.stringify(seed)));
+  const init = { method: request.method, headers: hdrs };
+  if (request.method === "POST") {
+    hdrs.set("Content-Type", "application/json");
+    init.body = await request.text();
+  }
+  const r = await stub.fetch(new Request(doUrl.toString(), init));
+  const data = await r.json().catch(() => ({ ok: false, error: "Ses rölesi yanıt veremedi" }));
+  return jsonResp(data, r.status, relayHdrs);
 }

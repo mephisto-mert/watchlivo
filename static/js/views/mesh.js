@@ -1,17 +1,17 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261119_v223';
-import { api } from '../api.js?v=20261119_v223';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261119_v223';
-import { resolveMusicItem } from './selection-kinds.js?v=20261119_v223';
-import { MeshConnection } from '../realtime.js?v=20261119_v223';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261119_v223';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261119_v223';
-import { buildLayout } from './mesh-layout.js?v=20261119_v223';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261119_v223';
-import { Voice } from '../voice.js?v=20261119_v223';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261119_v223';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261119_v223';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261119_v223';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261119_v224';
+import { api } from '../api.js?v=20261119_v224';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261119_v224';
+import { resolveMusicItem } from './selection-kinds.js?v=20261119_v224';
+import { MeshConnection } from '../realtime.js?v=20261119_v224';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261119_v224';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261119_v224';
+import { buildLayout } from './mesh-layout.js?v=20261119_v224';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261119_v224';
+import { Voice } from '../voice.js?v=20261119_v224';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261119_v224';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261119_v224';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261119_v224';
 
 let ctx = null;
 
@@ -97,19 +97,27 @@ function reconcileSelfVoiceState(room) {
   const parts = Array.isArray(room.participants) ? room.participants : [];
   const meP = parts.find((x) => x && x.id === state.clientId);
   const voipMode = room.voipMode || 'all';
-  if (ctx.voice.micOn) {
-    const blockedByMode = voipMode === 'off'
-      || (voipMode === 'leader' && !isLeader())
-      || (voipMode === 'stage' && meP && !meP.isHost && !meP.isCoHost && !meP.isStageSpeaker);
-    if ((meP && meP.muted === true) || blockedByMode) {
+  const blockedByMode = voipMode === 'off'
+    || (voipMode === 'leader' && !isLeader())
+    || (voipMode === 'stage' && meP && !meP.isHost && !meP.isCoHost && !meP.isStageSpeaker);
+  const lastLocalMs = Number(ctx.voice.lastLocalVoiceAt || 0);
+  const inLocalGrace = Boolean(lastLocalMs && (Date.now() - lastLocalMs) < 4500);
+  const hostMutedMe = Boolean(meP && Number(meP.hostMutedAt || 0) > 0 && Number(meP.hostMutedAt) * 1000 > lastLocalMs);
+
+  if (ctx.voice.micOn && !ctx.voice.micPending) {
+    if (blockedByMode || hostMutedMe || (!inLocalGrace && meP && meP.muted === true)) {
       ctx.voice.toggleMic();
     }
   }
-  if (meP && meP.cam === false && ctx.voice.camOn) {
-    ctx.voice.toggleCamera();
+  if (ctx.voice.camOn && !ctx.voice.camPending) {
+    if (blockedByMode || (!inLocalGrace && meP && meP.cam === false)) {
+      ctx.voice.toggleCamera();
+    }
   }
-  if (meP && meP.screen === false && ctx.voice.screenOn) {
-    ctx.voice.toggleScreenShare();
+  if (ctx.voice.screenOn && !ctx.voice.screenPending) {
+    if (blockedByMode || (!inLocalGrace && meP && meP.screen === false)) {
+      ctx.voice.toggleScreenShare();
+    }
   }
 }
 
@@ -405,6 +413,8 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
   }
   setBackground(thumbFor(room.media));
   ctx?.layout.update();
+  ctx?.layout?.pollsUpdated?.();
+  ctx?.layout?.reactionsUpdated?.();
   ctx?.voice?.syncPeers(room.participants || []);
 }
 
@@ -783,6 +793,30 @@ function onMessage(data) {
         ctx.layout.update();
         ctx.voice?.syncPeers(data.participants);
       }
+      break;
+    case 'voice_state':
+      if (room && data.cid) {
+        const nextParts = (room.participants || []).map((p) => {
+          if (!p || p.id !== data.cid) return p;
+          return {
+            ...p,
+            muted: data.muted !== undefined ? Boolean(data.muted) : p.muted,
+            speaking: data.speaking !== undefined ? Boolean(data.speaking) : p.speaking,
+            cam: data.cam !== undefined ? Boolean(data.cam) : p.cam,
+            screen: data.screen !== undefined ? Boolean(data.screen) : p.screen,
+            inCall: data.inCall !== undefined ? Boolean(data.inCall) : p.inCall,
+            deafened: data.deafened !== undefined ? Boolean(data.deafened) : p.deafened,
+          };
+        });
+        const nextRoom = { ...room, participants: nextParts };
+        set({ mesh: nextRoom });
+        if (ctx?.conn) ctx.conn.lastRoom = nextRoom;
+        ctx.layout.update();
+        ctx.voice?.syncPeers(nextParts);
+      }
+      break;
+    case 'host_action':
+      if (data.room) applyRoom(data.room);
       break;
     case 'room_closed': {
       document.body.classList.remove('mesh-minimized');

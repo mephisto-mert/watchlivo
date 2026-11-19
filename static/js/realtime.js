@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261119_v223';
-import { api } from './api.js?v=20261119_v223';
-import { state } from './store.js?v=20261119_v223';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261119_v223';
+import { clock } from './sync.js?v=20261119_v224';
+import { api } from './api.js?v=20261119_v224';
+import { state } from './store.js?v=20261119_v224';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261119_v224';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -304,10 +304,12 @@ export class MeshConnection {
     const scheduleNextPoll = () => {
       if (this.closed || this.mode !== 'http') return;
       const pCnt = Math.max(this.participantCount || 1, this.lastRoom?.largeRoomMode ? 25 : 1);
-      const rawBaseMs = pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt >= 25 ? 1450 : 950;
+      const inFastBurst = Boolean(this._fastPollUntil && Date.now() < this._fastPollUntil);
+      const inActiveCall = Boolean(state.voice?.inCall && pCnt >= 2 && pCnt < 25);
+      const rawBaseMs = inFastBurst ? 320 : (inActiveCall ? 550 : (pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt >= 25 ? 1450 : 950));
       const baseMs = (typeof document !== 'undefined' && document.hidden) ? Math.round(rawBaseMs * 1.6) : rawBaseMs;
       const backoffMs = Math.min(4000, (this.httpFailCount || 0) * 650);
-      const jitterMs = pCnt >= 25 ? Math.floor(Math.random() * 550) : Math.floor(Math.random() * 140);
+      const jitterMs = inFastBurst ? Math.floor(Math.random() * 60) : (pCnt >= 25 ? Math.floor(Math.random() * 550) : Math.floor(Math.random() * 140));
       this.pollTimer = setTimeout(async () => {
         if (this.closed) return;
         if (this.outQueue.length && !this.flushing) {
@@ -329,10 +331,11 @@ export class MeshConnection {
 
   _dispatchHttpEvents(room, isInit) {
     if (!room) return;
+    const selfAllowedTypes = new Set(['chat', 'break_request', 'media_changed', 'poll_updated', 'msg_reacted', 'chat_cleared', 'skip_votes', 'hand_raised', 'queue_updated']);
     for (const ev of room.events || []) {
       if (!ev.id || this.seenEventIds.has(ev.id)) continue;
       this._addBounded(this.seenEventIds, ev.id);
-      if (!isInit && (ev.cid !== this.clientId || ev.type === 'chat' || ev.type === 'break_request' || ev.type === 'media_changed')) {
+      if (!isInit && (ev.cid !== this.clientId || selfAllowedTypes.has(ev.type))) {
         this.onMessage?.(ev);
       }
     }
@@ -340,6 +343,7 @@ export class MeshConnection {
       if (!sg.id || this.seenSignalIds.has(sg.id)) continue;
       this._addBounded(this.seenSignalIds, sg.id);
       if (sg.targetId === this.clientId && sg.fromId !== this.clientId) {
+        this._fastPollUntil = Date.now() + 12000;
         this.onMessage?.(sg);
       }
     }
@@ -354,7 +358,13 @@ export class MeshConnection {
         const payload = items.length === 1 ? items[0] : { type: 'batch', items };
         const ok = await this.httpSend(payload, false);
         if (!ok && !this.closed) {
-          const retryTypes = ['chat', 'msg_react', 'poll_create', 'poll_vote', 'change_media', 'play', 'pause', 'seek', 'rate', 'resolve_media', 'host_action'];
+          const retryTypes = [
+            'chat', 'clear_chat', 'msg_react', 'poll_create', 'poll_vote',
+            'change_media', 'play', 'pause', 'seek', 'rate', 'resolve_media', 'host_action',
+            'voice_state', 'webrtc_offer', 'webrtc_answer', 'webrtc_ice',
+            'queue_add', 'queue_add_batch', 'queue_vote', 'vote_video', 'queue_play', 'queue_play_index', 'queue_remove',
+            'break_request', 'hand_raise', 'vote_skip',
+          ];
           const retryable = items.filter((it) => it && retryTypes.includes(it.type) && (it._retries = (it._retries || 0) + 1) <= 3);
           if (retryable.length) {
             const hasNewerPlayPauseSeek = this.outQueue.some((q) => q && ['play', 'pause', 'seek', 'change_media'].includes(q.type));
@@ -490,8 +500,9 @@ export class MeshConnection {
         this.participantCount = newCnt;
         let stateMutated = false;
         if (Array.isArray(res.participants)) {
-          const prevPIds = (this.lastRoom.participants || []).map((p) => `${p.id}:${p.uid || ''}:${p.name || ''}:${p.handle || ''}:${p.color || ''}:${p.avatarUrl || ''}:${p.isHost}:${p.isCoHost}:${p.isCreator}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}`).join('|');
-          const nextPIds = res.participants.map((p) => `${p.id}:${p.uid || ''}:${p.name || ''}:${p.handle || ''}:${p.color || ''}:${p.avatarUrl || ''}:${p.isHost}:${p.isCoHost}:${p.isCreator}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}`).join('|');
+          const partKey = (p) => `${p.id}:${p.uid || ''}:${p.name || ''}:${p.handle || ''}:${p.color || ''}:${p.avatarUrl || ''}:${p.isHost}:${p.isCoHost}:${p.isCreator}:${p.isStageSpeaker}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}:${p.inCall}:${p.deafened}:${p.handRaised}:${p.statusText || ''}`;
+          const prevPIds = (this.lastRoom.participants || []).map(partKey).join('|');
+          const nextPIds = res.participants.map(partKey).join('|');
           if (prevPIds !== nextPIds) {
             this.lastRoom.participants = res.participants;
             stateMutated = true;
@@ -563,12 +574,18 @@ export class MeshConnection {
             stateMutated = true;
           }
         }
-        if (stateMutated || this.lastRoom.participantCount !== newCnt || (res.host_id && res.host_id !== this.lastRoom.host_id) || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode)) {
+        if (Array.isArray(res.queue) && JSON.stringify(res.queue) !== JSON.stringify(this.lastRoom.queue || [])) {
+          this.lastRoom.queue = res.queue;
+          stateMutated = true;
+        }
+        if (stateMutated || this.lastRoom.participantCount !== newCnt || (res.host_id && res.host_id !== this.lastRoom.host_id) || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode) || (res.voipMode && res.voipMode !== this.lastRoom.voipMode)) {
           this.lastRoom.participantCount = newCnt;
           this.lastRoom.count = newCnt;
           if (res.privacy) this.lastRoom.privacy = res.privacy;
           if (res.playMode) this.lastRoom.playMode = res.playMode;
           if (res.voipMode) this.lastRoom.voipMode = res.voipMode;
+          if (Array.isArray(res.stage_speakers)) this.lastRoom.stage_speakers = res.stage_speakers;
+          if (Array.isArray(res.skip_votes)) this.lastRoom.skip_votes = res.skip_votes;
           if (res.name) this.lastRoom.name = res.name;
           if (res.host_id) this.lastRoom.host_id = res.host_id;
           this.onMessage?.({ type: 'room_state', room: this.lastRoom, viaHttp: true });
@@ -590,7 +607,8 @@ export class MeshConnection {
           if (!isPoll) this._emitP2p({ event: { type: 'room_state', room: res.room } });
         }
         const srvLastChatId = Array.isArray(res.room.chat) && res.room.chat.length ? String(res.room.chat[res.room.chat.length - 1]?.id || '') : '';
-        const stamp = `${res.room.rev}|${res.room.privacy}|${res.room.playMode}|${res.room.voipMode}|${res.room.name}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateTime}|${res.room.media?.meshStateStatus}|${res.room.media?.url}|${res.room.chat?.length}|${srvLastChatId}|${res.room.host_id}`;
+        const pVoiceSig = (res.room.participants || []).map((p) => `${p.id}:${p.muted}:${p.cam}:${p.screen}:${p.inCall}:${p.speaking}:${p.handRaised}:${p.isStageSpeaker}`).join(',');
+        const stamp = `${res.room.rev}|${res.room.privacy}|${res.room.playMode}|${res.room.voipMode}|${res.room.name}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateTime}|${res.room.media?.meshStateStatus}|${res.room.media?.url}|${res.room.chat?.length}|${srvLastChatId}|${res.room.host_id}|${(res.room.polls || []).length}|${(res.room.queue || []).length}|${(res.room.skip_votes || []).length}|${pVoiceSig}`;
         if (isInit) this.onMessage?.({ type: 'init', clientId: this.clientId, room: res.room });
         else if (stamp !== this.lastRoomStamp) this.onMessage?.({ type: 'room_state', room: res.room, viaHttp: isPoll });
         this.lastRoomStamp = stamp;
@@ -639,10 +657,13 @@ export class MeshConnection {
       this._addBounded(this.seenEventIds, actId);
       this._emitP2p({ event: { ...obj, id: actId, user: this.profile.name, cid: this.clientId } });
     } else if (['webrtc_offer', 'webrtc_answer', 'webrtc_ice'].includes(obj.type)) {
+      this._fastPollUntil = Date.now() + 12000;
       const sigId = obj.signalId || ('sg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
       obj.signalId = sigId;
       this._addBounded(this.seenSignalIds, sigId);
       this._emitP2p({ event: { ...obj, id: sigId, fromId: this.clientId } });
+    } else if (obj.type === 'voice_state') {
+      this._fastPollUntil = Date.now() + 10000;
     } else if (['change_media', 'resolve_media'].includes(obj.type)) {
       this.needsMediaPush = true;
       this.lastMediaPushAt = Date.now();

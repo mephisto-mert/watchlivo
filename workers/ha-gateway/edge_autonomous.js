@@ -13,6 +13,7 @@ import {
   handleEdgeRoomCreate,
   handleEdgeRoomInfo,
   handleEdgeRoomSync,
+  handleEdgeRoomVoiceRelay,
   handleEdgeRoomWs,
   verifyRoomClientToken,
 } from "./edge_rooms.js";
@@ -175,7 +176,7 @@ async function getBootstrap(env) {
     } catch {}
   }
   _curatedMap = new Map(DEFAULT_CURATED_LIVE_ROOMS.map((rm) => [rm.id, rm]));
-  return { version: "20261119_v223", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
+  return { version: "20261119_v224", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
 }
 
 function makeNonce() {
@@ -223,7 +224,7 @@ function edgeJson(obj, status = 200, extra = {}) {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store, private",
       "Content-Security-Policy": buildAppCsp(makeNonce()),
-      "Permissions-Policy": "camera=(self), microphone=(self), geolocation=()",
+      "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*",
       "Referrer-Policy": "strict-origin-when-cross-origin",
       "X-Frame-Options": "SAMEORIGIN",
       "X-Watchlivo-Origin": "cf-autonomous-edge",
@@ -4672,6 +4673,10 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const roomId = String(pathRid || url.searchParams.get("roomId") || "").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 48);
     if (!roomId) return edgeJson({ ok: false, error: "Geçersiz oda" }, 400);
     const relayHdrs = { "Access-Control-Allow-Origin": "*" };
+    if (env?.ROOM_DO) {
+      const doRelay = await handleEdgeRoomVoiceRelay(roomId, request, env, edgeJson, _curatedMap, relayHdrs);
+      if (doRelay) return doRelay;
+    }
     const b = request.method === "POST" ? await request.json().catch(() => null) : null;
     if (request.method === "POST" && (!b || typeof b !== "object")) {
       return edgeJson({ ok: false, error: "Geçersiz JSON" }, 400, relayHdrs);

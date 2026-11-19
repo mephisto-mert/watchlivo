@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261119_v223';
-import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261119_v223';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261119_v223';
+import { toast } from './ui.js?v=20261119_v224';
+import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261119_v224';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261119_v224';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -59,6 +59,7 @@ export class Voice {
     this.peerVolumes = new Map();
     this._chimeCtxs = new Set();
     this._onStateChange = null;
+    this.lastLocalVoiceAt = 0;
     this._syncStoreVoice();
     this._unlockBound = () => {
       for (const st of this.peers.values()) {
@@ -86,6 +87,18 @@ export class Voice {
       this._syncStoreVoice();
       this._onStateChange?.();
     };
+  }
+
+  _emitVoiceState(stampLocal = true) {
+    if (stampLocal) this.lastLocalVoiceAt = Date.now();
+    this.send('voice_state', {
+      inCall: Boolean(this.inCall || this.micOn || this.camOn || this.screenOn),
+      muted: !this.micOn,
+      speaking: Boolean(this.micOn && this.selfSpeaking),
+      cam: Boolean(this.camOn),
+      screen: Boolean(this.screenOn),
+      deafened: Boolean(this.deafened),
+    });
   }
 
   _syncStoreVoice() {
@@ -159,7 +172,7 @@ export class Voice {
       }
     }
     this._updateDuckState();
-    this.send('voice_state', { deafened: this.deafened, muted: !this.micOn });
+    this._emitVoiceState(true);
     this.onStateChange?.();
     toast(this.deafened ? '🎧 Kulaklık sesi kapatıldı (Sağırlaştırıldı)' : '🎧 Kulaklık sesi açıldı');
     return this.deafened;
@@ -636,6 +649,7 @@ export class Voice {
           return;
         }
         await pc.setLocalDescription(offer);
+        st._lastNegAt = Date.now();
         this.send('webrtc_offer', { targetId: id, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
       } catch (err) {
         console.warn('[voice] offer', err);
@@ -667,10 +681,11 @@ export class Voice {
     audio.playsInline = true;
     audio.setAttribute('playsinline', '');
     this._ensureAudioHost().appendChild(audio);
-    const st = { pc, dc: null, makingOffer: false, ignoreOffer: false, needsNegotiation: false, iceRestartPending: false, _recovering: false, iceQueue: [], sigChain: Promise.resolve(), audio, audioSender: null, videoSender: null, audioTransceiver: null };
+    const st = { pc, dc: null, makingOffer: false, ignoreOffer: false, needsNegotiation: false, iceRestartPending: false, _recovering: false, _applyingSignal: false, iceQueue: [], sigChain: Promise.resolve(), audio, audioSender: null, videoSender: null, audioTransceiver: null, videoTransceiver: null };
     this.peers.set(id, st);
     const activeVid = this.screenStream || this.camStream;
-    if (!forOffer || activeVid) {
+    const vTrackInit = activeVid?.getVideoTracks?.()[0] || null;
+    if (!forOffer) {
       try {
         const aTrack = (this.micOn && this.stream?.getAudioTracks?.()[0]) ? this.stream.getAudioTracks()[0] : null;
         st.audioTransceiver = pc.addTransceiver('audio', { direction: aTrack ? 'sendrecv' : 'recvonly' });
@@ -683,6 +698,17 @@ export class Voice {
           for (const t of this.stream.getAudioTracks()) {
             st.audioSender = pc.addTrack(t, this.stream);
           }
+        }
+      }
+      try {
+        st.videoTransceiver = pc.addTransceiver('video', { direction: vTrackInit ? 'sendrecv' : 'recvonly' });
+        st.videoSender = st.videoTransceiver.sender;
+        if (vTrackInit) {
+          st.videoSender.replaceTrack(vTrackInit).catch(() => {});
+        }
+      } catch (e) {
+        if (vTrackInit && activeVid) {
+          st.videoSender = pc.addTrack(vTrackInit, activeVid);
         }
       }
     }
@@ -700,17 +726,14 @@ export class Voice {
         } catch (e) { /* ignore */ }
       };
     } catch (e) { /* ignore */ }
-    if (activeVid) {
-      for (const t of activeVid.getVideoTracks()) {
-        st.videoSender = pc.addTrack(t, activeVid);
-      }
-    }
     pc.ontrack = (e) => {
       if (e.track.kind === 'video') {
         const vStream = new MediaStream([e.track]);
         st.remoteVideoStream = vStream;
         const p = (this.participants || []).find((x) => x.id === id);
-        this._attachVideoBubble(id, vStream, p?.name || 'Katılımcı', Boolean(p?.screen));
+        if (p?.cam || p?.screen) {
+          this._attachVideoBubble(id, vStream, p?.name || 'Katılımcı', Boolean(p?.screen));
+        }
         e.track.onended = () => this._removeVideoBubble(id);
         e.track.onunmute = () => {
           const curP = (this.participants || []).find((x) => x.id === id);
@@ -738,7 +761,10 @@ export class Voice {
         this.send('webrtc_ice', { targetId: id, candidate: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate });
       }
     };
-    pc.onnegotiationneeded = () => this._negotiate(id, st);
+    pc.onnegotiationneeded = () => {
+      if (st._applyingSignal) return;
+      this._negotiate(id, st);
+    };
     const recoverPeer = async () => {
       if (this.destroyed || st._recovering || this.peers.get(id) !== st) return;
       st._recovering = true;
@@ -798,32 +824,75 @@ export class Voice {
           const collision = desc.type === 'offer' && (st.makingOffer || pc.signalingState !== 'stable');
           st.ignoreOffer = !polite && collision;
           if (st.ignoreOffer) return;
-          if (collision) {
-            st.iceQueue = [];
-            try { await pc.setLocalDescription({ type: 'rollback' }); } catch (e) { /* ignore */ }
-          }
-          await pc.setRemoteDescription(new RTCSessionDescription(desc));
-          const tr = pc.getTransceivers?.().find((t) => t.mid !== null && (t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio'))
-            || pc.getTransceivers?.().find((t) => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio');
-          if (tr) {
-            st.audioTransceiver = tr;
-            st.audioSender = tr.sender || st.audioSender;
-            if (this.micOn && this.stream?.getAudioTracks?.()[0]) {
-              const aTrack = this.stream.getAudioTracks()[0];
-              tr.direction = 'sendrecv';
-              try { await tr.sender.replaceTrack(aTrack); } catch (_) {}
+          st._applyingSignal = true;
+          try {
+            if (collision) {
+              st.iceQueue = [];
+              try { await pc.setLocalDescription({ type: 'rollback' }); } catch (e) { /* ignore */ }
+              if (!pc.currentRemoteDescription) {
+                for (const t of (pc.getTransceivers?.() || [])) {
+                  if (t.mid === null) {
+                    try { t.stop(); } catch (_) {}
+                  }
+                }
+                st.audioTransceiver = null;
+                st.audioSender = null;
+                st.videoTransceiver = null;
+                st.videoSender = null;
+              }
             }
-          }
-          if (st.iceQueue?.length) {
-            const queued = st.iceQueue.splice(0, st.iceQueue.length);
-            for (const cand of queued) {
-              try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (e) { /* ignore */ }
+            await pc.setRemoteDescription(new RTCSessionDescription(desc));
+            const allTrs = pc.getTransceivers?.() || [];
+            const aTr = allTrs.find((t) => t.mid !== null && (t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio'))
+              || allTrs.find((t) => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio');
+            const vTr = allTrs.find((t) => t.mid !== null && (t.receiver?.track?.kind === 'video' || t.sender?.track?.kind === 'video'))
+              || allTrs.find((t) => t.receiver?.track?.kind === 'video' || t.sender?.track?.kind === 'video');
+            if (aTr) {
+              st.audioTransceiver = aTr;
+              st.audioSender = aTr.sender || st.audioSender;
             }
-          }
-          if (desc.type === 'offer') {
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            this.send('webrtc_answer', { targetId: from, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
+            if (vTr) {
+              st.videoTransceiver = vTr;
+              st.videoSender = vTr.sender || st.videoSender;
+            }
+            if (desc.type === 'offer') {
+              const aTrack = (this.micOn && this.stream?.getAudioTracks?.()[0]) ? this.stream.getAudioTracks()[0] : null;
+              if (aTr) {
+                const wantADir = aTrack ? 'sendrecv' : 'recvonly';
+                if (aTr.direction !== wantADir) aTr.direction = wantADir;
+                if (aTrack && aTr.sender.track !== aTrack) {
+                  try { await aTr.sender.replaceTrack(aTrack); } catch (_) {}
+                }
+              }
+              const activeLocalVid = this.screenStream || this.camStream;
+              const vTrack = activeLocalVid?.getVideoTracks?.()[0] || null;
+              if (vTr) {
+                const wantVDir = vTrack ? 'sendrecv' : 'recvonly';
+                if (vTr.direction !== wantVDir) vTr.direction = wantVDir;
+                if (vTrack && vTr.sender.track !== vTrack) {
+                  try { await vTr.sender.replaceTrack(vTrack); } catch (_) {}
+                }
+              }
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              this.send('webrtc_answer', { targetId: from, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
+              if (vTrack && !vTr) {
+                try {
+                  st.videoTransceiver = pc.addTransceiver('video', { direction: 'sendrecv' });
+                  st.videoSender = st.videoTransceiver.sender;
+                  await st.videoSender.replaceTrack(vTrack);
+                  st.needsNegotiation = true;
+                } catch (_) {}
+              }
+            }
+            if (st.iceQueue?.length) {
+              const queued = st.iceQueue.splice(0, st.iceQueue.length);
+              for (const cand of queued) {
+                try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (e) { /* ignore */ }
+              }
+            }
+          } finally {
+            st._applyingSignal = false;
           }
           if (st.needsNegotiation && !st.makingOffer && st.pc.signalingState === 'stable') {
             st.needsNegotiation = false;
@@ -910,10 +979,12 @@ export class Voice {
             }
           }
           const had = this.peers.has(p.id);
+          const shouldInitiate = iAmActive || (peerActive && String(selfId) < String(p.id));
+          if (!had && !shouldInitiate) continue;
           const st = this.peer(p.id);
-          if (!had && (iAmActive || (peerActive && String(selfId) < String(p.id)))) {
+          if (!had && shouldInitiate) {
             this._negotiate(p.id, st);
-          } else if (had && st && iAmActive && peerActive && st.pc.connectionState === 'new' && st.pc.signalingState === 'stable' && !st.makingOffer && String(selfId) < String(p.id)) {
+          } else if (had && st && iAmActive && peerActive && st.pc.connectionState === 'new' && st.pc.signalingState === 'stable' && !st.makingOffer && !st.pc.remoteDescription && !st.pc.localDescription && (!st._lastNegAt || Date.now() - st._lastNegAt > 5000) && String(selfId) < String(p.id)) {
             this._negotiate(p.id, st);
           }
         }
@@ -975,8 +1046,18 @@ export class Voice {
     for (const p of this._orderedPeerTargets()) this.peer(p.id);
     for (const [id, st] of this.peers.entries()) {
       try {
-        if (st.videoSender) {
-          await st.videoSender.replaceTrack(vTrack);
+        const allTrs = st.pc.getTransceivers?.() || [];
+        const vTr = st.videoTransceiver
+          || allTrs.find((t) => t.mid !== null && (t.receiver?.track?.kind === 'video' || t.sender?.track?.kind === 'video'))
+          || allTrs.find((t) => t.receiver?.track?.kind === 'video' || t.sender?.track?.kind === 'video');
+        if (vTr) {
+          st.videoTransceiver = vTr;
+          st.videoSender = vTr.sender;
+          const wantDir = vTrack ? 'sendrecv' : 'recvonly';
+          const needsDirNegotiation = vTr.currentDirection !== wantDir;
+          if (vTr.direction !== wantDir) vTr.direction = wantDir;
+          if (vTr.sender.track !== vTrack) await vTr.sender.replaceTrack(vTrack);
+          if (needsDirNegotiation) await this._negotiate(id, st);
         } else if (vTrack) {
           if (!st.audioSender && !st.audioTransceiver) {
             try {
@@ -986,9 +1067,11 @@ export class Voice {
               if (aTrack) st.audioSender.replaceTrack(aTrack).catch(() => {});
             } catch (_) {}
           }
-          st.videoSender = st.pc.addTrack(vTrack, stream);
+          st.videoTransceiver = st.pc.addTransceiver('video', { direction: 'sendrecv' });
+          st.videoSender = st.videoTransceiver.sender;
+          await st.videoSender.replaceTrack(vTrack);
+          await this._negotiate(id, st);
         }
-        await this._negotiate(id, st);
       } catch (e) { /* ignore */ }
     }
   }
@@ -1051,9 +1134,10 @@ export class Voice {
         this.camStream?.getTracks().forEach((t) => t.stop());
         this.camStream = null;
         this.camOn = false;
+        this.lastLocalVoiceAt = Date.now();
         this._removeVideoBubble('self');
         await this._attachOrReplaceVideoTrack(this.screenStream || null);
-        this.send('voice_state', { cam: false, inCall: Boolean(this.inCall || this.micOn || this.screenOn) });
+        this._emitVoiceState(true);
         this.onStateChange?.();
         toast('📷 Kamera kapatıldı');
         return false;
@@ -1081,10 +1165,11 @@ export class Voice {
       }
       this.camOn = true;
       this.inCall = true;
+      this.lastLocalVoiceAt = Date.now();
       this._activateCallAudio();
       this._attachVideoBubble('self', this.camStream, `📷 ${this.getSelfProfile().name || 'Sen'}`, false);
       await this._attachOrReplaceVideoTrack(this.screenStream || this.camStream);
-      this.send('voice_state', { cam: true, inCall: true });
+      this._emitVoiceState(true);
       this.onStateChange?.();
       return true;
     } finally {
@@ -1101,9 +1186,10 @@ export class Voice {
         this.screenStream?.getTracks().forEach((t) => t.stop());
         this.screenStream = null;
         this.screenOn = false;
+        this.lastLocalVoiceAt = Date.now();
         this._removeVideoBubble('self-screen');
         await this._attachOrReplaceVideoTrack(this.camStream || null);
-        this.send('voice_state', { screen: false, inCall: Boolean(this.inCall || this.micOn || this.camOn) });
+        this._emitVoiceState(true);
         this.onStateChange?.();
         toast('🖥️ Ekran yansıtma durduruldu');
         return false;
@@ -1135,11 +1221,12 @@ export class Voice {
       }
       this.screenOn = true;
       this.inCall = true;
+      this.lastLocalVoiceAt = Date.now();
       this._activateCallAudio();
       this._attachVideoBubble('self-screen', this.screenStream, `🖥️ ${this.getSelfProfile().name || 'Sen'} · Ekran Yayını`, true);
       this.screenStream.getVideoTracks()[0]?.addEventListener('ended', () => { if (this.screenOn) this.toggleScreenShare(); });
       await this._attachOrReplaceVideoTrack(this.screenStream);
-      this.send('voice_state', { screen: true, inCall: true });
+      this._emitVoiceState(true);
       this.onStateChange?.();
       toast('🖥️ Ekran yansıtma başlatıldı — odadaki herkes ekranını görebilir');
       return true;
@@ -1190,7 +1277,7 @@ export class Voice {
       this.selfSpeaking = false;
       this.onMicLevel?.(0);
       this._updateDuckState();
-      this.send('voice_state', { muted: true, speaking: false, inCall: Boolean(this.inCall || this.camOn || this.screenOn) });
+      this._emitVoiceState(true);
       this.onStateChange?.();
       toast('🔇 Mikrofon kapatıldı');
       return false;
@@ -1235,7 +1322,7 @@ export class Voice {
         if (this.inCall) {
           for (const p of this._orderedPeerTargets()) this.peer(p.id);
           this._ensureRelayLoops();
-          this.send('voice_state', { muted: true, speaking: false, inCall: true });
+          this._emitVoiceState(true);
         }
         this.onStateChange?.();
         toast('🎧 Mikrofon izni verilmedi veya cihaz bulunamadı — dinleyici modundasın');
@@ -1267,28 +1354,28 @@ export class Voice {
       if (aTrack) {
         for (const [id, st] of this.peers.entries()) {
           try {
-            const aTrs = st.pc.getTransceivers?.().filter((t) => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio') || [];
-            if (aTrs.length) {
-              for (const tr of aTrs) {
-                tr.direction = 'sendrecv';
-                try { await tr.sender.replaceTrack(aTrack); } catch (_) {}
-              }
-              st.audioTransceiver = aTrs.find((t) => t.mid !== null) || aTrs[0];
-              st.audioSender = st.audioTransceiver.sender;
-            } else if (st.audioTransceiver) {
-              st.audioTransceiver.direction = 'sendrecv';
-              await st.audioTransceiver.sender.replaceTrack(aTrack);
-            } else if (st.audioSender) {
-              await st.audioSender.replaceTrack(aTrack);
+            const allTrs = st.pc.getTransceivers?.() || [];
+            const aTr = st.audioTransceiver
+              || allTrs.find((t) => t.mid !== null && (t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio'))
+              || allTrs.find((t) => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio');
+            if (aTr) {
+              st.audioTransceiver = aTr;
+              st.audioSender = aTr.sender;
+              const needsDirNegotiation = aTr.currentDirection !== 'sendrecv';
+              if (aTr.direction !== 'sendrecv') aTr.direction = 'sendrecv';
+              if (aTr.sender.track !== aTrack) await aTr.sender.replaceTrack(aTrack);
+              if (needsDirNegotiation) await this._negotiate(id, st);
             } else {
-              st.audioSender = st.pc.addTrack(aTrack, this.stream);
+              st.audioTransceiver = st.pc.addTransceiver('audio', { direction: 'sendrecv' });
+              st.audioSender = st.audioTransceiver.sender;
+              await st.audioSender.replaceTrack(aTrack);
+              await this._negotiate(id, st);
             }
-            await this._negotiate(id, st);
           } catch (err) { /* ignore */ }
         }
       }
       this._ensureRelayLoops();
-      this.send('voice_state', { muted: false, deafened: this.deafened, inCall: true });
+      this._emitVoiceState(true);
       this.onStateChange?.();
       toast('🎙️ Mikrofon açıldı — sesin odaya iletiliyor');
       return true;
@@ -1337,7 +1424,7 @@ export class Voice {
     if (withCam && !this.camOn) {
       await this.toggleCamera();
     }
-    this.send('voice_state', { inCall: true, muted: !this.micOn, cam: this.camOn, screen: this.screenOn, deafened: this.deafened });
+    this._emitVoiceState(true);
     this.onStateChange?.();
     toast(this.micOn ? '📞 Ses Kanalına katıldın — mikrofonun açık!' : '🎧 Ses Kanalına dinleyici olarak katıldın');
     return true;
@@ -1387,7 +1474,7 @@ export class Voice {
       }
     }
     this._playCallChime(false);
-    this.send('voice_state', { inCall: false, muted: true, speaking: false, cam: false, screen: false, deafened: false });
+    this._emitVoiceState(true);
     this.onStateChange?.();
     toast('📴 Ses & Yayın Kanalından ayrıldın');
     return false;
@@ -1612,7 +1699,7 @@ export class Voice {
           speaking = now;
           this.selfSpeaking = now;
           this._updateDuckState();
-          this.send('voice_state', { speaking });
+          this._emitVoiceState(false);
         }
       }, 160);
     } catch (e) { /* analyser optional */ }
