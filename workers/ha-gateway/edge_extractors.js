@@ -1188,23 +1188,30 @@ async function extractDizilife({ title, displayTitle, originalTitle, sourceUrl, 
   ];
 
   const fetchHtmlWithBase = async (targetUrl, refUrl, timeoutMs = 4500) => {
-    try {
-      const { resp, finalUrl } = await fetchPublicFn(
-        targetUrl,
-        { "User-Agent": UA_EDGE, Referer: refUrl, "Accept-Language": "tr-TR,tr;q=0.9" },
-        4,
-        timeoutMs
-      );
-      if (!resp || !resp.ok) {
-        const status = resp?.status || 0;
-        resp?.body?.cancel?.();
-        return status === 429 ? { rateLimited: true } : null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const { resp, finalUrl } = await fetchPublicFn(
+          targetUrl,
+          { "User-Agent": UA_EDGE, Referer: refUrl, "Accept-Language": "tr-TR,tr;q=0.9" },
+          4,
+          timeoutMs
+        );
+        if (!resp || !resp.ok) {
+          const status = resp?.status || 0;
+          resp?.body?.cancel?.();
+          if (status === 429 && attempt === 0) {
+            await new Promise((r) => setTimeout(r, 650));
+            continue;
+          }
+          return status === 429 ? { rateLimited: true } : null;
+        }
+        const html = await resp.text();
+        return { html, baseDom: new URL(finalUrl).origin, finalUrl };
+      } catch {
+        return null;
       }
-      const html = await resp.text();
-      return { html, baseDom: new URL(finalUrl).origin, finalUrl };
-    } catch {
-      return null;
     }
+    return null;
   };
 
   for (const step of steps) {
@@ -1272,7 +1279,7 @@ async function extractDizilife({ title, displayTitle, originalTitle, sourceUrl, 
       if (sRes?.rateLimited) return null;
       if (sRes?.html) {
         baseDom = sRes.baseDom;
-        const altRe = new RegExp(`href=["']((?:https?:\\/\\/[^"'\\s/]+)?\\/${seg}\\/[a-z0-9-]+\\/sezon\\/\\d+\\/bolum\\/${e})["']`, "i");
+        const altRe = new RegExp(`href=["']((?:https?:\\/\\/[^"'\\s/]+)?\\/${seg}\\/[a-z0-9-]+\\/sezon\\/${s}\\/bolum\\/${e})["']`, "i");
         const altM = sRes.html.match(altRe);
         if (altM?.[1]) {
           epUrl = altM[1].startsWith("http") ? altM[1] : `${baseDom}${altM[1]}`;

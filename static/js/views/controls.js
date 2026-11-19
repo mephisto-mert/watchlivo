@@ -1502,8 +1502,9 @@ export function buildControls(frame, ctx) {
 
   function tick() {
     const d = duration();
-    const rawPos = Math.min(position(), d || Infinity);
     const vAct = host.adapter?.video;
+    const isBrokenNoStream = Boolean(vAct && vAct.readyState === 0 && (vAct.networkState === 3 || !errorBox.classList.contains('hidden')));
+    const rawPos = isBrokenNoStream ? 0 : Math.min(position(), d || Infinity);
     const mSig = `${state.mesh?.media?.tmdbId || state.mesh?.media?.id || state.mesh?.media?.url || ''}:${state.mesh?.media?.season || 0}:${state.mesh?.media?.episode || 0}`;
     if (mSig !== smoothMediaSig) {
       smoothMediaSig = mSig;

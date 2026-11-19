@@ -93,6 +93,7 @@ function createWindow() {
     try {
       const targetOrig = new URL(navUrl).origin;
       const appOrig = new URL(SERVER_URL).origin;
+      if (targetOrig !== appOrig) {
         event.preventDefault();
       }
     } catch (_) {

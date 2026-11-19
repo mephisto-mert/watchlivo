@@ -167,10 +167,17 @@ if (typeof window !== 'undefined' && !window.__wlCmdKBound) {
           const searchTabBtn = document.querySelector('.panel-left .drawer-tabs button') || document.getElementById('nav-search-video');
           searchTabBtn?.click?.();
         }
+        const focusRoomSearch = () => {
+          const mInp = document.querySelector('.panel-left input[type="search"], .panel-left input[type="text"], .panel-left input.input, .sel-search input, .panel-left input:not([type="hidden"])');
+          if (mInp) {
+            mInp.focus();
+            mInp.select?.();
+            return true;
+          }
+          return false;
+        };
         setTimeout(() => {
-          const mInp = document.querySelector('.panel-left input.input, .sel-search input');
-          mInp?.focus();
-          mInp?.select?.();
+          if (!focusRoomSearch()) setTimeout(focusRoomSearch, 140);
         }, 40);
         return;
       }
@@ -679,7 +686,7 @@ export function openDownloadModal() {
       'ℹ️ İndirilen APK dosyasını açmak için cihazınızda "Bilinmeyen kaynaklardan yüklemeye izin ver" seçeneğini onaylayabilirsiniz.'
     ) : null
   );
-  popup({ title: 'Watchlivo İndir', content: box, options: [{ label: 'Kapat', primary: true }] });
+  popup({ title: 'Watchlivo İndir', content: box, wide: true, options: [{ label: 'Kapat', primary: true }] });
 }
 
 let _activeCtxCleanup = null;

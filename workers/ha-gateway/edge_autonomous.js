@@ -2022,7 +2022,37 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     return edgeJson({ ok: true, items: mergedNr });
   }
   if (safePath === "/api/rave/latest-episodes") {
-    const items = blockedSet.size ? boot.latestEpisodes.filter((it) => !isItemBlocked(it, blockedSet)) : boot.latestEpisodes;
+    const rawItems = blockedSet.size ? boot.latestEpisodes.filter((it) => !isItemBlocked(it, blockedSet)) : boot.latestEpisodes;
+    const validItems = rawItems.filter((it) => {
+      const idStr = String(it?.id || "").trim().toLowerCase();
+      const tid = String(it?.tmdbId || "").trim();
+      if (idStr.startsWith("dbx-") && !/^\d+$/.test(tid)) return false;
+      return true;
+    });
+    const seenIds = new Set(validItems.map((it) => String(it?.tmdbId || it?.id || "")));
+    const items = [...validItems];
+    if (items.length < 16 && Array.isArray(boot.catalog)) {
+      for (const c of boot.catalog) {
+        if (items.length >= 16) break;
+        if (!c || c.mediaType !== "tv" || !/^\d+$/.test(String(c.tmdbId || ""))) continue;
+        if (blockedSet.size && isItemBlocked(c, blockedSet)) continue;
+        const k = String(c.tmdbId);
+        if (seenIds.has(k)) continue;
+        seenIds.add(k);
+        items.push({
+          id: c.id || `tmdb-tv-${k}`,
+          tmdbId: k,
+          mediaType: "tv",
+          title: c.title || c.originalTitle || "",
+          originalTitle: c.originalTitle || c.title || "",
+          poster: c.poster || "",
+          year: c.year || "",
+          season: 1,
+          episode: 1,
+          source: c.source || "Sinema+",
+        });
+      }
+    }
     return edgeJson({ ok: true, items });
   }
   if (isSeasonsPath) {

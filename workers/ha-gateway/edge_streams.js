@@ -1013,7 +1013,18 @@ export async function handleEdgeSubtitle(url, env) {
     try {
       raw = new TextDecoder("utf-8", { fatal: true }).decode(buf);
     } catch {
-      raw = new TextDecoder("windows-1254", { fatal: false }).decode(buf);
+      try {
+        raw = new TextDecoder("windows-1254", { fatal: false }).decode(buf);
+      } catch {
+        const bytes = new Uint8Array(buf);
+        const trMap = { 0xd0: "\u011e", 0xdd: "\u0130", 0xde: "\u015e", 0xf0: "\u011f", 0xfd: "\u0131", 0xfe: "\u015f" };
+        let s = "";
+        for (let i = 0; i < bytes.length; i++) {
+          const b = bytes[i];
+          s += trMap[b] || String.fromCharCode(b);
+        }
+        raw = s;
+      }
     }
     const vtt = normalizeSubtitleToVtt(raw);
     if (!vtt) {

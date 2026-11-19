@@ -876,6 +876,7 @@ body.in-room:not(.mesh-minimized) .bg-img { display: none !important; }
 .rave-login-dot.free-dot:empty { display: none !important; }
 .poster-source-pill {
   position: absolute; top: 6px; left: 6px; z-index: 3;
+  max-width: calc(100% - 46px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   padding: 2px 7px; border-radius: 7px; font-size: .58rem; font-weight: 800;
   color: #f8fafc; background: rgba(7, 9, 16, .86);
   border: 1px solid rgba(99, 102, 241, .38);
@@ -4252,19 +4253,16 @@ header.navbar.top-nav-capsule {
   }
 }
 @media (max-width: 420px) {
-  .top-nav-capsule #nav-theme-btn {
-    display: none !important;
-  }
   .top-nav-capsule .nav-icon {
-    width: 30px !important;
-    height: 30px !important;
-    min-width: 30px !important;
-    min-height: 30px !important;
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
   }
   .top-nav-capsule #btn-create-room {
-    padding: 0 9px !important;
-    height: 30px !important;
-    font-size: 0.7rem !important;
+    padding: 0 10px !important;
+    height: 36px !important;
+    font-size: 0.72rem !important;
   }
 }
 @media (max-width: 350px) {
@@ -7786,22 +7784,21 @@ body:has(#popup-root:not(:empty)) .wl-cookie-banner,
     min-width: 0 !important;
     gap: 4px !important;
   }
-  .top-nav-capsule #nav-theme-btn,
   .top-nav-capsule #nav-download-btn,
   .top-nav-capsule #nav-btn-apk {
     display: none !important;
   }
   .top-nav-capsule .nav-icon,
   .top-nav-capsule .user-profile-badge {
-    width: 32px !important;
-    height: 32px !important;
-    min-width: 32px !important;
-    min-height: 32px !important;
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
   }
   .top-nav-capsule #btn-create-room,
   .top-nav-capsule .btn-create-room {
-    height: 32px !important;
-    min-height: 32px !important;
+    height: 36px !important;
+    min-height: 36px !important;
     padding: 0 9px !important;
     font-size: 0.72rem !important;
     gap: 4px !important;

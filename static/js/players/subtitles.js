@@ -917,14 +917,18 @@ export class SubtitleDubController {
       || this.subtitleTracks.find((t) => t.lang === cleanId)
       || this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith(cleanId))
       || this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith('tr'))
-      || this.subtitleTracks[0];
+      || (isInit ? null : this.subtitleTracks[0]);
     if (!track) {
+      this.selectedSubId = 'off';
       this.subCues = [];
       this.secondaryCues = [];
       this.activeCueText = '';
       this.activeSecondaryCueText = '';
+      this._attachNativeTrack(null);
+      this._disableAllNativeTextTracks();
       this.adapter?._syncYtNativeCaptions?.();
       this.adapter.events.onSubtitleCue?.('', '');
+      this.adapter.events.onTracksChanged?.();
       return null;
     }
     const seq = this._mediaSeq;
