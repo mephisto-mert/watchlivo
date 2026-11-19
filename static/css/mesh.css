@@ -6290,7 +6290,13 @@ html.is-android-pip .rave-subtitle-cue {
     width: 36px !important;
     height: 36px !important;
   }
-  #mesh-root .discord-stage-btn:not(.hidden),
+  #mesh-root .discord-stage-btn:not(.hidden) {
+    width: auto !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    padding: 0 8px !important;
+    white-space: nowrap !important;
+  }
   body:not(.mesh-minimized) #mesh-root:not(.hidden) .chatbar .chat-input .chat-tools-toggle,
   body:not(.mesh-minimized) #mesh-root:not(.hidden) .chatbar .chat-input .voice-note-btn,
   body:not(.mesh-minimized) #mesh-root:not(.hidden) .chatbar .chat-input #btn-chat-gif,
