@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261119_v217';
-import { api } from './api.js?v=20261119_v217';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261119_v217';
+import { h, icons, popup, toast } from './ui.js?v=20261119_v219';
+import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261119_v219';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261119_v219';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261119_v217';
+} from './store.js?v=20261119_v219';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -51,8 +51,18 @@ export function sanitizeAvatarUrl(raw = '') {
 function _syncLiveSelfEverywhere(p) {
   if (!p || typeof document === 'undefined') return;
   try {
-    const navLbl = document.querySelector('#nav-account-btn .account-pill-name, #nav-account-btn span:not(.avatar)');
-    if (navLbl && p.name) navLbl.textContent = p.name;
+    const navBtn = document.querySelector('#nav-account-btn');
+    if (navBtn) {
+      const isMem = Boolean(!p.isGuest && (p.email || p.authToken));
+      const isConfGuest = Boolean(p.isGuest && p.guestConfirmed);
+      const navLbl = navBtn.querySelector('.uname, .account-pill-name');
+      if (navLbl) navLbl.textContent = isMem ? p.name : (isConfGuest ? p.name : (p.name || 'Giriş Yap / Misafir Gir'));
+      const navSub = navBtn.querySelector('.utag');
+      if (navSub) navSub.textContent = isMem ? `✓ @${p.handle || 'uye'}` : (isConfGuest ? '👤 Misafir · Hesap Aç' : '🔓 Kayıtsız İzle / Giriş');
+      navBtn.title = isMem ? `${p.name} (@${p.handle}) — Hesap Ayarları` : (isConfGuest ? `${p.name} (Misafir) — Giriş Yap / Hesap Aç` : 'Watchlivo Giriş Yap / Misafir İzle');
+      const oldAv = navBtn.querySelector('.avatar');
+      if (oldAv) oldAv.replaceWith(avatar(p, 30));
+    }
   } catch (_) {}
   try {
     if (state.mesh && Array.isArray(state.mesh.participants)) {
@@ -175,6 +185,8 @@ export function saveGuestProfile(data = {}) {
     setTimeout(() => {
       if (state.self && !state.self.isGuest) return;
       const gHdrs = { 'Content-Type': 'application/json' };
+      const edgeTok = getEdgeToken();
+      if (edgeTok) gHdrs['X-Watchlivo-Token'] = edgeTok;
       if (p.guestToken) gHdrs.Authorization = `Bearer ${p.guestToken}`;
       fetch('/api/rave/social/guest', {
         method: 'POST',
@@ -191,17 +203,15 @@ export function saveGuestProfile(data = {}) {
           statusEmoji: p.statusEmoji,
         }),
       }).then((r) => (r.ok ? r.json() : null)).then((d) => {
-        if (!state.self?.isGuest) return;
-        if (d) {
-          if (d.uid) { p.uid = String(d.uid); p.id = String(d.uid); }
-          if (d.handle) p.handle = String(d.handle);
-          if (d.guestToken) p.guestToken = String(d.guestToken);
-          try {
-            localStorage.setItem(KEY, JSON.stringify(p));
-            sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(p));
-            set({ self: { ...p } });
-          } catch (_) {}
-        }
+        if (!d || !state.self?.isGuest) return;
+        if (d.uid) { p.uid = String(d.uid); p.id = String(d.uid); }
+        if (d.handle) p.handle = String(d.handle);
+        if (d.guestToken) p.guestToken = String(d.guestToken);
+        try {
+          localStorage.setItem(KEY, JSON.stringify(p));
+          sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(p));
+          set({ self: { ...p } });
+        } catch (_) {}
         syncSocialState(true).catch(() => {});
         pushPresenceHeartbeat().catch(() => {});
       }).catch(() => {});
@@ -650,9 +660,11 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       if (res?.ok && res.user) {
         const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
         finish(prof, `✓ ${prof.name} (@${prof.handle}) olarak Google ile giriş yapıldı`);
+      } else {
+        showErr(res?.error || 'Google ile giriş başarısız oldu.');
       }
     } catch (e) {
-      showErr(e.message || 'Google ile giriş başarısız oldu');
+      showErr(humanApiError(e, 'Google ile giriş başarısız oldu.', 'Google ile giriş şu an kenar sunucuda kullanılamıyor.'));
     }
   };
 
@@ -1236,6 +1248,9 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                     method: 'POST',
                     body: { ...payload, authToken: profObj.authToken },
                   });
+                  if (res?.ok === false) {
+                    throw Object.assign(new Error(res.error || 'profile_update_failed'), { status: 503, data: res });
+                  }
                   const srvUser = res?.user || {};
                   const updated = saveProfile({
                     ...profObj,
@@ -1252,9 +1267,14 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                     handleInp.focus();
                     return;
                   }
+                  if (isEdgeUnavailable(e)) {
+                    const updated = saveProfile({ ...profObj, ...payload, isGuest: false });
+                    finish(updated, '⚠️ Sunucu profil güncelleme servisi şu an devre dışı; değişiklikler yalnızca bu cihaza kaydedildi.');
+                    return;
+                  }
+                  errBox.textContent = humanApiError(e, 'Profil sunucuya kaydedilemedi, lütfen tekrar deneyin.');
+                  return;
                 }
-                const updated = saveProfile({ ...profObj, ...payload, isGuest: false });
-                finish(updated, '✓ Profil bilgilerin güncellendi!');
               } else {
                 const guestId = profObj.uid || profObj.id || ('guest_' + Math.random().toString(36).slice(2, 10));
                 try {
@@ -1262,6 +1282,9 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                     method: 'POST',
                     body: { uid: guestId, ...payload },
                   });
+                  if (gRes?.ok === false) {
+                    throw Object.assign(new Error(gRes.error || 'guest_update_failed'), { status: 503, data: gRes });
+                  }
                   const gUser = gRes?.user || {};
                   const updated = saveGuestProfile({
                     ...profObj,
@@ -1282,8 +1305,8 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                     return;
                   }
                 }
-                const updated = saveGuestProfile({ ...profObj, ...payload, uid: guestId });
-                finish(updated, '✓ Profil kartın ve gizlilik ayarların kaydedildi!');
+                const updated = saveGuestProfile({ ...profObj, ...payload, uid: guestId, _skipProvision: true });
+                finish(updated, '✓ Profil kartın ve gizlilik ayarların bu cihaza kaydedildi!');
               }
             },
           }, '💾 Profili & Gizlilik Ayarlarını Kaydet'),
@@ -1314,10 +1337,15 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                           Object.assign(profObj, saved);
                           curPwInp.value = '';
                           newPwInp.value = '';
+                          errBox.textContent = '';
                           toast('✓ Şifreniz güncellendi ve diğer oturumlar sonlandırıldı!');
+                        } else {
+                          errBox.textContent = humanApiError({ status: 200, data: r }, 'Şifre güncellenemedi.', 'Şifre değiştirme servisi şu an kenar sunucuda kullanılamıyor.');
                         }
                       } catch (e) {
-                        errBox.textContent = e?.message || 'Şifre güncellenemedi.';
+                        errBox.textContent = Number(e?.status) === 401
+                          ? (e?.data?.error || 'Mevcut şifreniz hatalı veya oturumunuz sona ermiş.')
+                          : humanApiError(e, 'Şifre güncellenemedi.', 'Şifre değiştirme servisi şu an kenar sunucuda kullanılamıyor.');
                       }
                     },
                   }, '🔑 Şifreyi Güncelle'),
@@ -1339,9 +1367,13 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                           onDone?.(guestProf);
                           toast('Hesabınız kalıcı olarak silindi.');
                           modalRef?.close?.();
+                        } else {
+                          errBox.textContent = humanApiError({ status: 200, data: r }, 'Hesap silinemedi.', 'Hesap silme servisi şu an kenar sunucuda kullanılamıyor.');
                         }
                       } catch (e) {
-                        errBox.textContent = e?.message || 'Hesap silinemedi.';
+                        errBox.textContent = Number(e?.status) === 401
+                          ? (e?.data?.error || 'Şifreniz hatalı veya oturumunuz sona ermiş.')
+                          : humanApiError(e, 'Hesap silinemedi.', 'Hesap silme servisi şu an kenar sunucuda kullanılamıyor.');
                       }
                     },
                   }, '🗑️ Hesabı Sil'))));
@@ -1426,9 +1458,11 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           if (res?.ok && res.user) {
             const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
             finish(prof, `Hoş geldin, ${prof.name} (@${prof.handle})!`);
+          } else {
+            errBox.textContent = res?.error || 'Giriş yapılamadı. Bilgilerinizi kontrol edin.';
           }
         } catch (e) {
-          errBox.textContent = e.message || 'Giriş yapılamadı. Bilgilerinizi kontrol edin.';
+          errBox.textContent = humanApiError(e, 'Giriş yapılamadı. Bilgilerinizi kontrol edin.', 'Giriş servisi şu an kenar sunucuda kullanılamıyor.');
         }
       };
 
@@ -1441,11 +1475,16 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         }
         try {
           const res = await api('/api/auth/email-action', { method: 'POST', body: { action: 'reset_password', email } });
+          if (res?.ok === false) {
+            errBox.style.color = '#fb7185';
+            errBox.textContent = humanApiError({ status: 200, data: res }, 'Şifre sıfırlama e-postası gönderilemedi.', 'E-posta ile şifre sıfırlama servisi şu an kenar sunucuda kullanılamıyor.');
+            return;
+          }
           errBox.style.color = '#6ee7b7';
           errBox.textContent = res?.message || `Şifre sıfırlama e-postası ${email} adresine gönderildi!`;
         } catch (e) {
           errBox.style.color = '#fb7185';
-          errBox.textContent = e.message || 'Şifre sıfırlama e-postası gönderilemedi.';
+          errBox.textContent = humanApiError(e, 'Şifre sıfırlama e-postası gönderilemedi.', 'E-posta ile şifre sıfırlama servisi şu an kenar sunucuda kullanılamıyor.');
         }
       };
 
@@ -1495,9 +1534,11 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         if (res?.ok && res.user) {
           const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
           finish(prof, `🎉 Watchlivo hesabın oluşturuldu: @${prof.handle}`);
+        } else {
+          errBox.textContent = res?.error || 'Kayıt işlemi başarısız oldu.';
         }
       } catch (e) {
-        errBox.textContent = e.message || 'Kayıt işlemi başarısız oldu.';
+        errBox.textContent = humanApiError(e, 'Kayıt işlemi başarısız oldu.', 'Kayıt servisi şu an kenar sunucuda kullanılamıyor.');
       }
     };
 
@@ -1527,8 +1568,9 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     title: isLoggedMember && activeTab === 'account' ? 'Watchlivo Hesabım' : "Watchlivo'ya Giriş Yap",
     message: isLoggedMember && activeTab === 'account' ? null : 'Birlikte kesintisiz sinema, dizi ve müzik odalarına katıl.',
     dismissable: Boolean(dismissable),
+    kind: 'profile',
     content: root,
-    options: [],
+    options: dismissable ? [{ label: 'Kapat', class: 'btn ghost' }] : [],
   });
 }
 
@@ -1548,6 +1590,13 @@ export async function openDmModal(initialPeerId = null) {
   let lastRenderSig = '';
   let dmModal = null;
   let pollTimer = null;
+  let dmInFlight = false;
+  let dmConsec404 = 0;
+  let dmFailCount = 0;
+  let dmPollingStopped = false;
+  let dmUnavailable = false;
+  let dmErrorMsg = '';
+  let dmVisHandler = null;
 
   const root = h('div', { class: 'DMThreads DirectMessageView wl-dm-root' });
   const topBarWrap = h('div', { class: 'wl-dm-topbar' });
@@ -1656,7 +1705,9 @@ export async function openDmModal(initialPeerId = null) {
         toast(r?.error || 'Mesaj gönderilemedi');
       }
     } catch (e) {
-      toast(e?.message || 'Karşılıklı arkadaş olmadan mesaj gönderilemez');
+      toast(Number(e?.status) === 403
+        ? (e?.data?.error || 'Karşılıklı arkadaş olmadan mesaj gönderilemez')
+        : humanApiError(e, 'Mesaj gönderilemedi.', 'Özel mesajlaşma servisi şu an kenar sunucuda kullanılamıyor.'));
     }
   };
   dmInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendDmNow(); });
@@ -1695,7 +1746,8 @@ export async function openDmModal(initialPeerId = null) {
               type: 'button',
               class: 'btn primary sm',
               onclick: async () => {
-                await updateFriendAction('accept', { requestId: req.id, targetUid: req.fromUid });
+                const r = await updateFriendAction('accept', { requestId: req.id, targetUid: req.fromUid });
+                if (!r?.ok) { toast(r?.error || 'İstek kabul edilemedi.'); return; }
                 toast(`🎉 ${req.fromName} ile artık karşılıklı arkadaşsınız!`);
                 await refreshAll(req.fromUid || activePeerId, true);
               },
@@ -1704,7 +1756,8 @@ export async function openDmModal(initialPeerId = null) {
               type: 'button',
               class: 'btn sm',
               onclick: async () => {
-                await updateFriendAction('decline', { requestId: req.id, targetUid: req.fromUid });
+                const r = await updateFriendAction('decline', { requestId: req.id, targetUid: req.fromUid });
+                if (!r?.ok) { toast(r?.error || 'İstek reddedilemedi.'); return; }
                 await refreshAll(activePeerId, true);
               },
             }, '✕ Reddet'))))));
@@ -1843,10 +1896,15 @@ export async function openDmModal(initialPeerId = null) {
           style: { fontSize: '.71rem', opacity: expOn ? '1' : '.75', borderColor: expOn ? '#fbbf24' : '' },
           onclick: async () => {
             const nextSec = expOn ? 0 : 86400;
-            await api('/api/rave/social/dm', { method: 'POST', body: { uid: myUid, peerId: activePeer.uid, action: 'settings', expirySec: nextSec } });
-            toast(nextSec ? '⏱️ 24 saatlik kaybolan mesaj modu açıldı' : '∞ Mesajlar kalıcı moda alındı');
-            lastRenderSig = '';
-            await refreshAll(activePeer.uid, false);
+            try {
+              const r = await api('/api/rave/social/dm', { method: 'POST', body: { uid: myUid, peerId: activePeer.uid, action: 'settings', expirySec: nextSec } });
+              if (r?.ok === false) { toast(r?.error || 'Ayar güncellenemedi.'); return; }
+              toast(nextSec ? '⏱️ 24 saatlik kaybolan mesaj modu açıldı' : '∞ Mesajlar kalıcı moda alındı');
+              lastRenderSig = '';
+              await refreshAll(activePeer.uid, false);
+            } catch (e) {
+              toast(humanApiError(e, 'Ayar güncellenemedi.'));
+            }
           },
         }, expOn ? '⏱️ 24s' : '∞') : null,
         activePeer.uid ? h('button', {
@@ -1854,7 +1912,8 @@ export async function openDmModal(initialPeerId = null) {
           class: 'btn sm danger',
           title: 'Kullanıcıyı Engelle',
           onclick: async () => {
-            await updateFriendAction('block', { targetUid: activePeer.uid, targetName: activePeer.name });
+            const r = await updateFriendAction('block', { targetUid: activePeer.uid, targetName: activePeer.name });
+            if (!r?.ok) { toast(r?.error || 'Kullanıcı engellenemedi.'); return; }
             toast(`🚫 ${activePeer.name} engellendi`);
             activePeerId = '';
             lastRenderSig = '';
@@ -1864,6 +1923,13 @@ export async function openDmModal(initialPeerId = null) {
     );
 
     if (!activeDmMeta.canMessage) {
+      if ((dmUnavailable || dmErrorMsg) && !activeMessages.length) {
+        msgListEl.replaceChildren(h('div', { class: 'wl-dm-empty-placeholder' },
+          h('div', { style: { fontSize: '1.9rem' } }, '⚠️ '),
+          h('strong', {}, 'Özel Mesajlaşma Geçici Olarak Kullanılamıyor '),
+          h('span', {}, dmErrorMsg || 'Özel mesaj servisine şu an ulaşılamıyor, lütfen biraz sonra tekrar deneyin.')));
+        return;
+      }
       const fSt = activeDmMeta.friendState || 'NONE';
       msgListEl.replaceChildren(h('div', { class: 'wl-dm-empty-placeholder non-friend-placeholder' },
         h('div', { style: { fontSize: '1.9rem' } }, '🔒'),
@@ -1878,7 +1944,8 @@ export async function openDmModal(initialPeerId = null) {
               type: 'button',
               class: 'btn primary',
               onclick: async () => {
-                await updateFriendAction('accept', { targetUid: activePeer.uid });
+                const r = await updateFriendAction('accept', { targetUid: activePeer.uid });
+                if (!r?.ok) { toast(r?.error || 'İstek kabul edilemedi.'); return; }
                 toast(`🎉 ${activePeer.name} ile artık arkadaşsınız!`);
                 lastRenderSig = '';
                 await refreshAll(activePeer.uid, true);
@@ -1895,6 +1962,8 @@ export async function openDmModal(initialPeerId = null) {
                     toast(`📩 ${activePeer.name} kişisine istek gönderildi!`);
                     lastRenderSig = '';
                     await refreshAll(activePeer.uid, false);
+                  } else {
+                    toast(r?.error || 'İstek gönderilemedi.');
                   }
                 },
               }, '➕ Arkadaşlık İsteği Gönder')));
@@ -1973,9 +2042,14 @@ export async function openDmModal(initialPeerId = null) {
             type: 'button',
             class: `wl-dm-react-chip ${uids.includes(myUid) ? 'on' : ''}`,
             onclick: async () => {
-              await api('/api/rave/social/dm', { method: 'POST', body: { uid: myUid, peerId: activePeer.uid, action: 'react', messageId: m.id, emoji: emo } });
-              lastRenderSig = '';
-              await refreshAll(activePeer.uid, false);
+              try {
+                const r = await api('/api/rave/social/dm', { method: 'POST', body: { uid: myUid, peerId: activePeer.uid, action: 'react', messageId: m.id, emoji: emo } });
+                if (r?.ok === false) { toast(r?.error || 'Tepki gönderilemedi.'); return; }
+                lastRenderSig = '';
+                await refreshAll(activePeer.uid, false);
+              } catch (e) {
+                toast(humanApiError(e, 'Tepki gönderilemedi.'));
+              }
             },
           }, `${emo} ${uids.length}`))) : null,
         h('div', { class: 'wl-dm-bubble-actions' },
@@ -1983,9 +2057,14 @@ export async function openDmModal(initialPeerId = null) {
             type: 'button',
             class: 'wl-dm-mini-act',
             onclick: async () => {
-              await api('/api/rave/social/dm', { method: 'POST', body: { uid: myUid, peerId: activePeer.uid, action: 'react', messageId: m.id, emoji: emo } });
-              lastRenderSig = '';
-              await refreshAll(activePeer.uid, false);
+              try {
+                const r = await api('/api/rave/social/dm', { method: 'POST', body: { uid: myUid, peerId: activePeer.uid, action: 'react', messageId: m.id, emoji: emo } });
+                if (r?.ok === false) { toast(r?.error || 'Tepki gönderilemedi.'); return; }
+                lastRenderSig = '';
+                await refreshAll(activePeer.uid, false);
+              } catch (e) {
+                toast(humanApiError(e, 'Tepki gönderilemedi.'));
+              }
             },
           }, emo)),
           h('button', { type: 'button', class: 'wl-dm-mini-act', title: 'Yanıtla', onclick: () => setReply(m) }, '↩'),
@@ -1994,9 +2073,14 @@ export async function openDmModal(initialPeerId = null) {
             class: 'wl-dm-mini-act',
             title: 'Mesajı Sil',
             onclick: async () => {
-              await api('/api/rave/social/dm', { method: 'POST', body: { uid: myUid, peerId: activePeer.uid, action: 'delete', messageId: m.id } });
-              lastRenderSig = '';
-              await refreshAll(activePeer.uid, false);
+              try {
+                const r = await api('/api/rave/social/dm', { method: 'POST', body: { uid: myUid, peerId: activePeer.uid, action: 'delete', messageId: m.id } });
+                if (r?.ok === false) { toast(r?.error || 'Mesaj silinemedi.'); return; }
+                lastRenderSig = '';
+                await refreshAll(activePeer.uid, false);
+              } catch (e) {
+                toast(humanApiError(e, 'Mesaj silinemedi.'));
+              }
             },
           }, '🗑️') : null));
     }) : [
@@ -2009,53 +2093,91 @@ export async function openDmModal(initialPeerId = null) {
   };
 
   const refreshAll = async (peerId = activePeerId, forceScroll = false) => {
-    if (!peerId) {
-      try {
-        const st0 = await syncSocialState(true);
-        if (st0?.ok) socialData = st0;
-      } catch (_) {}
-      if (socialData.friends?.length) peerId = socialData.friends[0].uid;
-    }
-    activePeerId = peerId || '';
-    if (activePeerId) {
-      try {
-        const d = await api(`/api/rave/social/dm?uid=${encodeURIComponent(myUid)}&peerId=${encodeURIComponent(activePeerId)}`);
-        if (d?.ok) {
-          activeMessages = d.messages || [];
-          activeDmMeta = {
-            canMessage: Boolean(d.canMessage),
-            friendState: d.friendState || 'NONE',
-            peerTyping: Boolean(d.peerTyping),
-            settings: d.settings || { expirySec: 0 },
-            peer: d.peer || null,
-          };
-        }
-      } catch (_) {
-        activeMessages = [];
-      }
-    }
+    if (dmInFlight) return { nextDelay: 2800 };
+    dmInFlight = true;
+    let nextDelay = 2800;
     try {
-      const st = await syncSocialState(true);
-      if (st?.ok) socialData = st;
-    } catch (_) {}
-    const sig = JSON.stringify([
-      activePeerId,
-      activeDmMeta.canMessage,
-      activeDmMeta.friendState,
-      activeDmMeta.peerTyping,
-      activeDmMeta.settings?.expirySec,
-      (socialData.requests || []).length,
-      (socialData.friends || []).map((f) => `${f.uid}:${f.presenceState}:${f.unread || 0}`),
-      (socialData.threads || []).map((t) => `${t.peer?.uid}:${t.unreadCount || 0}:${t.lastMessage?.id || ''}`),
-      activeMessages.map((m) => `${m.id}:${m.readAt || 0}:${JSON.stringify(m.reactions || {})}`),
-    ]);
-    const isPlayingDmAudio = Array.from(msgListEl.querySelectorAll('audio')).some((el) => !el.paused);
-    if ((sig !== lastRenderSig || forceScroll) && !isRecordingDmVoice && !isPlayingDmAudio) {
-      const hadFocus = document.activeElement === dmInp;
-      lastRenderSig = sig;
-      renderParts(forceScroll);
-      if (hadFocus && dmInp.isConnected) dmInp.focus();
+      if (!peerId) {
+        try {
+          const st0 = await syncSocialState(true);
+          if (st0?.ok) socialData = st0;
+        } catch (_) {}
+        if (socialData.friends?.length) peerId = socialData.friends[0].uid;
+      }
+      activePeerId = peerId || '';
+      if (activePeerId) {
+        try {
+          const d = await api(`/api/rave/social/dm?uid=${encodeURIComponent(myUid)}&peerId=${encodeURIComponent(activePeerId)}`);
+          if (d?.pollingDisabled) {
+            dmPollingStopped = true;
+          }
+          if (d?.ok) {
+            dmConsec404 = 0;
+            dmFailCount = 0;
+            dmUnavailable = false;
+            dmErrorMsg = '';
+            activeMessages = d.messages || [];
+            activeDmMeta = {
+              canMessage: Boolean(d.canMessage),
+              friendState: d.friendState || 'NONE',
+              peerTyping: Boolean(d.peerTyping),
+              settings: d.settings || { expirySec: 0 },
+              peer: d.peer || null,
+            };
+            if (d.mode === 'cf-autonomous-edge') {
+              nextDelay = 12000;
+            }
+          } else if (d && d.ok === false) {
+            dmUnavailable = isEdgeUnavailable({ status: 200, data: d });
+            dmErrorMsg = humanApiError({ status: 200, data: d }, 'Özel mesajlar yüklenemedi.', 'Özel mesajlaşma servisi şu an kenar sunucuda kullanılamıyor.');
+            if (dmUnavailable) {
+              dmConsec404 += 1;
+              if (dmConsec404 >= 2) dmPollingStopped = true;
+              nextDelay = 15000;
+            }
+          }
+        } catch (err) {
+          const st = Number(err?.status || 0);
+          dmUnavailable = isEdgeUnavailable(err);
+          dmErrorMsg = humanApiError(err, 'Özel mesajlar yüklenemedi.', 'Özel mesajlaşma servisi şu an kenar sunucuda kullanılamıyor.');
+          if (st === 404 || st === 501) {
+            dmConsec404 += 1;
+            if (dmConsec404 >= 2) dmPollingStopped = true;
+            nextDelay = 15000;
+          } else {
+            dmFailCount += 1;
+            nextDelay = Math.min(30000, 5000 * Math.pow(2, Math.min(3, dmFailCount - 1)));
+          }
+        }
+      }
+      try {
+        const st = await syncSocialState(true);
+        if (st?.ok) socialData = st;
+      } catch (_) {}
+      const sig = JSON.stringify([
+        activePeerId,
+        dmUnavailable,
+        dmErrorMsg,
+        activeDmMeta.canMessage,
+        activeDmMeta.friendState,
+        activeDmMeta.peerTyping,
+        activeDmMeta.settings?.expirySec,
+        (socialData.requests || []).length,
+        (socialData.friends || []).map((f) => `${f.uid}:${f.presenceState}:${f.unread || 0}`),
+        (socialData.threads || []).map((t) => `${t.peer?.uid}:${t.unreadCount || 0}:${t.lastMessage?.id || ''}`),
+        activeMessages.map((m) => `${m.id}:${m.readAt || 0}:${JSON.stringify(m.reactions || {})}`),
+      ]);
+      const isPlayingDmAudio = Array.from(msgListEl.querySelectorAll('audio')).some((el) => !el.paused);
+      if ((sig !== lastRenderSig || forceScroll) && !isRecordingDmVoice && !isPlayingDmAudio) {
+        const hadFocus = document.activeElement === dmInp;
+        lastRenderSig = sig;
+        renderParts(forceScroll);
+        if (hadFocus && dmInp.isConnected) dmInp.focus();
+      }
+    } finally {
+      dmInFlight = false;
     }
+    return { nextDelay };
   };
 
   const rightCol = h('div', { class: 'wl-dm-right-col' },
@@ -2070,7 +2192,12 @@ export async function openDmModal(initialPeerId = null) {
   await refreshAll(activePeerId, true);
 
   const cleanupDmModal = () => {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    dmPollingStopped = true;
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    if (dmVisHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', dmVisHandler);
+      dmVisHandler = null;
+    }
     if (dmVoiceRec) {
       try { dmVoiceRec.stop(false); } catch (_) {}
       dmVoiceRec = null;
@@ -2088,13 +2215,31 @@ export async function openDmModal(initialPeerId = null) {
     options: [{ label: 'Kapat', class: 'btn' }],
   });
 
-  pollTimer = setInterval(() => {
-    if (!root.isConnected) {
-      cleanupDmModal();
-      return;
-    }
-    refreshAll(activePeerId, false).catch(() => {});
-  }, 2800);
+  const scheduleNextDmPoll = (delayMs = 2800) => {
+    clearTimeout(pollTimer);
+    if (dmPollingStopped || !root.isConnected) return;
+    pollTimer = setTimeout(async () => {
+      if (dmPollingStopped || !root.isConnected) {
+        cleanupDmModal();
+        return;
+      }
+      if (typeof document !== 'undefined' && document.hidden) {
+        scheduleNextDmPoll(15000);
+        return;
+      }
+      const res = await refreshAll(activePeerId, false).catch(() => ({ nextDelay: 10000 }));
+      scheduleNextDmPoll(res?.nextDelay || 2800);
+    }, delayMs);
+  };
+  if (typeof document !== 'undefined') {
+    dmVisHandler = () => {
+      if (!dmPollingStopped && root.isConnected && !document.hidden) {
+        scheduleNextDmPoll(150);
+      }
+    };
+    document.addEventListener('visibilitychange', dmVisHandler);
+  }
+  scheduleNextDmPoll(2800);
 }
 
 // ============================================================================
@@ -2137,7 +2282,7 @@ export function openReportModal({ targetType = 'room', targetId = '', targetLabe
         class: 'btn primary',
         action: async () => {
           try {
-            await api('/api/rave/report', {
+            const r = await api('/api/rave/report', {
               method: 'POST',
               body: {
                 targetType,
@@ -2147,9 +2292,17 @@ export function openReportModal({ targetType = 'room', targetId = '', targetLabe
                 reporter: state.self?.name || 'İzleyici',
               },
             });
+            if (r?.ok === false) {
+              throw Object.assign(new Error(r.error || 'report_failed'), { status: 503, data: r });
+            }
             toast('✓ Bildiriminiz moderasyon ekibine iletildi. Teşekkürler!');
           } catch (e) {
-            toast('✓ Bildiriminiz kaydedildi.');
+            if (isEdgeUnavailable(e)) {
+              toast('⚠️ Şikayet servisi şu an kullanılamıyor. Acil bildirimler için iletişim e-postasını kullanabilirsiniz.', 4000);
+            } else {
+              toast(humanApiError(e, '⚠️ Bildirim gönderilemedi, lütfen tekrar deneyin.'));
+              return true;
+            }
           }
           modal?.close?.();
         },
@@ -2388,7 +2541,8 @@ export function openUserProfileModal(targetUser) {
         class: 'btn danger',
         style: { flex: '1', justifyContent: 'center' },
         onclick: async () => {
-          await updateFriendAction('block', { targetUid: safeSocialUid || `@${uHandle}`, targetName: uName });
+          const r = await updateFriendAction('block', { targetUid: safeSocialUid || `@${uHandle}`, targetName: uName });
+          if (!r?.ok) { toast(r?.error || 'Kullanıcı engellenemedi.'); return; }
           toast(`🚫 ${uName} engellendi`);
           userModal?.close?.();
         },

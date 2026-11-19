@@ -325,12 +325,16 @@ function parseRapidvidHtml(rhtml) {
 }
 
 async function fetchTextSafe(targetUrl, hdrs, fetchPublicFn, timeoutMs = 4500) {
-  const { resp } = await fetchPublicFn(targetUrl, hdrs, 4, timeoutMs);
-  if (!resp || !resp.ok) {
-    resp?.body?.cancel?.();
+  try {
+    const { resp } = await fetchPublicFn(targetUrl, hdrs, 4, timeoutMs);
+    if (!resp || !resp.ok) {
+      resp?.body?.cancel?.();
+      return "";
+    }
+    return await resp.text();
+  } catch {
     return "";
   }
-  return await resp.text();
 }
 
 function b64UrlToBytes(str) {
@@ -387,6 +391,7 @@ async function extractFilemoonStream(embedUrl, u, _fetchPublicFn) {
       signal: AbortSignal.timeout(5500),
     });
     if (resp.ok) rawJson = await resp.text();
+    else resp.body?.cancel?.();
   } catch {
     return null;
   }
@@ -642,6 +647,33 @@ function extractSequelTag(str) {
   return rom[raw] || raw;
 }
 
+function scoreTitleCandidate(rtNoYear, candToks, candSeq, candYearM, reqYear) {
+  const rToks = normTitleTokens(rtNoYear);
+  if (!rToks.length) return -1;
+  const hits = rToks.filter((t) => candToks.includes(t)).length;
+  if (hits === 0) return -1;
+  if (reqYear && candYearM) {
+    const diff = Math.abs(Number(reqYear) - Number(candYearM[1]));
+    if (diff > 2) return -1;
+  }
+  const rSeq = extractSequelTag(rtNoYear);
+  if (candSeq && rSeq && candSeq !== rSeq) return -1;
+  if (rToks.length >= 3 && hits < Math.ceil(rToks.length * 0.8)) return -1;
+  if (rToks.length === 2 && hits < 2) return -1;
+  if (rToks.length === 1 && candToks.length > 2) return -1;
+  const missing = rToks.length - hits;
+  const extra = Math.max(0, candToks.length - hits);
+  let score = (hits / Math.max(rToks.length, candToks.length)) * 100 - missing * 35 - extra * 12;
+  if ((candSeq && !rSeq) || (!candSeq && rSeq)) {
+    score -= 30;
+  }
+  if (reqYear && candYearM) {
+    const diff = Math.abs(Number(reqYear) - Number(candYearM[1]));
+    score += diff === 0 ? 15 : 5;
+  }
+  return score;
+}
+
 function titlesMatchScore(candRaw, reqTitles, reqYear = "") {
   const candClean = String(candRaw || "").replace(/\s+\d+\.\s*Sezon.*$/i, "").trim();
   const candYearM = candClean.match(/\((\d{4})\)/);
@@ -652,30 +684,17 @@ function titlesMatchScore(candRaw, reqTitles, reqYear = "") {
   let best = -1;
   for (const rt of reqTitles) {
     const rtNoYear = String(rt || "").replace(/\(\d{4}\)/g, "").trim();
-    const rToks = normTitleTokens(rtNoYear);
-    if (!rToks.length) continue;
-    const hits = rToks.filter((t) => candToks.includes(t)).length;
-    if (hits === 0) continue;
-    if (reqYear && candYearM) {
-      const diff = Math.abs(Number(reqYear) - Number(candYearM[1]));
-      if (diff > 2) continue;
+    const sc = scoreTitleCandidate(rtNoYear, candToks, candSeq, candYearM, reqYear);
+    if (sc > best) best = sc;
+    if (rtNoYear.includes(":")) {
+      const pre = rtNoYear.split(":")[0].trim();
+      const reqYrNum = /^\d{4}/.test(String(reqYear || "").trim()) ? Number(String(reqYear).trim().slice(0, 4)) : 0;
+      const yearMismatch = Boolean(reqYrNum && (!candYearM || reqYrNum !== Number(candYearM[1])));
+      if (!yearMismatch && normTitleTokens(pre).length >= 2 && extractSequelTag(rtNoYear) === candSeq) {
+        const preSc = scoreTitleCandidate(pre, candToks, candSeq, candYearM, reqYear);
+        if (preSc >= 0 && preSc - 18 > best) best = preSc - 18;
+      }
     }
-    const rSeq = extractSequelTag(rtNoYear);
-    if (candSeq && rSeq && candSeq !== rSeq) continue;
-    if (rToks.length >= 3 && hits < Math.ceil(rToks.length * 0.8)) continue;
-    if (rToks.length === 2 && hits < 2) continue;
-    if (rToks.length === 1 && candToks.length > 2) continue;
-    const missing = rToks.length - hits;
-    const extra = Math.max(0, candToks.length - hits);
-    let score = (hits / Math.max(rToks.length, candToks.length)) * 100 - missing * 35 - extra * 12;
-    if ((candSeq && !rSeq) || (!candSeq && rSeq)) {
-      score -= 30;
-    }
-    if (reqYear && candYearM) {
-      const diff = Math.abs(Number(reqYear) - Number(candYearM[1]));
-      score += diff === 0 ? 15 : 5;
-    }
-    if (score > best) best = score;
   }
   return best;
 }
@@ -700,14 +719,34 @@ async function postWebteizleForm(path, bodyStr, referer, timeoutMs = 4500) {
       return "";
     }
     const buf = await r.arrayBuffer();
-    try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(buf);
-    } catch {
-      return new TextDecoder("windows-1254").decode(buf);
-    }
+    return decodeTurkishLegacyText(buf);
   } catch {
     return "";
   }
+}
+
+const CP1254_HIGH = {
+  0x80: "\u20ac", 0x82: "\u201a", 0x83: "\u0192", 0x84: "\u201e", 0x85: "\u2026", 0x86: "\u2020", 0x87: "\u2021",
+  0x88: "\u02c6", 0x89: "\u2030", 0x8a: "\u0160", 0x8b: "\u2039", 0x8c: "\u0152", 0x91: "\u2018", 0x92: "\u2019",
+  0x93: "\u201c", 0x94: "\u201d", 0x95: "\u2022", 0x96: "\u2013", 0x97: "\u2014", 0x98: "\u02dc", 0x99: "\u2122",
+  0x9a: "\u0161", 0x9b: "\u203a", 0x9c: "\u0153", 0x9f: "\u0178",
+  0xd0: "\u011e", 0xdd: "\u0130", 0xde: "\u015e", 0xf0: "\u011f", 0xfd: "\u0131", 0xfe: "\u015f",
+};
+
+export function decodeTurkishLegacyText(buf) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {}
+  try {
+    return new TextDecoder("windows-1254").decode(buf);
+  } catch {}
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    out += b < 0x80 ? String.fromCharCode(b) : (CP1254_HIGH[b] || String.fromCharCode(b));
+  }
+  return out;
 }
 
 async function extractWebteizleMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn) {
@@ -790,8 +829,8 @@ async function extractWebteizleMovie({ title, displayTitle, originalTitle, year 
     }
     const isDub = wl.includes("/dublaj/");
     const candidates = [
-      { alt: alts.find((a) => /vidmoly/i.test(String(a?.baslik || ""))), kind: "vidmoly" },
       { alt: alts.find((a) => /filemoon/i.test(String(a?.baslik || ""))), kind: "filemoon" },
+      { alt: alts.find((a) => /vidmoly/i.test(String(a?.baslik || ""))), kind: "vidmoly" },
     ].filter((c) => c.alt?.id);
     for (const cand of candidates) {
       const embRaw = await postWebteizleForm("/ajax/dataEmbed.asp", `id=${cand.alt.id}`, izUrl);
@@ -821,6 +860,11 @@ async function extractWebteizleMovie({ title, displayTitle, originalTitle, year 
     }
   }
   if (!resolvedStreams.length) return null;
+  resolvedStreams.sort((a, b) => {
+    const aVm = isVmpxOrVidmolyUrl(a.url) ? 1 : 0;
+    const bVm = isVmpxOrVidmolyUrl(b.url) ? 1 : 0;
+    return aVm - bVm;
+  });
   return {
     url: resolvedStreams[0].url,
     referer: resolvedStreams[0].referer,
@@ -828,6 +872,49 @@ async function extractWebteizleMovie({ title, displayTitle, originalTitle, year 
     streams: resolvedStreams,
     tag: "hls_wt_vm",
   };
+}
+
+function isVmpxOrVidmolyUrl(rawUrl) {
+  return /(?:vmpx\.|vidmoly\.|vmbox\.|vmnow\.|vmget\.)/i.test(String(rawUrl || ""));
+}
+
+function isCfPoisonedVmpxUrl(rawUrl) {
+  const s = String(rawUrl || "");
+  return /vmpx\./i.test(s) && /(?:[?&])asn=(?:132892|13335)\b/i.test(s);
+}
+
+function decodeHtmlEntitiesBasic(s) {
+  return String(s || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function decodeMolyObfuscation(mHtml) {
+  const raw = String(mHtml || "");
+  const decodedParts = [];
+  for (const obfM of raw.matchAll(/atob\(\s*unescape\(\s*["']([^"']+)["']\s*\)\s*\)/gi)) {
+    if (!obfM?.[1]) continue;
+    try {
+      let esc = obfM[1];
+      try {
+        esc = decodeURIComponent(esc);
+      } catch {
+        esc = unescape(esc);
+      }
+      const bin = atob(esc.replace(/\s+/g, ""));
+      const decoded = new TextDecoder("utf-8", { fatal: false }).decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+      if (decoded) decodedParts.push(decoded);
+    } catch {
+      // Safe fallback: skip malformed block and continue checking remaining blocks
+    }
+  }
+  return decodedParts.length ? decodedParts.join("\n") : raw;
 }
 
 async function extractDiziboxEpisode({ title, displayTitle, originalTitle, sourceUrl, year, s, e }, fetchPublicFn) {
@@ -849,13 +936,12 @@ async function extractDiziboxEpisode({ title, displayTitle, originalTitle, sourc
     if (sl && !slugs.includes(`${sl}-izle`)) slugs.push(`${sl}-izle`);
   }
 
-  const tryDiziboxSlug = async (sl) => {
-    const epUrl = `https://www.dizibox.live/${sl}-${s}-sezon-${e}-bolum-izle/`;
+  const extractFromEpUrl = async (epUrl, skipTitleCheck = false) => {
     const html = await fetchTextSafe(epUrl, hdrs, fetchPublicFn, 5000);
     if (!html) return null;
-    const tM = html.match(/<title>([^<]+)<\/title>/i);
-    if (tM && !String(sourceUrl || "").includes("dizibox.")) {
-      if (titlesMatchScore(tM[1], reqTitles, year) < 0) return null;
+    if (!skipTitleCheck && !String(sourceUrl || "").includes("dizibox.")) {
+      const tM = html.match(/<title>([^<]+)<\/title>/i);
+      if (tM && titlesMatchScore(tM[1], reqTitles, year) < 0) return null;
     }
 
     const streams = [];
@@ -867,7 +953,8 @@ async function extractDiziboxEpisode({ title, displayTitle, originalTitle, sourc
     if (mUrl) {
       const fullM = mUrl.startsWith("//") ? `https:${mUrl}` : mUrl;
       const mHtml = await fetchTextSafe(fullM, { ...hdrs, Referer: epUrl }, fetchPublicFn, 4500);
-      const vmU = mHtml.match(/https?:\/\/(?:vidmoly|vmbox|vmnow|vmpx|vmget)\.[a-z]+\/(?:embed-|w\/)[a-zA-Z0-9_-]+(?:\.html)?/i)?.[0];
+      const decodedM = decodeMolyObfuscation(mHtml);
+      const vmU = decodedM.match(/https?:\/\/(?:vidmoly|vmbox|vmnow|vmpx|vmget)\.[a-z]+\/(?:embed-|w\/)[a-zA-Z0-9_-]+(?:\.html)?/i)?.[0];
       if (vmU) {
         const vmRes = await resolveEmbedHtmlToHls(vmU, fetchPublicFn);
         if (vmRes?.url) {
@@ -887,9 +974,8 @@ async function extractDiziboxEpisode({ title, displayTitle, originalTitle, sourc
       }
     }
     if (streams.length > 1) {
-      const hasVmpx = streams.some((st) => /(?:vmpx\.|\/hls2\/)/i.test(String(st?.url || "")));
       const sheilaIdx = streams.findIndex((st) => /dbx\.molystream\.org/i.test(String(st?.url || "")));
-      if (hasVmpx && sheilaIdx > 0) {
+      if (sheilaIdx > 0) {
         const [sheila] = streams.splice(sheilaIdx, 1);
         streams.unshift(sheila);
       }
@@ -900,22 +986,599 @@ async function extractDiziboxEpisode({ title, displayTitle, originalTitle, sourc
     return null;
   };
 
-  const results = await Promise.allSettled(slugs.slice(0, 3).map(tryDiziboxSlug));
+  const results = await Promise.allSettled(
+    slugs.slice(0, 3).map((sl) => extractFromEpUrl(`https://www.dizibox.live/${sl}-${s}-sezon-${e}-bolum-izle/`, false))
+  );
   for (const r of results) {
     if (r.status === "fulfilled" && r.value?.url) return r.value;
+  }
+
+  // Search fallback via dizibox.live/?s=... (parse ONLY <article>...</article> blocks)
+  const searchQueries = [];
+  for (const rt of reqTitles) {
+    const clean = String(rt || "").replace(/\(\d{4}\)/g, "").trim();
+    if (!clean) continue;
+    if (!searchQueries.includes(clean)) searchQueries.push(clean);
+    if (clean.includes(":")) {
+      const pre = clean.split(":")[0].trim();
+      if (pre.length >= 3 && !searchQueries.includes(pre)) searchQueries.push(pre);
+    }
+  }
+
+  let bestSeriesSlug = "";
+  let bestSeriesScore = -1;
+  for (const q of searchQueries.slice(0, 2)) {
+    const sHtml = await fetchTextSafe(`https://www.dizibox.live/?s=${encodeURIComponent(q)}`, hdrs, fetchPublicFn, 4500);
+    if (!sHtml) continue;
+    for (const artM of sHtml.matchAll(/<article\b[^>]*>([\s\S]*?)<\/article>/gi)) {
+      const block = artM[1];
+      const linkM = block.match(/<a[^>]+href=["'](https?:\/\/www\.dizibox\.live\/diziler\/([a-z0-9-]+)\/?)["']/i);
+      if (!linkM?.[2]) continue;
+      const slugCand = linkM[2];
+      const h3M = block.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
+      const attrM = block.match(/(?:title|alt)=["']([^"']+)["']/i);
+      const yrM =
+        block.match(/<i[^>]*icon-globe[^>]*><\/i>[^<]*?\b((?:19|20)\d{2})\b/i) ||
+        block.match(/<span[^>]*class=["'][^"']*year[^"']*["'][^>]*>\s*((?:19|20)\d{2})\s*<\/span>/i);
+      const baseTitle = decodeHtmlEntitiesBasic(h3M?.[1] || attrM?.[1] || slugCand.replace(/-/g, " "));
+      const candTitle = yrM?.[1] && !/\(\d{4}\)/.test(baseTitle) ? `${baseTitle} (${yrM[1]})` : baseTitle;
+      const sc = titlesMatchScore(candTitle, reqTitles, year);
+      if (sc >= 40 && sc > bestSeriesScore) {
+        bestSeriesScore = sc;
+        bestSeriesSlug = slugCand;
+      }
+    }
+    if (bestSeriesScore >= 90) break;
+  }
+
+  if (bestSeriesSlug) {
+    const epSlugs = [];
+    const noHd = bestSeriesSlug.replace(/-hd$/i, "");
+    if (noHd) epSlugs.push(noHd);
+    if (!epSlugs.includes(bestSeriesSlug)) epSlugs.push(bestSeriesSlug);
+    for (const epSlug of epSlugs) {
+      const hit = await extractFromEpUrl(`https://www.dizibox.live/${epSlug}-${s}-sezon-${e}-bolum-izle/`, true);
+      if (hit?.url) return hit;
+    }
+    const seriesHtml = await fetchTextSafe(`https://www.dizibox.live/diziler/${bestSeriesSlug}/`, hdrs, fetchPublicFn, 4500);
+    if (seriesHtml) {
+      const epLinkRe = new RegExp(`href=["'](https?:\\/\\/www\\.dizibox\\.live\\/[^"']*?-${s}-sezon-${e}-bolum(?:-[a-z0-9-]*)?\\/)["']`, "i");
+      const epLinkM = seriesHtml.match(epLinkRe);
+      if (epLinkM?.[1]) {
+        const hit = await extractFromEpUrl(epLinkM[1], true);
+        if (hit?.url) return hit;
+      }
+    }
   }
   return null;
 }
 
-export async function resolveTurkishCatalogStream({ title, displayTitle, originalTitle, sourceUrl, year = "", mtype, s, e, fetchPublicFn }) {
+// Pure-JS RFC 1321 MD5 for OpenSSL EVP_BytesToKey (Node & CF Workers lack crypto.subtle MD5)
+const MD5_SHIFTS = [
+  7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+  5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+  4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+  6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+];
+const MD5_K = Array.from({ length: 64 }, (_, i) => Math.floor(Math.abs(Math.sin(i + 1)) * 0x100000000) >>> 0);
+
+function md5Bytes(inputBytes) {
+  const src = inputBytes instanceof Uint8Array ? inputBytes : new Uint8Array(inputBytes || 0);
+  const bitLen = src.length * 8;
+  const padLen = ((56 - ((src.length + 1) % 64)) + 64) % 64;
+  const buf = new Uint8Array(src.length + 1 + padLen + 8);
+  buf.set(src, 0);
+  buf[src.length] = 0x80;
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(buf.length - 8, bitLen >>> 0, true);
+  dv.setUint32(buf.length - 4, Math.floor(bitLen / 0x100000000) >>> 0, true);
+
+  let a0 = 0x67452301;
+  let b0 = 0xefcdab89;
+  let c0 = 0x98badcfe;
+  let d0 = 0x10325476;
+  const M = new Uint32Array(16);
+
+  for (let off = 0; off < buf.length; off += 64) {
+    for (let j = 0; j < 16; j++) M[j] = dv.getUint32(off + j * 4, true);
+    let A = a0, B = b0, C = c0, D = d0;
+    for (let i = 0; i < 64; i++) {
+      let F, g;
+      if (i < 16) {
+        F = (B & C) | (~B & D);
+        g = i;
+      } else if (i < 32) {
+        F = (D & B) | (~D & C);
+        g = (5 * i + 1) % 16;
+      } else if (i < 48) {
+        F = B ^ C ^ D;
+        g = (3 * i + 5) % 16;
+      } else {
+        F = C ^ (B | ~D);
+        g = (7 * i) % 16;
+      }
+      const sum = (A + F + MD5_K[i] + M[g]) >>> 0;
+      const s = MD5_SHIFTS[i];
+      const rot = ((sum << s) | (sum >>> (32 - s))) >>> 0;
+      A = D;
+      D = C;
+      C = B;
+      B = (B + rot) >>> 0;
+    }
+    a0 = (a0 + A) >>> 0;
+    b0 = (b0 + B) >>> 0;
+    c0 = (c0 + C) >>> 0;
+    d0 = (d0 + D) >>> 0;
+  }
+
+  const out = new Uint8Array(16);
+  const outDv = new DataView(out.buffer);
+  outDv.setUint32(0, a0, true);
+  outDv.setUint32(4, b0, true);
+  outDv.setUint32(8, c0, true);
+  outDv.setUint32(12, d0, true);
+  return out;
+}
+
+function evpBytesToKeyMd5(pwBytes, saltBytes, totalLen = 48) {
+  const out = new Uint8Array(totalLen);
+  let off = 0;
+  let prev = new Uint8Array(0);
+  while (off < totalLen) {
+    const inp = new Uint8Array(prev.length + pwBytes.length + saltBytes.length);
+    inp.set(prev, 0);
+    inp.set(pwBytes, prev.length);
+    inp.set(saltBytes, prev.length + pwBytes.length);
+    prev = md5Bytes(inp);
+    const take = Math.min(prev.length, totalLen - off);
+    out.set(prev.subarray(0, take), off);
+    off += take;
+  }
+  return { key: out.slice(0, 32), iv: out.slice(32, 48) };
+}
+
+function b64ToUint8(b64Str) {
+  const bin = atob(String(b64Str || "").replace(/\s+/g, ""));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+async function extractDizilife({ title, displayTitle, originalTitle, sourceUrl, year, mtype, s, e }, fetchPublicFn) {
+  const rawCands = [displayTitle, title, originalTitle]
+    .map((x) => String(x || "").replace(/\(\d{4}\)/g, "").trim())
+    .filter(Boolean);
+  const qCands = [];
+  const validTitles = [];
+  for (const x of rawCands) {
+    if (!validTitles.includes(x)) validTitles.push(x);
+    if (x.includes(":")) {
+      const sp = x.replace(/:/g, " ").replace(/\s+/g, " ").trim();
+      if (sp && !validTitles.includes(sp)) validTitles.push(sp);
+      const pre = x.split(":")[0].trim();
+      if (pre.length >= 3 && !qCands.includes(pre)) qCands.push(pre);
+      if (sp && !qCands.includes(sp)) qCands.push(sp);
+    }
+    if (!qCands.includes(x)) qCands.push(x);
+  }
+  for (const vt of [displayTitle, title, originalTitle]) {
+    const clean = String(vt || "").trim();
+    if (clean && !validTitles.includes(clean)) validTitles.push(clean);
+  }
+  if (!validTitles.length) return null;
+  const wantKore = validTitles.some((vt) => /kore|korea/i.test(String(vt || "")));
+  const seg = mtype === "tv" ? "dizi" : "film";
+
+  const directDl = sourceUrl && /dizi\d*\.(?:life|plus)\/(?:dizi|film)\//i.test(sourceUrl)
+    ? sourceUrl.replace(/https?:\/\/dizi\d*\.(?:life|plus)/i, "https://dizi86.life")
+    : "";
+
+  const slugSteps = [];
+  for (const x of [originalTitle, title, displayTitle]) {
+    const sl = slugifyAscii(x);
+    if (sl && sl.length >= 3) {
+      const u = `https://dizi86.life/${seg}/${sl}`;
+      if (!slugSteps.some((st) => st.val === u)) slugSteps.push({ mode: "SLUG", val: u });
+    }
+    if (slugSteps.length >= 2) break;
+  }
+
+  const steps = [
+    ...(directDl ? [{ mode: "DIRECT", val: directDl }] : []),
+    ...slugSteps,
+    ...qCands.slice(0, 2).map((q) => ({ mode: "SEARCH", val: q })),
+  ];
+
+  const fetchHtmlWithBase = async (targetUrl, refUrl, timeoutMs = 4500) => {
+    try {
+      const { resp, finalUrl } = await fetchPublicFn(
+        targetUrl,
+        { "User-Agent": UA_EDGE, Referer: refUrl, "Accept-Language": "tr-TR,tr;q=0.9" },
+        4,
+        timeoutMs
+      );
+      if (!resp || !resp.ok) {
+        const status = resp?.status || 0;
+        resp?.body?.cancel?.();
+        return status === 429 ? { rateLimited: true } : null;
+      }
+      const html = await resp.text();
+      return { html, baseDom: new URL(finalUrl).origin, finalUrl };
+    } catch {
+      return null;
+    }
+  };
+
+  for (const step of steps) {
+    let matchedUrl = "";
+    let baseDom = "https://dizi86.life";
+    if (step.mode === "DIRECT" || step.mode === "SLUG") {
+      matchedUrl = step.val;
+      try { baseDom = new URL(matchedUrl).origin; } catch {}
+    } else {
+      let sRes = null;
+      for (const dlHost of ["https://dizi86.life", "https://dizi84.life", "https://dizi82.life"]) {
+        sRes = await fetchHtmlWithBase(`${dlHost}/ara?q=${encodeURIComponent(step.val)}`, `${dlHost}/`, 3500);
+        if (sRes?.rateLimited) return null;
+        if (sRes?.html) break;
+      }
+      if (!sRes?.html) continue;
+      baseDom = sRes.baseDom;
+      const cardRe = new RegExp(`<a[^>]+href=["']((?:https?:\\/\\/[^"'\\s/]+)?\\/${seg}\\/[a-z0-9-]+)["'][^>]*>([\\s\\S]*?)<\\/a>`, "gi");
+      let bestCardUrl = "";
+      let bestCardScore = -1;
+      for (const m of sRes.html.matchAll(cardRe)) {
+        const href = m[1];
+        const inner = m[2];
+        const slugPart = href.split("/").pop() || "";
+        if (!wantKore && (slugPart.includes("-kore") || slugPart.includes("korea"))) continue;
+        const tm = inner.match(/data-fallback-title=["']([^"']+)["']/i) || inner.match(/alt=["']([^"']+)["']/i);
+        const slugTitle = slugPart.replace(/-/g, " ");
+        const cTitle = decodeHtmlEntitiesBasic(tm?.[1] || slugTitle);
+        const ym = inner.match(/<span>\s*((?:19|20)\d{2})\s*<\/span>/i);
+        const cYear = ym?.[1] || "";
+        const reqYrNum = /^\d{4}/.test(String(year || "")) ? Number(String(year).slice(0, 4)) : 0;
+        if (cYear && reqYrNum) {
+          const tol = mtype === "movie" ? 1 : 4;
+          if (Math.abs(Number(cYear) - reqYrNum) > tol) continue;
+        }
+        const passYear = cYear && reqYrNum && Math.abs(Number(cYear) - reqYrNum) <= 2 ? String(reqYrNum) : "";
+        const titleInput1 = passYear ? `${cTitle} (${cYear})` : cTitle;
+        const titleInput2 = passYear ? `${slugTitle} (${cYear})` : slugTitle;
+        const sc = Math.max(
+          titlesMatchScore(titleInput1, validTitles, passYear),
+          titlesMatchScore(titleInput2, validTitles, passYear)
+        );
+        if (sc >= 50 && sc > bestCardScore) {
+          bestCardScore = sc;
+          bestCardUrl = href.startsWith("http") ? href : `${baseDom}${href}`;
+        }
+      }
+      matchedUrl = bestCardUrl;
+    }
+
+    if (!matchedUrl) continue;
+    let epUrl = matchedUrl;
+    if (mtype === "tv") {
+      if (epUrl.includes("/sezon/")) {
+        epUrl = epUrl.replace(/\/+$/, "").replace(/\/sezon\/\d+\/bolum\/\d+.*$/, `/sezon/${s}/bolum/${e}`);
+      } else {
+        epUrl = `${epUrl.replace(/\/+$/, "")}/sezon/${s}/bolum/${e}`;
+      }
+    }
+
+    let epRes = await fetchHtmlWithBase(epUrl, `${baseDom}/`, 4500);
+    if (epRes?.rateLimited) return null;
+    if (!epRes && mtype === "tv" && !matchedUrl.includes("/sezon/") && step.mode !== "SLUG") {
+      const sRes = await fetchHtmlWithBase(matchedUrl, `${baseDom}/`, 4000);
+      if (sRes?.rateLimited) return null;
+      if (sRes?.html) {
+        baseDom = sRes.baseDom;
+        const altRe = new RegExp(`href=["']((?:https?:\\/\\/[^"'\\s/]+)?\\/${seg}\\/[a-z0-9-]+\\/sezon\\/\\d+\\/bolum\\/${e})["']`, "i");
+        const altM = sRes.html.match(altRe);
+        if (altM?.[1]) {
+          epUrl = altM[1].startsWith("http") ? altM[1] : `${baseDom}${altM[1]}`;
+          epRes = await fetchHtmlWithBase(epUrl, `${baseDom}/`, 4500);
+          if (epRes?.rateLimited) return null;
+        }
+      }
+    }
+    if (!epRes?.html) continue;
+
+    if (step.mode === "SLUG") {
+      const pageTitleM = epRes.html.match(/<title>([^<]+)<\/title>/i);
+      if (pageTitleM?.[1] && titlesMatchScore(pageTitleM[1], validTitles, mtype === "movie" ? year : "") < 40) {
+        continue;
+      }
+    }
+
+    const ifrM = epRes.html.match(/<iframe[^>]+src=["']((?:https?:)?\/\/[^"']+\/player\/[^"']+)["']/i);
+    if (!ifrM?.[1]) continue;
+    const pu = ifrM[1].startsWith("//") ? `https:${ifrM[1]}` : ifrM[1];
+    const pHtml = await fetchTextSafe(pu, { "User-Agent": UA_EDGE, Referer: epRes.finalUrl || epUrl }, fetchPublicFn, 4200);
+    if (!pHtml) continue;
+
+    const fnM = pHtml.match(/var\s+([a-zA-Z0-9_$]+)\s*=\s*function\(s\)\{return atob/);
+    if (!fnM?.[1]) continue;
+    const escapedFn = fnM[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const sMatches = [...pHtml.matchAll(new RegExp(`${escapedFn}\\("([^"]+)"\\)`, "g"))].map((m) => m[1]);
+    if (sMatches.length < 2) continue;
+
+    try {
+      const cB64 = atob(sMatches[0].split("").reverse().join(""));
+      const pwBytes = b64ToUint8(sMatches[1].split("").reverse().join(""));
+      const raw = b64ToUint8(cB64);
+      if (raw.length <= 16 || String.fromCharCode(...raw.subarray(0, 8)) !== "Salted__") continue;
+      const salt = raw.subarray(8, 16);
+      const ct = raw.subarray(16);
+      const { key, iv } = evpBytesToKeyMd5(pwBytes, salt, 48);
+      const cryptoKey = await crypto.subtle.importKey("raw", key, { name: "AES-CBC" }, false, ["decrypt"]);
+      const ptBuf = await crypto.subtle.decrypt({ name: "AES-CBC", iv }, cryptoKey, ct);
+      const pt = new TextDecoder("utf-8", { fatal: false }).decode(ptBuf);
+      const fm = pt.match(/file:\s*"([^"]+)"/);
+      if (!fm?.[1]) continue;
+      const rawFile = fm[1].trim();
+      const cleanMu = rawFile.split("?")[0].trim();
+      let workingMu = "";
+      let pOrigin = "";
+      try { pOrigin = new URL(pu).origin; } catch {}
+
+      for (const candMu of cleanMu === rawFile ? [cleanMu] : [cleanMu, rawFile]) {
+        if (!candMu.startsWith("https://")) continue;
+        try {
+          if (isBlockedAdHost(new URL(candMu).hostname)) continue;
+        } catch {
+          continue;
+        }
+        try {
+          const refHdr = `${pOrigin}/`;
+          const { resp: mResp } = await fetchPublicFn(candMu, { "User-Agent": UA_EDGE, Referer: refHdr }, 4, 3500);
+          if (mResp?.ok) {
+            const mTxt = await mResp.text();
+            if (mTxt.includes("#EXTM3U")) {
+              workingMu = candMu;
+              break;
+            }
+          } else {
+            mResp?.body?.cancel?.();
+          }
+        } catch {}
+      }
+      if (!workingMu) continue;
+
+      const baseM = workingMu.replace(/\/[^/]*$/, "");
+      const subRef = pOrigin ? `${pOrigin}/` : "";
+      const checkSub = async (lang, subUrl) => {
+        try {
+          const sr = await fetch(subUrl, {
+            method: "HEAD",
+            headers: { "User-Agent": UA_EDGE, ...(subRef ? { Referer: subRef } : {}) },
+            redirect: "manual",
+            signal: AbortSignal.timeout(1500),
+          });
+          sr.body?.cancel?.();
+          return sr.ok ? { lang, url: subUrl, source: "dl_embed" } : null;
+        } catch {
+          return null;
+        }
+      };
+      const subChecks = await Promise.all([
+        checkSub("tr", `${baseM}/sub_turkish/turkish.vtt`),
+        checkSub("en", `${baseM}/sub_english/english.vtt`),
+      ]);
+      const subs = subChecks.filter(Boolean);
+      const outRef = /makesomthingup|centralodsseyproud|\/r6\//i.test(workingMu) ? "https://one.makesomthingup.click/" : `${pOrigin}/`;
+      return {
+        url: workingMu,
+        referer: outRef,
+        subs,
+        streams: [{ url: workingMu, referer: outRef, label: "📡 Sunucu · Dizilife (1080p HLS)" }],
+        tag: "hls_dl",
+      };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+const _HEXA_CAP = { token: "", uses: 0, exp: 0, deadUntil: 0 };
+
+function randomHexBytes(nBytes = 32) {
+  const arr = new Uint8Array(nBytes);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function fetchJsonPostSafe(targetUrl, bodyObj, hdrs, timeoutMs = 4000) {
+  try {
+    const r = await fetch(targetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...hdrs },
+      body: JSON.stringify(bodyObj),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!r.ok) {
+      r.body?.cancel?.();
+      return { status: r.status, data: null };
+    }
+    return { status: r.status, data: await r.json().catch(() => null) };
+  } catch {
+    return { status: 0, data: null };
+  }
+}
+
+async function extractHexa({ tmdbId, mtype, s, e }, fetchPublicFn) {
+  const tid = String(tmdbId || "").trim();
+  if (!/^\d+$/.test(tid)) return null;
+  const now = Date.now();
+  if (now < _HEXA_CAP.deadUntil) return null;
+
+  const hxCapHdrs = {
+    "User-Agent": UA_EDGE,
+    Origin: "https://hexa.su",
+    Referer: "https://hexa.su/",
+  };
+
+  let tok = _HEXA_CAP.token || "";
+  if (!tok || _HEXA_CAP.uses >= 18 || now > _HEXA_CAP.exp) {
+    tok = "";
+    const chRes = await fetchJsonPostSafe("https://cap.hexa.su/15d2cf0395/challenge", {}, hxCapHdrs, 2500);
+    if (chRes.status === 403 || chRes.status === 429 || chRes.status === 503) {
+      _HEXA_CAP.deadUntil = now + 180_000;
+      return null;
+    }
+    if (chRes.data?.token) {
+      const encRes = await fetchJsonPostSafe("https://enc-dec.app/api/enc-hexa", { challenge_data: chRes.data }, {}, 4000);
+      const sol = encRes.data?.result;
+      if (sol?.token) {
+        const redRes = await fetchJsonPostSafe("https://cap.hexa.su/15d2cf0395/redeem", sol, hxCapHdrs, 3500);
+        const redeemedTok = String(redRes.data?.token || "").trim();
+        if (redeemedTok) {
+          tok = redeemedTok;
+          _HEXA_CAP.token = tok;
+          _HEXA_CAP.uses = 0;
+          _HEXA_CAP.exp = now + 540_000;
+        }
+      }
+    }
+  }
+  if (!tok) return null;
+
+  _HEXA_CAP.uses += 1;
+  const apiKey = randomHexBytes(32);
+  const ep = mtype === "tv"
+    ? `https://theemoviedb.hexa.su/api/tmdb/tv/${tid}/season/${s}/episode/${e}/images`
+    : `https://theemoviedb.hexa.su/api/tmdb/movie/${tid}/images`;
+  const encTxt = await fetchTextSafe(
+    ep,
+    {
+      "User-Agent": UA_EDGE,
+      Referer: "https://hexa.su/",
+      Origin: "https://hexa.su",
+      Accept: "text/plain",
+      "X-Fingerprint-Lite": "e9136c41504646444",
+      "X-Api-Key": apiKey,
+      "X-Cap-Token": tok,
+    },
+    fetchPublicFn,
+    4500
+  );
+  if (!encTxt || encTxt.length <= 20) return null;
+
+  const decRes = await fetchJsonPostSafe("https://enc-dec.app/api/dec-hexa", { text: encTxt, key: apiKey }, {}, 4500);
+  const srcs = Array.isArray(decRes.data?.result?.sources) ? [...decRes.data.result.sources] : [];
+  if (!srcs.length) return null;
+
+  srcs.sort((a, b) => {
+    const aFav = String(a?.url || "").includes("fuckme.dragonballzfans") ? 0 : 1;
+    const bFav = String(b?.url || "").includes("fuckme.dragonballzfans") ? 0 : 1;
+    return aFav - bFav;
+  });
+
+  const candUrls = [];
+  for (const src of srcs) {
+    const u = String(src?.url || "").trim();
+    if (!u.startsWith("https://")) continue;
+    if (u.includes("serve.dragonballzfans.xyz") || u.includes("shrek.dragonballzfans.xyz") || u.includes("sun.dragonballzfans.xyz")) continue;
+    try {
+      if (isBlockedAdHost(new URL(u).hostname)) continue;
+    } catch {
+      continue;
+    }
+    if (!candUrls.includes(u)) candUrls.push(u);
+  }
+  if (!candUrls.length) return null;
+
+  const probeHexa = async (uCand) => {
+    if (!uCand.includes("dragonballzfans")) return uCand;
+    try {
+      const { resp } = await fetchPublicFn(
+        uCand,
+        { "User-Agent": UA_EDGE, Referer: "https://hexa.su/", Origin: "https://hexa.su" },
+        4,
+        2500
+      );
+      if (!resp?.ok) {
+        resp?.body?.cancel?.();
+        return null;
+      }
+      const txt = await resp.text();
+      return txt.includes("#EXTM3U") ? uCand : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const probed = await Promise.all(candUrls.slice(0, 4).map(probeHexa));
+  const validUrls = probed.filter(Boolean);
+  if (!validUrls.length) return null;
+
+  const streams = validUrls.map((u, idx) => ({
+    url: u,
+    referer: "https://hexa.su/",
+    label: `📡 Hexa · Sunucu ${idx + 1} (1080p HLS)`,
+  }));
+  return {
+    url: streams[0].url,
+    referer: "https://hexa.su/",
+    subs: [],
+    streams,
+    tag: "hls_hexa",
+  };
+}
+
+function mergeResolvedResults(resultList) {
+  const rawStreams = [];
+  const subs = [];
+  const seenUrls = new Set();
+  const seenSubs = new Set();
+  for (const res of resultList) {
+    if (!res) continue;
+    const list = Array.isArray(res.streams) && res.streams.length
+      ? res.streams
+      : (res.url ? [{ url: res.url, referer: res.referer, label: "" }] : []);
+    for (const st of list) {
+      const u = String(st?.url || "").trim();
+      if (!u || seenUrls.has(u)) continue;
+      seenUrls.add(u);
+      rawStreams.push({ url: u, referer: st.referer || res.referer || "", label: st.label || "" });
+    }
+    for (const sb of res.subs || []) {
+      const su = String(sb?.url || "").trim();
+      if (!su || seenSubs.has(su)) continue;
+      seenSubs.add(su);
+      subs.push(sb);
+    }
+  }
+  if (!rawStreams.length) return null;
+
+  const hasNonVmpx = rawStreams.some((st) => !isVmpxOrVidmolyUrl(st.url));
+  const filtered = hasNonVmpx
+    ? rawStreams.filter((st) => !isCfPoisonedVmpxUrl(st.url))
+    : rawStreams;
+
+  const rankStream = (st) => {
+    const u = String(st.url || "").toLowerCase();
+    if (/makesomthingup|centralodsseyproud|\/r6\//.test(u)) return 0;
+    if (/dbx\.molystream\.org/.test(u)) return 1;
+    if (/sprintcdn|r66nv9ed|owphbf24|filemoon|byse/.test(u)) return 2;
+    if (/dragonballzfans/.test(u)) return 3;
+    if (!isVmpxOrVidmolyUrl(u)) return 4;
+    return isCfPoisonedVmpxUrl(u) ? 6 : 5;
+  };
+  filtered.sort((a, b) => rankStream(a) - rankStream(b));
+
+  return {
+    url: filtered[0].url,
+    referer: filtered[0].referer,
+    subs,
+    streams: filtered,
+    tag: resultList.find((r) => r?.tag)?.tag || "hls_edge",
+  };
+}
+
+export async function resolveTurkishCatalogStream({ title, displayTitle, originalTitle, sourceUrl, year = "", mtype, s, e, tmdbId = "", fetchPublicFn }) {
   try {
     const src = String(sourceUrl || "").trim();
-    let triedDizibox = false;
-    if (/dizibox\./i.test(src) && mtype === "tv") {
-      triedDizibox = true;
-      const dbxRes = await extractDiziboxEpisode({ title, displayTitle, originalTitle, sourceUrl: src, year, s, e }, fetchPublicFn);
-      if (dbxRes?.url) return dbxRes;
-    }
     if (/fullhdfilmizlesene\./i.test(src)) {
       const fhdRes = await extractFullhdMoviePage(src, fetchPublicFn);
       if (fhdRes?.url) return fhdRes;
@@ -927,10 +1590,25 @@ export async function resolveTurkishCatalogStream({ title, displayTitle, origina
 
     if (mtype === "movie") {
       const wtRes = await extractWebteizleMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn);
+      const wtHasNonVmpx = Boolean(wtRes?.streams?.some((st) => !isVmpxOrVidmolyUrl(st?.url)));
+      if (wtRes?.url && wtHasNonVmpx) return wtRes;
+
+      const [hxRes, dlRes] = await Promise.allSettled([
+        extractHexa({ tmdbId, mtype: "movie", s, e }, fetchPublicFn),
+        extractDizilife({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "movie", s, e }, fetchPublicFn),
+      ]);
+      const merged = mergeResolvedResults([
+        wtRes,
+        hxRes.status === "fulfilled" ? hxRes.value : null,
+        dlRes.status === "fulfilled" ? dlRes.value : null,
+      ]);
+      if (merged?.url) return merged;
       if (wtRes?.url) return wtRes;
-    } else if (mtype === "tv" && !triedDizibox) {
+    } else if (mtype === "tv") {
+      const dlRes = await extractDizilife({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "tv", s, e }, fetchPublicFn);
       const dbxRes = await extractDiziboxEpisode({ title, displayTitle, originalTitle, sourceUrl: src, year, s, e }, fetchPublicFn);
-      if (dbxRes?.url) return dbxRes;
+      const merged = mergeResolvedResults([dlRes, dbxRes]);
+      if (merged?.url) return merged;
     }
   } catch {}
   return null;

@@ -24,6 +24,7 @@ const BYPASS_WORKER_HOSTS = [
   "r66nv9ed",
   "owphbf24",
   "filemoon.",
+  "byse.",
   "webteizle.",
   "dizibox.",
   "sezonlukdizi.",
@@ -101,13 +102,13 @@ function hasAutonomousEdge(env) {
   return Boolean(env && (env.ASSETS || env.WATCHLIVO_KV || env.ROOM_DO));
 }
 
-async function runAutonomousFallback(request, url, safePath, bodyBuf, env) {
+async function runAutonomousFallback(request, url, safePath, bodyBuf, env, ctx = null) {
   const init = { method: request.method, headers: request.headers };
   if (bodyBuf !== null && bodyBuf !== undefined && request.method !== "GET" && request.method !== "HEAD") {
     init.body = bodyBuf;
   }
   const edgeReq = new Request(request.url, init);
-  return await handleAutonomousEdge(edgeReq, url, safePath, env);
+  return await handleAutonomousEdge(edgeReq, url, safePath, env, ctx);
 }
 
 const MAX_BUFFER_BYTES = 262_144;
@@ -413,7 +414,7 @@ async function safeFetchSecondary(
   const safePath = normalizeSafePath(url.pathname);
   const edgeOnlyOverride = isAdminEdge(request, env) && url.searchParams.get("__edge_only") === "1";
   if (hasAutonomousEdge(env) && (edgeOnlyOverride || Date.now() < tunnelOfflineUntil)) {
-    return await runAutonomousFallback(request, url, safePath, bodyBuf, env);
+    return await runAutonomousFallback(request, url, safePath, bodyBuf, env, ctx);
   }
   const ua = request.headers.get("user-agent") || "";
   const isBotUa = BOT_UA_RE.test(ua);
@@ -496,7 +497,7 @@ async function safeFetchSecondary(
 
   if (hasAutonomousEdge(env)) {
     tunnelOfflineUntil = Date.now() + 25_000;
-    return await runAutonomousFallback(request, url, safePath, bodyBuf, env);
+    return await runAutonomousFallback(request, url, safePath, bodyBuf, env, ctx);
   }
 
   if (cache && isIdempotent) {
@@ -595,23 +596,27 @@ export default {
               return pat.endsWith(".") ? rawHost.includes(pat) : (rawHost === pat || rawHost.endsWith(`.${pat}`) || rawHost.includes(pat));
             });
           }
+          if (!bypassWorker && (rawTarget.includes("/sheila_") || (url.searchParams.get("referer") || "").includes("molystream.org"))) {
+            bypassWorker = true;
+          }
         }
         if (!bypassWorker) {
           if (env.STREAM_PROXY) {
             try {
-              return await env.STREAM_PROXY.fetch(request);
-            } catch {
-              if (isEdgeFetchPath) {
-                return new Response(JSON.stringify({ ok: false, error: "Kenar servisi geçici olarak meşgul." }), {
-                  status: 502,
-                  headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS },
-                });
-              }
-              if (hasAutonomousEdge(env)) {
-                return await runAutonomousFallback(request, url, safePath, null, env);
-              }
-              return await safeFetchSecondary(request, url, null, env, "render-eu-stream-fallback", ctx, false);
+              const spResp = await env.STREAM_PROXY.fetch(request);
+              if (spResp.status !== 503) return spResp;
+              spResp.body?.cancel?.();
+            } catch {}
+            if (isEdgeFetchPath) {
+              return new Response(JSON.stringify({ ok: false, error: "Kenar servisi geçici olarak meşgul." }), {
+                status: 502,
+                headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS },
+              });
             }
+            if (hasAutonomousEdge(env)) {
+              return await runAutonomousFallback(request, url, safePath, null, env);
+            }
+            return await safeFetchSecondary(request, url, null, env, "render-eu-stream-fallback", ctx, false);
           }
           if (hasAutonomousEdge(env)) {
             return await runAutonomousFallback(request, url, safePath, null, env);
@@ -704,6 +709,10 @@ export default {
       let bodyBuf = null;
       if (request.method !== "GET" && request.method !== "HEAD") {
         const contentLen = parseInt(request.headers.get("content-length") || "0", 10);
+        const allowVoiceNoteEdgeBuf =
+          safePath === "/api/rave/voice-note" &&
+          hasAutonomousEdge(env);
+        const maxBufBytes = allowVoiceNoteEdgeBuf ? 1_572_864 : MAX_BUFFER_BYTES;
         const streamLargeToSecondary = async (streamBody) => {
           const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
           const secUrl = buildSafeOriginUrl(secondaryBase, safePath, url.search);
@@ -736,11 +745,11 @@ export default {
           }
         };
 
-        if (!Number.isNaN(contentLen) && contentLen > MAX_BUFFER_BYTES) {
+        if (!Number.isNaN(contentLen) && contentLen > maxBufBytes) {
           return await streamLargeToSecondary(request.body);
         }
         try {
-          const { buf, overflowStream } = await readBoundedBody(request, MAX_BUFFER_BYTES);
+          const { buf, overflowStream } = await readBoundedBody(request, maxBufBytes);
           if (overflowStream) {
             return await streamLargeToSecondary(overflowStream);
           }
@@ -791,7 +800,7 @@ export default {
 
       const edgeOnlyHttp = isAdminEdge(request, env) && url.searchParams.get("__edge_only") === "1";
       if (hasAutonomousEdge(env) && (edgeOnlyHttp || Date.now() < tunnelOfflineUntil)) {
-        return await runAutonomousFallback(request, url, safePath, bodyBuf, env);
+        return await runAutonomousFallback(request, url, safePath, bodyBuf, env, ctx);
       }
 
       let alreadyTriedSecondary = false;
@@ -809,7 +818,7 @@ export default {
           statefulResp.body?.cancel?.();
           if (hasAutonomousEdge(env)) {
             tunnelOfflineUntil = Date.now() + 25_000;
-            return await runAutonomousFallback(request, url, safePath, bodyBuf, env);
+            return await runAutonomousFallback(request, url, safePath, bodyBuf, env, ctx);
           }
           if (env.FORCE_SECONDARY !== "1") {
             if (isExplicitlyDown) {
@@ -821,7 +830,7 @@ export default {
         } catch {
           if (hasAutonomousEdge(env)) {
             tunnelOfflineUntil = Date.now() + 25_000;
-            return await runAutonomousFallback(request, url, safePath, bodyBuf, env);
+            return await runAutonomousFallback(request, url, safePath, bodyBuf, env, ctx);
           }
           if (env.FORCE_SECONDARY !== "1") {
             secondaryCircuitOpenUntil = Date.now() + 15_000;

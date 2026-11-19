@@ -1,16 +1,17 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261119_v217';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261119_v217';
-import { resolveMusicItem } from './selection-kinds.js?v=20261119_v217';
-import { MeshConnection } from '../realtime.js?v=20261119_v217';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261119_v217';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261119_v217';
-import { buildLayout } from './mesh-layout.js?v=20261119_v217';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261119_v217';
-import { Voice } from '../voice.js?v=20261119_v217';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261119_v217';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261119_v217';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261119_v217';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261119_v219';
+import { api } from '../api.js?v=20261119_v219';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261119_v219';
+import { resolveMusicItem } from './selection-kinds.js?v=20261119_v219';
+import { MeshConnection } from '../realtime.js?v=20261119_v219';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261119_v219';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261119_v219';
+import { buildLayout } from './mesh-layout.js?v=20261119_v219';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261119_v219';
+import { Voice } from '../voice.js?v=20261119_v219';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261119_v219';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261119_v219';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261119_v219';
 
 let ctx = null;
 
@@ -465,47 +466,43 @@ async function loadMedia(media) {
     if (String(media.url || '').startsWith('/api/rave/resolve-catalog')) {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          const r = await fetch(media.url);
+          const res = await api(media.url, { timeout: 12000 });
           if (!ctx || ctx.loadSeq !== mySeq) return;
-          if (r.ok) {
-            const res = await r.json();
-            if (!ctx || ctx.loadSeq !== mySeq) return;
-            if (res && res.url) {
-              const refMedia = state.mesh?.media || media;
-              const freshExp = expectedPosition(refMedia);
-              const resolvedStart = (wasNewCreatorRoom && initialPos < 3.0 && freshExp < 3.0)
-                ? 0
-                : Math.max(initialPos, freshExp >= 0.8 ? freshExp : 0);
-              const keepServerClockAnchor = !isTimeKeeper() && Number(refMedia?.meshStateTime || refMedia?.updatedAt || 0) > 1000000000;
-              media = {
-                ...media,
-                provider: res.provider || 'hls',
-                streamType: res.streamType || 'hls',
-                url: res.url,
-                videoId: res.videoId || media.videoId || '',
-                embedUrl: res.embedUrl || media.embedUrl || '',
-                title: res.title || media.title || '',
-                channel: res.channel || media.channel || '',
-                thumbnail: res.thumbnail || media.thumbnail || '',
-                altUrls: res.altUrls || [],
-                servers: (res.servers && res.servers.length) ? res.servers : (media.servers || []),
-                audioTracks: (res.audioTracks && res.audioTracks.length) ? res.audioTracks : media.audioTracks,
-                subtitleTracks: (res.subtitleTracks && res.subtitleTracks.length) ? res.subtitleTracks : (res.subtitles || media.subtitleTracks),
-                intro: res.intro || media.intro,
-                duration: res.duration || media.duration,
-                meshStatePosition: keepServerClockAnchor ? Number(refMedia.meshStatePosition ?? refMedia.currentTime ?? resolvedStart) : resolvedStart,
-                meshStateTime: keepServerClockAnchor ? Number(refMedia.meshStateTime ?? refMedia.updatedAt ?? clock.now()) : clock.now(),
-              };
-              if (state.mesh) {
-                const updatedMesh = { ...state.mesh, media };
-                set({ mesh: updatedMesh });
-                if (ctx?.conn) ctx.conn.lastRoom = updatedMesh;
-                rememberRoom(updatedMesh);
-              }
-              if (ctx) ctx.lastResolvePushAt = Date.now();
-              ctx.conn?.send('resolve_media', { ...media, currentTime: resolvedStart });
-              break;
+          if (res && res.url) {
+            const refMedia = state.mesh?.media || media;
+            const freshExp = expectedPosition(refMedia);
+            const resolvedStart = (wasNewCreatorRoom && initialPos < 3.0 && freshExp < 3.0)
+              ? 0
+              : Math.max(initialPos, freshExp >= 0.8 ? freshExp : 0);
+            const keepServerClockAnchor = !isTimeKeeper() && Number(refMedia?.meshStateTime || refMedia?.updatedAt || 0) > 1000000000;
+            media = {
+              ...media,
+              provider: res.provider || 'hls',
+              streamType: res.streamType || 'hls',
+              url: res.url,
+              videoId: res.videoId || media.videoId || '',
+              embedUrl: res.embedUrl || media.embedUrl || '',
+              title: res.title || media.title || '',
+              channel: res.channel || media.channel || '',
+              thumbnail: res.thumbnail || media.thumbnail || '',
+              altUrls: res.altUrls || [],
+              servers: (res.servers && res.servers.length) ? res.servers : (media.servers || []),
+              audioTracks: (res.audioTracks && res.audioTracks.length) ? res.audioTracks : media.audioTracks,
+              subtitleTracks: (res.subtitleTracks && res.subtitleTracks.length) ? res.subtitleTracks : (res.subtitles || media.subtitleTracks),
+              intro: res.intro || media.intro,
+              duration: res.duration || media.duration,
+              meshStatePosition: keepServerClockAnchor ? Number(refMedia.meshStatePosition ?? refMedia.currentTime ?? resolvedStart) : resolvedStart,
+              meshStateTime: keepServerClockAnchor ? Number(refMedia.meshStateTime ?? refMedia.updatedAt ?? clock.now()) : clock.now(),
+            };
+            if (state.mesh) {
+              const updatedMesh = { ...state.mesh, media };
+              set({ mesh: updatedMesh });
+              if (ctx?.conn) ctx.conn.lastRoom = updatedMesh;
+              rememberRoom(updatedMesh);
             }
+            if (ctx) ctx.lastResolvePushAt = Date.now();
+            ctx.conn?.send('resolve_media', { ...media, currentTime: resolvedStart });
+            break;
           }
         } catch (e) { /* retry */ }
       }
@@ -789,6 +786,11 @@ function onMessage(data) {
       break;
     case 'room_closed': {
       document.body.classList.remove('mesh-minimized');
+      const wasInitialized = Boolean(ctx?.initReceived);
+      const rawErr = String(data?.error || '').trim();
+      const closedMsg = rawErr
+        ? `🚪 ${rawErr}`
+        : (wasInitialized ? '🚪 Oda kurucusu odayı kapattı' : '🚪 Bu oda kapatılmış veya artık aktif değil.');
       const closedId = data.roomId || room?.id || state.route?.params?.id;
       if (closedId) {
         forgetRoom(closedId);
@@ -796,8 +798,14 @@ function onMessage(data) {
       }
       ctx?.conn?.close(false);
       leaveMeshView(true);
-      toast('🚪 Oda kurucusu odayı kapattı');
+      try {
+        for (const ovId of ['popup-root', 'toast-root']) {
+          const ov = document.getElementById(ovId);
+          if (ov && ov.parentElement !== document.body) document.body.appendChild(ov);
+        }
+      } catch (_) {}
       window.vortexNavigate('/');
+      toast(closedMsg, 4500);
       break;
     }
     case 'password_required': askPassword(); break;
@@ -828,8 +836,17 @@ function askPassword() {
     const existingPwd = document.getElementById('wl-room-pwd-input');
     if (existingPwd && !existingPwd.closest('.popup-backdrop.is-closing')) return;
   }
-  if (typeof document !== 'undefined' && document.pictureInPictureElement) {
-    try { document.exitPictureInPicture().catch(() => {}); } catch (_) {}
+  if (typeof document !== 'undefined') {
+    const meshRootEl = document.getElementById('mesh-root');
+    for (const ovId of ['popup-root', 'toast-root']) {
+      const ov = document.getElementById(ovId);
+      if (ov && meshRootEl && meshRootEl.contains(ov) && document.body) {
+        document.body.appendChild(ov);
+      }
+    }
+    if (document.pictureInPictureElement) {
+      try { document.exitPictureInPicture().catch(() => {}); } catch (_) {}
+    }
   }
   const submitPwd = () => {
     const id = state.route.params.id;
@@ -1243,11 +1260,8 @@ const actions = {
       if (!simPool.length) {
         try {
           const qs = new URLSearchParams({ artist: m.artist || '', title: m.songTitle || m.title || '' });
-          const r = await fetch(`/api/rave/music-similar?${qs}`);
-          if (r.ok) {
-            const d = await r.json();
-            if (Array.isArray(d.items) && d.items.length) simPool = d.items;
-          }
+          const d = await api(`/api/rave/music-similar?${qs}`, { timeout: 8000 });
+          if (Array.isArray(d?.items) && d.items.length) simPool = d.items;
         } catch (e) { /* ignore */ }
       }
       if (simPool.length) {
@@ -1556,8 +1570,17 @@ export function leaveMeshView(explicitLeave = false) {
       if (pos > 8) saveWatchProgress(m, pos, dur, { forceCloud: true });
     }
   } catch (e) { /* ignore */ }
-  if (typeof document !== 'undefined' && document.pictureInPictureElement) {
-    try { document.exitPictureInPicture().catch(() => {}); } catch (_) {}
+  if (typeof document !== 'undefined') {
+    const meshRootEl = document.getElementById('mesh-root');
+    for (const ovId of ['popup-root', 'toast-root']) {
+      const ov = document.getElementById(ovId);
+      if (ov && meshRootEl && meshRootEl.contains(ov) && document.body) {
+        document.body.appendChild(ov);
+      }
+    }
+    if (document.pictureInPictureElement) {
+      try { document.exitPictureInPicture().catch(() => {}); } catch (_) {}
+    }
   }
   const shouldClose = false;
   if (explicitLeave && prevMesh?.id && !prevMesh?.curated) {

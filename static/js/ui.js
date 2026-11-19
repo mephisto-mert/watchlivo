@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261119_v217';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261119_v219';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -204,7 +204,7 @@ if (typeof document !== 'undefined' && typeof window !== 'undefined' && !window.
 
 // Rave PopUp: { title, message, options:[{label, primary, danger, onClick}], content(Node), dismissable, onClose }
 let _popupSeq = 0;
-export function popup({ title, message, options = [], content = null, dismissable = true, wide = false, persistOnNavigate = false, onClose = null } = {}) {
+export function popup({ title, message, options = [], content = null, dismissable = true, wide = false, persistOnNavigate = false, kind = '', onClose = null } = {}) {
   const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const titleId = title ? `wl-popup-title-${++_popupSeq}` : '';
   const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
@@ -312,7 +312,27 @@ export function popup({ title, message, options = [], content = null, dismissabl
           }
         },
       }, o.label))) : null);
-  const back = h('div', { class: 'popup-backdrop', onclick: (e) => { if (dismissable && e.target === back) close(); } }, card);
+  const back = h('div', {
+    class: 'popup-backdrop',
+    onclick: (e) => {
+      if (!dismissable || e.target !== back) return;
+      const cx = e.clientX;
+      const cy = e.clientY;
+      const appEl = document.getElementById('app');
+      const prevInert = appEl?.inert;
+      close();
+      if (Number.isFinite(cx) && Number.isFinite(cy) && (cx !== 0 || cy !== 0)) {
+        back.style.pointerEvents = 'none';
+        if (appEl) appEl.inert = false;
+        const hit = document.elementFromPoint(cx, cy)?.closest?.('.dock-btn, .dock-quick-btn');
+        if (appEl && prevInert && !hit) appEl.inert = true;
+        if (hit && hit.dataset?.view !== kind) {
+          setTimeout(() => hit.click(), 0);
+        }
+      }
+    },
+  }, card);
+  if (kind) back.dataset.popupKind = kind;
   if (persistOnNavigate) back.dataset.persistOnNavigate = '1';
   if (dismissable && drawerHandle) {
     let startY = 0, deltaY = 0, dragging = false;
@@ -398,21 +418,39 @@ export function fmtTime(sec) {
 }
 
 export function setBackground(url) {
-  const img = document.getElementById('bg-img');
-  if (!img) return;
-  if (!url) {
-    img.classList.remove('on');
-    img.removeAttribute('src');
-    delete img.dataset.src;
-    img.style.display = 'none';
+  const cleanUrl = String(url || '').trim();
+  let img = document.getElementById('bg-img');
+  if (!cleanUrl) {
+    if (img) {
+      img.classList.remove('on');
+      img.onload = null;
+      img.onerror = null;
+      img.remove();
+    }
     return;
   }
-  img.style.display = '';
-  if (img.dataset.src === url) return;
-  img.dataset.src = url;
+  const bg = document.getElementById('bg');
+  if (!bg) return;
+  if (!img) {
+    img = document.createElement('img');
+    img.id = 'bg-img';
+    img.className = 'bg-img';
+    img.alt = '';
+    img.decoding = 'async';
+    bg.prepend(img);
+  }
+  if (img.dataset.src === cleanUrl && img.complete && img.naturalWidth > 0) return;
+  img.dataset.src = cleanUrl;
   img.classList.remove('on');
-  img.onload = () => img.classList.add('on');
-  img.src = url;
+  img.onload = () => {
+    if (img.isConnected && img.naturalWidth > 0) img.classList.add('on');
+  };
+  img.onerror = () => {
+    img.onload = null;
+    img.onerror = null;
+    img.remove();
+  };
+  img.src = cleanUrl;
 }
 
 const DEFAULT_OPENAI_KEY = '';

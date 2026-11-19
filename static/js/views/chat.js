@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261119_v217';
-import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261119_v217';
-import { avatar } from '../profile.js?v=20261119_v217';
-import { api, qs } from '../api.js?v=20261119_v217';
-import { resolveMusicItem } from './selection-kinds.js?v=20261119_v217';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261119_v217';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261119_v219';
+import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261119_v219';
+import { avatar } from '../profile.js?v=20261119_v219';
+import { api, qs, humanApiError } from '../api.js?v=20261119_v219';
+import { resolveMusicItem } from './selection-kinds.js?v=20261119_v219';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261119_v219';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -908,10 +908,35 @@ export function buildChat(ctx) {
     if (!gifPanel.classList.contains('hidden')) { gifPanel.classList.add('hidden'); return; }
     const q = h('input', { class: 'input', placeholder: 'GIF ara...' });
     const grid = h('div', { class: 'gif-grid' });
+    let gifSeq = 0;
     const load = async () => {
+      const mySeq = ++gifSeq;
       grid.replaceChildren(h('div', { class: 'spinner' }));
-      const res = await api(`/api/rave/gifs?${qs({ q: q.value || 'funny' })}`).catch(() => ({ gifs: [] }));
-      grid.replaceChildren(...(res.gifs || []).map((g) => h('img', { src: g.preview || g.url, loading: 'lazy', alt: g.title || 'gif', onclick: () => { actions.sendChat('', { gif: g.url, ...(activeReply ? { replyTo: activeReply } : {}) }); clearReply(); gifPanel.classList.add('hidden'); } })));
+      try {
+        const res = await api(`/api/rave/gifs?${qs({ q: q.value || 'funny' })}`);
+        if (mySeq !== gifSeq || gifPanel.classList.contains('hidden')) return;
+        const gifs = Array.isArray(res?.gifs) ? res.gifs : [];
+        if (!gifs.length) {
+          const emptyMsg = res?.error || (q.value.trim() ? `"${q.value.trim()}" için GIF bulunamadı.` : 'GIF bulunamadı veya servis şu an kullanılamıyor.');
+          grid.replaceChildren(h('div', { class: 'lobby-empty', style: { gridColumn: '1 / -1', padding: '14px 8px', textAlign: 'center' } }, emptyMsg));
+          return;
+        }
+        grid.replaceChildren(...gifs.map((g) => h('img', {
+          src: g.preview || g.url,
+          loading: 'lazy',
+          alt: g.title || 'gif',
+          onerror: (e) => { e.currentTarget.style.display = 'none'; },
+          onclick: () => {
+            actions.sendChat('', { gif: g.url, ...(activeReply ? { replyTo: activeReply } : {}) });
+            clearReply();
+            gifPanel.classList.add('hidden');
+          },
+        })));
+      } catch (err) {
+        if (mySeq !== gifSeq || gifPanel.classList.contains('hidden')) return;
+        const errMsg = humanApiError(err, 'GIFler yüklenemedi, lütfen tekrar deneyin.', 'GIF servisi şu an kullanılamıyor.');
+        grid.replaceChildren(h('div', { class: 'lobby-empty', style: { gridColumn: '1 / -1', padding: '14px 8px', textAlign: 'center' } }, errMsg));
+      }
     };
     q.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
     gifPanel.replaceChildren(q, grid);

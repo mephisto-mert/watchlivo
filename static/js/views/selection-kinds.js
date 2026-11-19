@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261119_v217';
-import { api, qs } from '../api.js?v=20261119_v217';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261119_v217';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261119_v217';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261119_v217';
-import { profileSetup } from '../profile.js?v=20261119_v217';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v217';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261119_v219';
+import { api, qs, isEdgeUnavailable, humanApiError } from '../api.js?v=20261119_v219';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261119_v219';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261119_v219';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261119_v219';
+import { profileSetup } from '../profile.js?v=20261119_v219';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v219';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261119_v217';
+} from '../store.js?v=20261119_v219';
 
 const _resolveMemCache = new Map();
 
@@ -46,6 +46,8 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
     authSatisfied: acct?.loginSatisfied ? '1' : '0',
     profileName: acct?.profileName || '',
   });
+  let lastErrMsg = '';
+  let toastedErr = false;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const qTry = attempt === 1 ? `${query}&refresh=1` : query;
@@ -82,7 +84,8 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
         }
         return res;
       }
-      break;
+      if (res?.error) lastErrMsg = String(res.error);
+      if (res?.ok === false && res?.error) break;
     } catch (err) {
       if (err.status === 401 || err.data?.authRequired) {
         const targetProv = (provId === 'max' || it?.provider === 'max') ? (getProvider('max') || prov) : prov;
@@ -91,7 +94,10 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
         return null;
       }
       if (attempt === 1) {
-        if (!it.streamUrl) toast(err.data?.error || 'Bu bölüm şu an açılamadı, lütfen tekrar dene.');
+        if (!it.streamUrl) {
+          toast(humanApiError(err, 'Bu bölüm şu an açılamadı, lütfen tekrar dene.'));
+          toastedErr = true;
+        }
         break;
       }
     }
@@ -115,6 +121,9 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
       season: s,
       episode: e,
     };
+  }
+  if (!toastedErr) {
+    toast(lastErrMsg || 'Bu içerik şu an çözümlenemedi, lütfen tekrar dene.');
   }
   return null;
 }
@@ -233,12 +242,18 @@ export function renderSearchKind(p, body, presetQuery, pick) {
     const rawQ = String(q || '').trim();
     if (/[?&]list=([A-Za-z0-9_-]{10,64})/.test(rawQ) || /^(PL|UU|FL|RD|OLAK)[A-Za-z0-9_-]{8,64}$/.test(rawQ)) {
       grid.replaceChildren(spinner());
-      const plRes = await api(`/api/rave/playlist?${qs({ url: rawQ })}`, { timeout: 14000 }).catch(() => ({ items: [] }));
+      let plRes = { items: [] };
+      let plErr = null;
+      try {
+        plRes = await api(`/api/rave/playlist?${qs({ url: rawQ })}`, { timeout: 14000 });
+      } catch (e) {
+        plErr = e;
+      }
       if (mine !== seq) return;
-      const plItems = (plRes.items || []).map(ytToMedia);
+      const plItems = (plRes?.items || []).map(ytToMedia);
       sectionHeader.replaceChildren(
         h('div', { style: { fontSize: '.86rem', fontWeight: '800', color: '#f8fafc' } },
-          `📋 ${plRes.title || 'YouTube Oynatma Listesi'} (${plItems.length} video)`),
+          `📋 ${plRes?.title || 'YouTube Oynatma Listesi'} (${plItems.length} video)`),
         plItems.length ? h('button', {
           type: 'button',
           class: 'btn sm primary',
@@ -256,7 +271,11 @@ export function renderSearchKind(p, body, presetQuery, pick) {
           },
         }, `📋 Tüm Playlisti Odaya Ekle (${plItems.length})`) : null
       );
-      grid.replaceChildren(...(plItems.length ? plItems.map((m) => videoCard(m, pickAndRecord, cardOpts)) : [h('div', { class: 'lobby-empty' }, 'Oynatma listesi yüklenemedi.')]));
+      const plErrMsg = (plErr || (plRes?.ok === false && !plItems.length))
+        ? humanApiError(plErr || { status: 200, data: plRes }, 'Oynatma listesi yüklenemedi.', 'YouTube oynatma listesi içe aktarma şu an kullanılamıyor.')
+        : 'Oynatma listesi yüklenemedi.';
+      if ((plErr || (plRes?.ok === false && !plItems.length)) && !plItems.length) toast(plErrMsg);
+      grid.replaceChildren(...(plItems.length ? plItems.map((m) => videoCard(m, pickAndRecord, cardOpts)) : [h('div', { class: 'lobby-empty' }, plErrMsg)]));
       return;
     }
     const pasted = parseVideoUrl(rawQ);
@@ -277,15 +296,25 @@ export function renderSearchKind(p, body, presetQuery, pick) {
     if (recordSearch && rawQ) recordYtSearchQuery(rawQ);
     grid.replaceChildren(spinner());
     let res;
-    try { res = await api(`/api/search/youtube?${qs({ q: rawQ || p.defaultQuery || 'türkiye popüler video 2026' })}`, { timeout: 12000 }); } catch (e) { res = { items: [] }; }
+    let searchErr = null;
+    try { res = await api(`/api/search/youtube?${qs({ q: rawQ || p.defaultQuery || 'türkiye popüler video 2026' })}`, { timeout: 12000 }); } catch (e) { searchErr = e; res = { items: [] }; }
     if (mine !== seq) return;
-    const items = (res.items || []).map(ytToMedia);
+    const items = (res?.items || []).map(ytToMedia);
     if (customHeader) {
       sectionHeader.replaceChildren(h('div', { style: { fontSize: '.84rem', fontWeight: '700', color: '#cbd5e1' } }, customHeader));
     } else {
       sectionHeader.replaceChildren();
     }
-    grid.replaceChildren(...(items.length ? items.map((m) => videoCard(m, pickAndRecord, cardOpts)) : [h('div', { class: 'lobby-empty' }, 'Sonuç bulunamadı.')]));
+    let emptyText = 'Sonuç bulunamadı.';
+    if (!items.length && (searchErr || res?.ok === false)) {
+      emptyText = humanApiError(
+        searchErr || { status: 200, data: res },
+        'YouTube araması şu an yanıt vermiyor.',
+        'YouTube araması şu an kenar sunucuda kullanılamıyor. Doğrudan YouTube video bağlantısı (https://youtu.be/...) yapıştırarak izleyebilirsiniz.'
+      );
+      if (recordSearch || customHeader) toast(emptyText);
+    }
+    grid.replaceChildren(...(items.length ? items.map((m) => videoCard(m, pickAndRecord, cardOpts)) : [h('div', { class: 'lobby-empty' }, emptyText)]));
   };
 
   const loadTab = async (tabId, forceRefresh = false) => {
@@ -389,12 +418,29 @@ export function renderSearchKind(p, body, presetQuery, pick) {
       }
       const items = (feed?.items || []).map(ytToMedia);
       if (!items.length && (tabId === 'all' || tabId === 'recommended' || tabId === 'for_you')) {
+        if (feed?.unavailable || (feed?.ok === false && isEdgeUnavailable(feed))) {
+          const msg = humanApiError(
+            { status: 503, data: feed },
+            'YouTube öneri akışı şu an kullanılamıyor.',
+            'YouTube öneri akışı şu an kenar sunucuda kullanılamıyor. Doğrudan YouTube video bağlantısı (https://youtu.be/...) yapıştırarak izleyebilirsiniz.'
+          );
+          toast(msg);
+          grid.replaceChildren(h('div', { class: 'lobby-empty' }, msg));
+          return;
+        }
         await runSearchQuery('Türkiye popüler video müzik sinema 2026', '🔥 Önerilen Videolar', false);
         return;
       }
-      grid.replaceChildren(...(items.length ? items.map((m) => videoCard(m, pickAndRecord, cardOpts)) : [h('div', { class: 'lobby-empty' }, 'Bu kategoride henüz video bulunamadı.')]));
+      grid.replaceChildren(...(items.length ? items.map((m) => videoCard(m, pickAndRecord, cardOpts)) : [h('div', { class: 'lobby-empty' }, feed?.error || 'Bu kategoride henüz video bulunamadı.')]));
     } catch (e) {
-      if (mine === seq) await runSearchQuery('Türkiye popüler video müzik sinema 2026', '🔥 Önerilen Videolar', false);
+      if (mine !== seq) return;
+      if (tabId === 'all' || tabId === 'recommended' || tabId === 'for_you') {
+        await runSearchQuery('Türkiye popüler video müzik sinema 2026', '🔥 Önerilen Videolar', false);
+      } else {
+        const msg = humanApiError(e, 'YouTube öneri akışı yüklenemedi.', 'YouTube öneri akışı şu an kenar sunucuda kullanılamıyor.');
+        toast(msg);
+        grid.replaceChildren(h('div', { class: 'lobby-empty' }, msg));
+      }
     }
   };
 
@@ -697,7 +743,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   };
 
   const openDetail = (it) => {
-    const scroller = detailWrap.closest('.panel-body') || detailWrap.closest('.home') || document.scrollingElement;
+    const scroller = detailWrap.closest('.panel-body') || detailWrap.closest('.home-scroll') || detailWrap.closest('.home') || document.scrollingElement;
     const savedScroll = scroller ? scroller.scrollTop : window.scrollY;
     mainWrap.classList.add('hidden');
     detailWrap.classList.remove('hidden');
@@ -738,23 +784,39 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
       },
     }, isFavoriteMedia(it) ? '❤️' : '🤍');
 
+    const activateCard = async () => {
+      if (isYt) { await pickYtItem(); return; }
+      if (isTv) { openDetail(it); return; }
+      if (card.querySelector('.loading')) return;
+      const l = h('div', { class: 'loading' }, h('div', { class: 'spinner' }));
+      card.append(l);
+      try {
+        const media = await resolveCatalogItem(it, p, 1, 1);
+        if (media) await pick(media);
+      } finally { l.remove(); }
+    };
+
     const quickBtn = h('button', {
+      type: 'button',
       class: 'btn primary poster-cta',
       onclick: async (e) => {
         e.stopPropagation();
-        if (isYt) { await pickYtItem(); return; }
-        if (isTv) { openDetail(it); return; }
-        if (card.querySelector('.loading')) return;
-        const l = h('div', { class: 'loading' }, h('div', { class: 'spinner' }));
-        card.append(l);
-        try {
-          const media = await resolveCatalogItem(it, p, 1, 1);
-          if (media) await pick(media);
-        } finally { l.remove(); }
+        await activateCard();
       },
     }, isYt ? '▶️ YouTube\'da İzle' : (isTv ? '📺 Sezon & Bölüm Seç' : '▶ Tam Filmi İzle'));
 
-    const card = h('div', { class: 'poster catalog-card', role: 'button', tabindex: '0', onclick: () => (isYt ? pickYtItem() : openDetail(it)), onkeydown: (e) => { if (e.target === card && e.key === 'Enter') { if (isYt) pickYtItem(); else openDetail(it); } } },
+    const card = h('div', {
+      class: 'poster catalog-card',
+      role: 'button',
+      tabindex: '0',
+      onclick: () => activateCard(),
+      onkeydown: (e) => {
+        if (e.target === card && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          activateCard();
+        }
+      },
+    },
       h('div', { class: 'poster-thumb-wrap' },
         h('img', {
           src: it.poster || it.thumbnail || (it.title && !isYt ? `/api/rave/poster?${qs({ tid: it.tmdbId || it.id || '', t: it.title || '', ot: it.originalTitle || '', y: it.year || '', mt: isTv ? 'tv' : 'movie' })}` : '/static/watchlivo-poster.svg'),
@@ -1182,23 +1244,35 @@ export function openVizyonModal(pick, onAdded) {
         renderItems(cachedLatestEps);
         return;
       }
-      const epRes = await api(`/api/rave/latest-episodes${refresh ? '?refresh=1' : ''}`, { timeout: 10000 }).catch(() => null);
-      cachedLatestEps = epRes?.items || [];
-      renderItems(cachedLatestEps);
-      if (refresh) toast(`🆕 Yeni bölümler güncellendi (${cachedLatestEps.length} güncel bölüm aktif)!`);
+      try {
+        const epRes = await api(`/api/rave/latest-episodes${refresh ? '?refresh=1' : ''}`, { timeout: 10000 });
+        cachedLatestEps = epRes?.items || [];
+        renderItems(cachedLatestEps);
+        if (refresh) toast(`🆕 Yeni bölümler güncellendi (${cachedLatestEps.length} güncel bölüm aktif)!`);
+      } catch (e) {
+        const msg = humanApiError(e, 'Yeni bölümler yüklenemedi.');
+        gridWrap.replaceChildren(h('div', { class: 'lobby-empty' }, msg));
+        if (refresh) toast(msg);
+      }
       return;
     }
     if (!refresh && cachedVizyonItems.length) {
       renderItems(cachedVizyonItems);
       return;
     }
-    const res = await api(`/api/rave/new-releases${refresh ? '?refresh=1' : ''}`, { timeout: 12000 }).catch(() => null);
-    if (res?.items) {
-      cachedVizyonItems = res.items;
-      renderItems(cachedVizyonItems);
-      if (refresh) toast(`🍿 Vizyon taraması tamamlandı (${res.items.length} film & dizi aktif)!`);
-    } else {
-      renderItems([]);
+    try {
+      const res = await api(`/api/rave/new-releases${refresh ? '?refresh=1' : ''}`, { timeout: 12000 });
+      if (res?.items) {
+        cachedVizyonItems = res.items;
+        renderItems(cachedVizyonItems);
+        if (refresh) toast(`🍿 Vizyon taraması tamamlandı (${res.items.length} film & dizi aktif)!`);
+      } else {
+        renderItems([]);
+      }
+    } catch (e) {
+      const msg = humanApiError(e, 'Vizyon kataloğu yüklenemedi.');
+      gridWrap.replaceChildren(h('div', { class: 'lobby-empty' }, msg));
+      if (refresh) toast(msg);
     }
   };
 
@@ -1218,18 +1292,27 @@ export function openVizyonModal(pick, onAdded) {
       streamUrl: streamIn.value.trim(),
       sourceUrl: streamIn.value.trim(),
     };
+    const subBtn = addForm.querySelector('#btn-submit-vizyon');
+    if (subBtn?.disabled) return;
+    if (subBtn) subBtn.disabled = true;
     toast('⏳ Yeni içerik vizyon kataloğuna ekleniyor...');
-    const res = await api('/api/rave/new-releases', { method: 'POST', body }).catch(() => null);
-    if (res?.ok && res.item) {
-      toast(`✅ "${res.item.title}" vizyon kataloğuna eklendi!`);
-      titleIn.value = '';
-      yearIn.value = '';
-      streamIn.value = '';
-      addForm.classList.add('hidden');
-      onAdded?.(res.item);
-      await loadVizyon(true);
-    } else {
-      toast(res?.error || 'İçerik eklenirken bir sorun oluştu.');
+    try {
+      const res = await api('/api/rave/new-releases', { method: 'POST', body });
+      if (res?.ok && res.item) {
+        toast(`✅ "${res.item.title}" vizyon kataloğuna eklendi!`);
+        titleIn.value = '';
+        yearIn.value = '';
+        streamIn.value = '';
+        addForm.classList.add('hidden');
+        onAdded?.(res.item);
+        await loadVizyon(true);
+      } else {
+        toast(res?.error || 'Yeni içerik ekleme şu an kenar sunucuda desteklenmiyor.');
+      }
+    } catch (err) {
+      toast(humanApiError(err, 'İçerik eklenirken bir sorun oluştu.', 'Yeni içerik ekleme şu an kenar sunucuda desteklenmiyor.'));
+    } finally {
+      if (subBtn) subBtn.disabled = false;
     }
   };
 
@@ -1307,13 +1390,14 @@ export async function resolveMusicItem(item, prov = { id: 'music', name: 'Müzik
   });
   try {
     const res = await api(`/api/rave/music-resolve?${query}`, { timeout: 14000 });
-    if (res && (res.url || res.videoId)) {
+    if (res && res.ok !== false && (res.url || res.videoId)) {
       res.musicMode = effectiveMode === 'audio' ? 'audio' : 'video';
       saveMusicHistory({ ...item, ...res });
       return res;
     }
+    toast(humanApiError({ status: 200, data: res }, 'Şarkı klibi veya ses akışı bulunamadı, lütfen başka bir parça dene.', 'Müzik çözümleme servisi şu an kullanılamıyor, lütfen biraz sonra tekrar dene.'));
   } catch (e) {
-    toast('Şarkı klibi şu an çözümlenemedi, lütfen tekrar dene.');
+    toast(humanApiError(e, 'Şarkı klibi şu an çözümlenemedi, lütfen tekrar dene.', 'Müzik çözümleme servisi şu an kullanılamıyor, lütfen biraz sonra tekrar dene.'));
   }
   return null;
 }
@@ -1482,7 +1566,13 @@ export function renderMusicKind(p, body, presetQuery, pick) {
     if (/^https?:\/\//i.test(raw)) {
       contentArea.replaceChildren(spinner());
       const media = await resolveMusicItem({ url: raw, title: `${p.name} Parçası` }, p);
-      if (media) await pick(media);
+      if (mine !== seq) return;
+      if (media) {
+        await pick(media);
+        return;
+      }
+      if (lastData?.shelves?.length) renderShelves(lastData);
+      else contentArea.replaceChildren(h('div', { class: 'lobby-empty' }, 'Bu müzik bağlantısı çözümlenemedi.'));
       return;
     }
     contentArea.replaceChildren(spinner());
@@ -1564,9 +1654,22 @@ export function renderDriveKind(p, body, pick) {
     listHolder.replaceChildren(spinner());
     try {
       const res = await api(`/api/rave/gdrive-folder?${qs({ url: rawUrl })}`, { timeout: 12000 });
-      renderDriveItems(res.items || res.presets || []);
+      const items = res?.items || res?.presets || [];
+      if (res?.ok === false || !items.length) {
+        qualityHolder.replaceChildren();
+        listHolder.replaceChildren(h('div', { class: 'lobby-empty' }, res?.error || 'Bu Google Drive klasöründe oynatılabilir video bulunamadı.'));
+        return;
+      }
+      renderDriveItems(items);
     } catch (e) {
-      listHolder.replaceChildren(h('div', { class: 'lobby-empty' }, 'Google Drive klasörü okunamadı.'));
+      qualityHolder.replaceChildren();
+      const msg = humanApiError(
+        e,
+        'Google Drive klasörü okunamadı.',
+        'Google Drive klasör tarama şu an kenar sunucuda kullanılamıyor; tekil dosya bağlantısı (/file/d/...) yapıştırabilirsiniz.'
+      );
+      toast(msg);
+      listHolder.replaceChildren(h('div', { class: 'lobby-empty' }, msg));
     }
   };
 
@@ -1620,16 +1723,23 @@ export function renderRaveDjKind(p, body, pick) {
       if (res?.mashup) {
         toast(`🎧 Watchlivo DJ Mashup hazır: ${res.mashup.title}`);
         await pick(res.mashup);
+      } else {
+        toast(res?.error || 'Watchlivo DJ Mashup oluşturulamadı.');
       }
     } catch (e) {
-      toast('Watchlivo DJ Mashup oluşturulamadı, lütfen tekrar dene');
+      toast(humanApiError(e, 'Watchlivo DJ Mashup oluşturulamadı, lütfen tekrar dene.', 'Watchlivo DJ Mashup motoru şu an kenar sunucuda kullanılamıyor.'));
     } finally {
       statusBox.replaceChildren();
     }
   };
 
+  presetGrid.replaceChildren(spinner());
   api('/api/rave/ravedj-trending').then((res) => {
-    const items = res.items || res.presets || [];
+    const items = res?.items || res?.presets || [];
+    if (!items.length || res?.ok === false) {
+      presetGrid.replaceChildren(h('div', { class: 'lobby-empty' }, res?.error || 'Hazır DJ şablonu bulunamadı.'));
+      return;
+    }
     presetGrid.replaceChildren(...items.map((it) => h('div', {
       class: 'vcard',
       role: 'button',
@@ -1649,7 +1759,9 @@ export function renderRaveDjKind(p, body, pick) {
       h('div', { class: 'vcard-info' },
         h('div', { class: 'vcard-title' }, it.title),
         h('div', { class: 'vcard-sub' }, it.channel || (it.trackA && it.trackB ? `${it.trackA} × ${it.trackB}` : 'RaveDJ Mix'))))));
-  }).catch(() => {});
+  }).catch((e) => {
+    presetGrid.replaceChildren(h('div', { class: 'lobby-empty' }, humanApiError(e, 'Hazır DJ şablonları yüklenemedi.', 'Watchlivo DJ şablonları şu an kenar sunucuda kullanılamıyor.')));
+  });
 
   body.append(
     h('div', {

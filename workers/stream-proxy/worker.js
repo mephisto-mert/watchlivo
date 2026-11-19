@@ -231,7 +231,7 @@ function resolveMediaContentType(url, extHint, upstreamCt) {
     cleanPath.includes("init-") ||
     cleanPath.includes("/init.") ||
     cleanPath.includes("_init.") ||
-    url.toLowerCase().includes("/file/tau-video/") ||
+    url.toLowerCase().includes("/file/tau-video/")
   ) {
     return "video/mp4";
   }

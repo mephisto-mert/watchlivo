@@ -1,16 +1,16 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261119_v217';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261119_v219';
 import {
   state, setUiPref, isLeader, isHostOnly, isFriend,
   getWatchHistory, getMusicHistory,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite,
-} from '../store.js?v=20261119_v217';
-import { avatar } from '../profile.js?v=20261119_v217';
-import { clock } from '../sync.js?v=20261119_v217';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261119_v217';
-import { copyInvite, inviteUrl } from './chat.js?v=20261119_v217';
-import { parseVideoUrl } from '../providers.js?v=20261119_v217';
-import { resolveMedia } from './selection.js?v=20261119_v217';
+} from '../store.js?v=20261119_v219';
+import { avatar } from '../profile.js?v=20261119_v219';
+import { clock } from '../sync.js?v=20261119_v219';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261119_v219';
+import { copyInvite, inviteUrl } from './chat.js?v=20261119_v219';
+import { parseVideoUrl } from '../providers.js?v=20261119_v219';
+import { resolveMedia } from './selection.js?v=20261119_v219';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -314,7 +314,8 @@ function Friends() {
                 style: { fontSize: '.72rem', padding: '4px 9px' },
                 onclick: async () => {
                   if (isInv) {
-                    await sendRoomInvite(fUid, 'cancel');
+                    const r = await sendRoomInvite(fUid, 'cancel');
+                    if (!r?.ok) { toast(r?.error || 'Davet iptal edilemedi.'); return; }
                     invitedSet.delete(fUid);
                     toast(`${f.name} daveti iptal edildi`);
                   } else {
@@ -501,10 +502,12 @@ function Participants(ctx) {
               title: isMut ? 'Karşılıklı arkadaşsınız' : (isPend ? 'Onay bekleniyor' : 'Arkadaşlık isteği gönder'),
               onclick: async () => {
                 if (isMut && resolvedTargetUid) {
-                  await updateFriendAction('remove', { targetUid: resolvedTargetUid });
+                  const r = await updateFriendAction('remove', { targetUid: resolvedTargetUid });
+                  if (!r?.ok) { toast(r?.error || 'Arkadaş çıkarılamadı.'); return; }
                   toast(`${p.name} arkadaş listesinden çıkarıldı`);
                 } else if (isPend && resolvedTargetUid) {
-                  await updateFriendAction('cancel', { targetUid: resolvedTargetUid });
+                  const r = await updateFriendAction('cancel', { targetUid: resolvedTargetUid });
+                  if (!r?.ok) { toast(r?.error || 'İstek geri çekilemedi.'); return; }
                   toast('Arkadaşlık isteği geri çekildi');
                 } else {
                   const r = await sendFriendRequest(pTarget);

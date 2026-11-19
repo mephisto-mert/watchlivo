@@ -231,7 +231,7 @@ export async function handleEdgeMusicRoute(request, url, safePath) {
     return new Response(vtt, { status: 200, headers: { "Content-Type": "text/vtt; charset=utf-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600, s-maxage=86400" } });
   }
 
-  if (safePath === "/api/rave/music-resolve") {
+  if (safePath === "/api/rave/music-resolve" || safePath === "/api/rave/resolve-music") {
     const artist = (url.searchParams.get("artist") || "").trim().slice(0, 80);
     const songTitle = (url.searchParams.get("title") || url.searchParams.get("songTitle") || url.searchParams.get("q") || "").trim().slice(0, 120);
     const vidParam = (url.searchParams.get("videoId") || "").trim();
@@ -239,22 +239,79 @@ export async function handleEdgeMusicRoute(request, url, safePath) {
     const mv = (url.searchParams.get("mvUrl") || "").trim();
     const rawUrl = (url.searchParams.get("url") || "").trim();
     const poster = (url.searchParams.get("poster") || "").trim() || "/static/watchlivo-poster.svg";
-    const mode = (url.searchParams.get("mode") || "video").trim().toLowerCase();
+    const mode = (url.searchParams.get("mode") || "video").trim().toLowerCase() === "audio" ? "audio" : "video";
     const cleanQ = `${artist} ${songTitle}`.trim();
     let vid = /^[\w-]{11}$/.test(vidParam) ? vidParam : "";
+    if (!vid && rawUrl) {
+      const ym = rawUrl.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|v\/|live\/)|youtu\.be\/)([\w-]{11})/i);
+      if (ym) vid = ym[1];
+    }
     if (!vid && cleanQ) {
+      vid = await resolveYoutubeVideoId(cleanQ);
     }
     const dispTitle = artist && songTitle ? `${artist} — ${songTitle}` : (songTitle || artist || "Müzik");
     const lyricsUrl = `/api/rave/music-lyrics.vtt?${new URLSearchParams({ artist, title: songTitle })}`;
+    const subtitleTracks = [{ lang: "tr", label: "🎵 Şarkı Sözleri (Senkron)", url: lyricsUrl }];
     if (vid) {
       return musicJson({
-        title: `🎵 ${dispTitle}`, artist, songTitle, poster, duration: 210, lyricsUrl, audioPreviewUrl: prev,
+        ok: true,
+        isMusic: true,
+        isPreview: false,
+        mediaType: "music",
+        musicMode: mode,
+        provider: "youtube",
+        streamType: "youtube",
+        catalogProvider: "music",
+        videoId: vid,
+        url: `https://www.youtube.com/watch?v=${vid}`,
+        title: `🎵 ${dispTitle}`,
+        artist,
+        songTitle,
+        poster,
+        thumbnail: poster,
+        duration: 210,
+        lyricsUrl,
+        subtitleTracks,
+        audioPreviewUrl: prev,
+        altUrls: prev ? [prev] : [],
       }, 200, 60);
     }
-    const directUrl = mv || prev || rawUrl;
+    const isDirectMedia = /\.(mp3|m4a|aac|ogg|wav|mp4|webm|m3u8)(\?|$)/i.test(rawUrl)
+      || /^https:\/\/(?:audio-ssl\.itunes\.apple\.com|p\.scdn\.co\/mp3-preview|[a-z0-9-]+\.dzcdn\.net|cdns-preview-[a-z0-9-]+\.dzcdn\.net)\//i.test(rawUrl);
+    const directUrl = mv || prev || (isDirectMedia ? rawUrl : "");
+    if (!directUrl) {
+      return musicJson({
+        ok: false,
+        isMusic: true,
+        mediaType: "music",
+        musicMode: mode,
+        title: `🎵 ${dispTitle}`,
+        artist,
+        songTitle,
+        poster,
+        lyricsUrl,
+        error: "Bu parça için oynatılabilir ses veya video akışı bulunamadı.",
+      }, 404, 15);
+    }
     return musicJson({
-      isMusic: true, isPreview: Boolean(directUrl), mediaType: "music", musicMode: mode, url: directUrl,
-      title: `🎵 ${dispTitle}`, artist, songTitle, poster, duration: directUrl ? 30 : 210, lyricsUrl,
+      ok: true,
+      isMusic: true,
+      isPreview: !mv,
+      mediaType: "music",
+      musicMode: mode,
+      provider: "direct",
+      streamType: /\.m3u8(\?|$)/i.test(directUrl) ? "hls" : "mp4",
+      catalogProvider: "music",
+      url: directUrl,
+      audioPreviewUrl: prev || directUrl,
+      title: `🎵 ${dispTitle}`,
+      artist,
+      songTitle,
+      poster,
+      thumbnail: poster,
+      duration: mv ? 210 : 30,
+      lyricsUrl,
+      subtitleTracks,
     }, 200, 60);
   }
   return null;

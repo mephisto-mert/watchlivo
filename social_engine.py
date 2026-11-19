@@ -763,7 +763,6 @@ async def social_guest_provision(request: Request) -> JSONResponse:
         if len(cand_h) < 2:
             return JSONResponse({"ok": False, "error": "Kullanıcı adı en az 2 geçerli harf veya rakam içermelidir."}, status_code=400)
         try:
-            import auth_engine
             reg_owner = auth_engine.resolve_public_user(f"@{cand_h}")
             if reg_owner and reg_owner.get("uid") and reg_owner["uid"] != uid:
                 return JSONResponse({"ok": False, "error": f"Bu kullanıcı adı (@{cand_h}) kayıtlı bir üyeye ait."}, status_code=409)

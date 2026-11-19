@@ -1,9 +1,10 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261119_v217';
-import { expectedPosition } from '../sync.js?v=20261119_v217';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261119_v217';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261119_v217';
-import { ensureHlsJs } from './hls-loader.js?v=20261119_v217';
+import { SubtitleDubController } from './subtitles.js?v=20261119_v219';
+import { api } from '../api.js?v=20261119_v219';
+import { expectedPosition } from '../sync.js?v=20261119_v219';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261119_v219';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261119_v219';
+import { ensureHlsJs } from './hls-loader.js?v=20261119_v219';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -726,26 +727,22 @@ export class Html5Adapter {
             episode: String(media.episode || 1),
             refresh: '1',
           });
-          const edgeTok = document.querySelector('meta[name="wl-edge-token"]')?.getAttribute('content') || '';
-          const resp = await fetch(`/api/rave/resolve-catalog?${qs.toString()}`, edgeTok ? { headers: { 'X-Watchlivo-Token': edgeTok } } : undefined);
-          if (resp.ok && this.video === v) {
-            const fresh = await resp.json();
-            if (fresh && fresh.url) {
-              if (Array.isArray(fresh.servers) && fresh.servers.length) media.servers = fresh.servers;
-              if (Array.isArray(fresh.altUrls) && fresh.altUrls.length) media.altUrls = fresh.altUrls;
-              const freshList = [fresh.url, ...(fresh.altUrls || []), ...((fresh.servers || []).map((s) => s?.url))].filter(Boolean);
-              seenUrls.clear();
-              const prevLen = alts.length;
-              for (const fu of freshList) {
-                if (fu !== this.currentUrl) pushAlt(fu);
-              }
-              if (fresh.url && fresh.url !== this.currentUrl && !alts.includes(fresh.url)) alts.push(fresh.url);
-              const addedAny = alts.length > prevLen;
-              if (addedAny && nativeAltIdx < alts.length) {
-                triedProxySegs = false;
-                loadCandidateUrl(alts[nativeAltIdx++], doneCb);
-                return;
-              }
+          const fresh = await api(`/api/rave/resolve-catalog?${qs.toString()}`, { timeout: 12000 });
+          if (this.video === v && fresh && fresh.url) {
+            if (Array.isArray(fresh.servers) && fresh.servers.length) media.servers = fresh.servers;
+            if (Array.isArray(fresh.altUrls) && fresh.altUrls.length) media.altUrls = fresh.altUrls;
+            const freshList = [fresh.url, ...(fresh.altUrls || []), ...((fresh.servers || []).map((s) => s?.url))].filter(Boolean);
+            seenUrls.clear();
+            const prevLen = alts.length;
+            for (const fu of freshList) {
+              if (fu !== this.currentUrl) pushAlt(fu);
+            }
+            if (fresh.url && fresh.url !== this.currentUrl && !alts.includes(fresh.url)) alts.push(fresh.url);
+            const addedAny = alts.length > prevLen;
+            if (addedAny && nativeAltIdx < alts.length) {
+              triedProxySegs = false;
+              loadCandidateUrl(alts[nativeAltIdx++], doneCb);
+              return;
             }
           }
         } catch (err) { /* ignore and fall through */ }

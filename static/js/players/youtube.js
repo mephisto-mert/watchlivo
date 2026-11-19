@@ -1,7 +1,7 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261119_v217';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261119_v217';
-import { ensureHlsJs } from './hls-loader.js?v=20261119_v217';
+import { SubtitleDubController } from './subtitles.js?v=20261119_v219';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261119_v219';
+import { ensureHlsJs } from './hls-loader.js?v=20261119_v219';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -397,15 +397,44 @@ export class YouTubeAdapter {
     }
     if (this._destroyed) return;
 
+    const ytHost = 'https://www.youtube-nocookie.com';
+    const iframe = document.createElement('iframe');
+    iframe.id = `wl-yt-iframe-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    iframe.style.cssText = 'width:100%;height:100%;border:0;display:block;';
+    iframe.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+    iframe.allowFullscreen = true;
+    iframe.referrerPolicy = 'strict-origin-when-cross-origin';
+    const qp = new URLSearchParams({
+      autoplay: autoplay ? '1' : '0',
+      controls: '0',
+      disablekb: '1',
+      rel: '0',
+      modestbranding: '1',
+      playsinline: '1',
+      iv_load_policy: '3',
+      cc_load_policy: '0',
+      fs: '0',
+      enablejsapi: '1',
+      start: String(Math.max(0, Math.floor(startAt))),
+      origin: location.origin,
+      widget_referrer: location.origin,
+    });
+    iframe.src = `${ytHost}/embed/${encodeURIComponent(videoId)}?${qp.toString()}`;
+    mount.replaceChildren(iframe);
+
+    await new Promise((resolve) => {
+      let doneLoad = false;
+      const fin = () => { if (!doneLoad) { doneLoad = true; resolve(); } };
+      iframe.addEventListener('load', fin, { once: true });
+      setTimeout(fin, 4000);
+    });
+    if (this._destroyed || !iframe.isConnected) return;
+
     await new Promise((resolve) => {
       let settled = false;
       const done = () => { if (!settled) { settled = true; resolve(); } };
-      this.player = new window.YT.Player(mount, {
-        host: 'https://www.youtube-nocookie.com',
-        width: '100%',
-        height: '100%',
-        videoId,
-        playerVars: { autoplay: autoplay ? 1 : 0, controls: 0, disablekb: 1, rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, cc_load_policy: 0, fs: 0, start: Math.floor(startAt), origin: location.origin },
+      this.player = new window.YT.Player(iframe, {
+        host: ytHost,
         events: {
           onReady: () => {
             if (this._destroyed) return;
@@ -456,6 +485,7 @@ export class YouTubeAdapter {
             else if (e.data === S.ENDED) { this.events.onBuffering?.(false); this.events.onEnded?.(); }
           },
           onError: (e) => {
+            if (this._destroyed) { done(); return; }
             if (this.altQueue.length > 0 && this.player?.loadVideoById) {
               const nextVid = this.altQueue.shift();
               try { this.player.loadVideoById(nextVid, Math.floor(this.getTime() || startAt)); done(); return; } catch (_) {}

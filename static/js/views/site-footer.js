@@ -1,7 +1,7 @@
 // Watchlivo Institutional Footer, On-Page SEO Hub, FAQ Accordion, Legal Modals & Contact/DMCA Engine (v125)
-import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261119_v217';
-import { api } from '../api.js?v=20261119_v217';
-import { state } from '../store.js?v=20261119_v217';
+import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261119_v219';
+import { api, isEdgeUnavailable, humanApiError } from '../api.js?v=20261119_v219';
+import { state } from '../store.js?v=20261119_v219';
 
 export const OFFICIAL_CONTACT_EMAIL = 'jokallame0@gmail.com';
 
@@ -268,11 +268,19 @@ export function openContactModal(initialType = 'request') {
               return false;
             }
             statusEl.style.color = '#f87171';
-            statusEl.textContent = res?.error || '⚠️ Mesaj iletilemedi, lütfen tekrar deneyin.';
+            statusEl.textContent = isEdgeUnavailable({ status: 200, data: res })
+              ? `⚠️ İletişim formu şu an geçici olarak devre dışı. Aşağıdaki e-posta butonunu veya ${OFFICIAL_CONTACT_EMAIL} adresini kullanabilirsiniz.`
+              : (res?.error || '⚠️ Mesaj iletilemedi, lütfen tekrar deneyin.');
             return true;
           } catch (err) {
             statusEl.style.color = '#f87171';
-            statusEl.textContent = err?.data?.error || '⚠️ Bağlantı hatası oluştu, lütfen tekrar deneyin.';
+            if (isEdgeUnavailable(err)) {
+              statusEl.textContent = `⚠️ İletişim formu şu an geçici olarak devre dışı. Aşağıdaki e-posta butonunu veya ${OFFICIAL_CONTACT_EMAIL} adresini kullanabilirsiniz.`;
+            } else if (Number(err?.status) === 400) {
+              statusEl.textContent = err?.data?.error || '⚠️ Lütfen geçerli bir başlık ve mesaj yazın.';
+            } else {
+              statusEl.textContent = `⚠️ ${humanApiError(err, 'Bağlantı hatası oluştu, lütfen tekrar deneyin.')}`;
+            }
             return true;
           }
         },
@@ -407,7 +415,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
       h('div', { class: 'wl-footer-cols' },
         h('div', { class: 'wl-footer-col brand-col' },
           h('div', { class: 'wl-footer-brand' },
-            h('img', { src: '/static/watchlivo-logo.svg?v=20261119_v217', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
+            h('img', { src: '/static/watchlivo-logo.svg?v=20261119_v219', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
             h('span', { class: 'wl-footer-wordmark' }, 'WATCHLIVO')),
           h('p', { class: 'wl-footer-brand-desc' },
             'Arkadaşlarınla aynı anda, tek kare gecikmesiz birlikte sinema, dizi, anime, canlı TV ve müzik odaları.'),

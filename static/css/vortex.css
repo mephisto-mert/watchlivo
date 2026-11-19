@@ -7822,3 +7822,8 @@ body:has(#popup-root:not(:empty)) .wl-cookie-banner,
     right: 6px !important;
   }
 }
+
+.super-results.hidden,
+.super-results:empty {
+  display: none !important;
+}

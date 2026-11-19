@@ -1,4 +1,5 @@
 // Minimal reactive store (mirrors Rave's redux slices: self, view, mesh, selection, uiPrefs/theme schemas).
+import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261119_v219';
 const _STORE_SINGLETON = (typeof window !== 'undefined' && window.__wlStoreSingleton) || null;
 const listeners = _STORE_SINGLETON ? _STORE_SINGLETON.listeners : new Set();
 const UI_PREFS_KEY = 'vortex_ui_prefs_v1';
@@ -354,7 +355,11 @@ const _normTs = (v) => {
 const _authHdrs = () => {
   const s = state.self;
   const tok = s?.isGuest ? s?.guestToken : s?.authToken;
-  return tok ? { Authorization: `Bearer ${tok}` } : {};
+  const edgeTok = getEdgeToken();
+  const hdrs = {};
+  if (tok) hdrs.Authorization = `Bearer ${tok}`;
+  if (edgeTok) hdrs['X-Watchlivo-Token'] = edgeTok;
+  return hdrs;
 };
 
 function _boundProgressKey(raw) {
@@ -713,8 +718,8 @@ export function getWatchHistory() {
       let bdrop = typeof item.backdrop === 'string' ? item.backdrop.trim() : '';
       const titleStr = String(item.title || '');
 
-      // Fix Solo Leveling mismatched One Piece backdrop/poster
-      if (/solo leveling/i.test(titleStr) && (bdrop.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG') || thumb.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG') || poster.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))) {
+      // Fix Solo Leveling mismatched One Piece backdrop/poster or invalid hash
+      if (/solo leveling/i.test(titleStr) && (bdrop.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG') || thumb.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG') || poster.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG') || bdrop.includes('od5S7r2v306B2eR0E5t6vP8K2wG') || thumb.includes('od5S7r2v306B2eR0E5t6vP8K2wG') || poster.includes('od5S7r2v306B2eR0E5t6vP8K2wG'))) {
         poster = 'https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuEWJt6dJ1.jpg';
         bdrop = 'https://image.tmdb.org/t/p/w780/xMNH87maNLt9n2bMDYeI6db5VFm.jpg';
         thumb = poster;
@@ -1128,56 +1133,91 @@ export async function searchUsersServer(query) {
       handle: s.handle || '',
     });
     const r = await fetch(`/api/rave/social/search?${qs}`, { credentials: 'same-origin', cache: 'no-store', headers: _authHdrs() });
-    if (!r.ok) return [];
-    const data = await r.json();
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data?.ok === false) {
+      const out = [];
+      const errObj = { status: r.status || 503, data };
+      out._unavailable = isEdgeUnavailable(errObj);
+      out._error = humanApiError(errObj, 'Kullanıcı araması şu an yanıt vermiyor.', 'Kullanıcı arama servisi şu an kenar sunucuda kullanılamıyor.');
+      return out;
+    }
     return Array.isArray(data?.users) ? data.users : [];
   } catch (e) {
-    return [];
+    const out = [];
+    out._unavailable = true;
+    out._error = humanApiError(e, 'Kullanıcı araması başarısız oldu.');
+    return out;
   }
 }
 
 export async function sendFriendRequest(targetIdent, extra = {}) {
   const s = state.self || {};
-  const r = await fetch('/api/rave/social/friends', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ..._authHdrs() },
-    body: JSON.stringify({
-      action: 'request',
-      uid: _socialUidParam(),
-      fromName: s.name || 'İzleyici',
-      fromHandle: s.handle || '',
-      color: s.color || '#27DCC8',
-      avatarUrl: s.avatarUrl || '',
-      target: String(targetIdent || '').trim(),
-      targetName: String(targetIdent || '').trim(),
-      ...extra,
-    }),
-  });
-  const data = await r.json().catch(() => ({ ok: false, error: 'Sunucu yanıtı alınamadı.' }));
-  if (data?.ok) _applySocialPayload(data);
-  return data;
+  try {
+    const r = await fetch('/api/rave/social/friends', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+      body: JSON.stringify({
+        action: 'request',
+        uid: _socialUidParam(),
+        fromName: s.name || 'İzleyici',
+        fromHandle: s.handle || '',
+        color: s.color || '#27DCC8',
+        avatarUrl: s.avatarUrl || '',
+        target: String(targetIdent || '').trim(),
+        targetName: String(targetIdent || '').trim(),
+        ...extra,
+      }),
+    });
+    const data = await r.json().catch(() => ({ ok: false, error: 'Sunucu yanıtı alınamadı.' }));
+    if (!r.ok || !data?.ok) {
+      const errObj = { status: r.status || 503, data };
+      return {
+        ok: false,
+        status: r.status,
+        unavailable: isEdgeUnavailable(errObj),
+        error: humanApiError(errObj, 'Arkadaşlık isteği gönderilemedi.', 'Sosyal servisler şu an kenar sunucuda kullanılamıyor.'),
+      };
+    }
+    _applySocialPayload(data);
+    return data;
+  } catch (e) {
+    return { ok: false, status: 0, unavailable: true, error: humanApiError(e, 'Arkadaşlık isteği gönderilemedi.') };
+  }
 }
 
 export async function updateFriendAction(action, payload = {}) {
   const s = state.self || {};
-  const r = await fetch('/api/rave/social/friends', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ..._authHdrs() },
-    body: JSON.stringify({
-      action,
-      uid: _socialUidParam(),
-      fromName: s.name || 'İzleyici',
-      fromHandle: s.handle || '',
-      color: s.color || '#27DCC8',
-      avatarUrl: s.avatarUrl || '',
-      ...payload,
-    }),
-  });
-  const data = await r.json().catch(() => ({ ok: false }));
-  if (data?.ok) _applySocialPayload(data);
-  return data;
+  try {
+    const r = await fetch('/api/rave/social/friends', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+      body: JSON.stringify({
+        action,
+        uid: _socialUidParam(),
+        fromName: s.name || 'İzleyici',
+        fromHandle: s.handle || '',
+        color: s.color || '#27DCC8',
+        avatarUrl: s.avatarUrl || '',
+        ...payload,
+      }),
+    });
+    const data = await r.json().catch(() => ({ ok: false }));
+    if (!r.ok || !data?.ok) {
+      const errObj = { status: r.status || 503, data };
+      return {
+        ok: false,
+        status: r.status,
+        unavailable: isEdgeUnavailable(errObj),
+        error: humanApiError(errObj, 'Sosyal işlem tamamlanamadı.', 'Sosyal servisler şu an kenar sunucuda kullanılamıyor.'),
+      };
+    }
+    _applySocialPayload(data);
+    return data;
+  } catch (e) {
+    return { ok: false, status: 0, unavailable: true, error: humanApiError(e, 'Sosyal işlem tamamlanamadı.') };
+  }
 }
 
 export async function sendRoomInvite(targetOrPayload = {}, actionArg = 'send') {
@@ -1193,25 +1233,39 @@ export async function sendRoomInvite(targetOrPayload = {}, actionArg = 'send') {
     if (!pwd && rid) pwd = sessionStorage.getItem('vortex_pwd_' + rid) || '';
     if (!syncTok && rid) syncTok = sessionStorage.getItem('vortex_st_' + rid) || '';
   } catch (_) {}
-  const r = await fetch('/api/rave/social/invite', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ..._authHdrs() },
-    body: JSON.stringify({
-      action: payload.action || actionArg || 'send',
-      uid: _socialUidParam(),
-      fromName: s.name || 'İzleyici',
-      roomId: rid,
-      roomName: payload.roomName || m?.name || 'Watchlivo Odası',
-      mediaTitle: payload.mediaTitle || m?.media?.title || '',
-      mediaPoster: payload.mediaPoster || m?.media?.poster || m?.media?.backdrop || m?.media?.thumbnail || '',
-      mediaProvider: payload.mediaProvider || m?.media?.provider || 'cinema',
-      password: pwd,
-      syncToken: syncTok,
-      ...payload,
-    }),
-  });
-  return r.json().catch(() => ({ ok: false }));
+  try {
+    const r = await fetch('/api/rave/social/invite', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+      body: JSON.stringify({
+        action: payload.action || actionArg || 'send',
+        uid: _socialUidParam(),
+        fromName: s.name || 'İzleyici',
+        roomId: rid,
+        roomName: payload.roomName || m?.name || 'Watchlivo Odası',
+        mediaTitle: payload.mediaTitle || m?.media?.title || '',
+        mediaPoster: payload.mediaPoster || m?.media?.poster || m?.media?.backdrop || m?.media?.thumbnail || '',
+        mediaProvider: payload.mediaProvider || m?.media?.provider || 'cinema',
+        password: pwd,
+        syncToken: syncTok,
+        ...payload,
+      }),
+    });
+    const data = await r.json().catch(() => ({ ok: false }));
+    if (!r.ok || data?.ok === false) {
+      const errObj = { status: r.status || 503, data };
+      return {
+        ok: false,
+        status: r.status,
+        unavailable: isEdgeUnavailable(errObj),
+        error: humanApiError(errObj, 'Davet gönderilemedi.', 'Oda davet servisi şu an kenar sunucuda kullanılamıyor.'),
+      };
+    }
+    return data;
+  } catch (e) {
+    return { ok: false, status: 0, unavailable: true, error: humanApiError(e, 'Davet gönderilemedi.') };
+  }
 }
 
 export async function pushPresenceHeartbeat(override = {}) {
@@ -1552,12 +1606,10 @@ export async function fetchPersonalizedYtFeed(chip = 'all', forceRefresh = false
     if (vid && vid.length === 11 && !seenV.has(vid)) { seenV.add(vid); seedVideoIds.push({ videoId: vid, title: m.title || '' }); }
   }
   const seedQueries = [...prefs.searchHistory.slice(0, 4)];
-  const r = await fetch('/api/rave/yt-personalized-feed', {
+  const data = await api('/api/rave/yt-personalized-feed', {
     method: 'POST',
-    credentials: 'same-origin',
-    cache: 'no-store',
-    headers: { 'Content-Type': 'application/json', ..._authHdrs() },
-    body: JSON.stringify({
+    timeout: 10000,
+    body: {
       chip,
       refresh: Boolean(forceRefresh),
       seedVideoIds: seedVideoIds.slice(0, 6),
@@ -1565,11 +1617,12 @@ export async function fetchPersonalizedYtFeed(chip = 'all', forceRefresh = false
       seedQueries: seedQueries.slice(0, 4),
       dismissedVideoIds: prefs.dismissedVideoIds.slice(0, 120),
       blockedChannels: prefs.blockedChannels.slice(0, 50),
-    }),
+    },
   });
-  const data = await r.json();
   if (data?.ok && Array.isArray(data.items) && data.items.length) {
     _ytFeedCache.set(ck, { ts: now, data });
+  } else if (data && data.ok === false && (!Array.isArray(data.items) || !data.items.length)) {
+    data.unavailable = isEdgeUnavailable({ status: 200, data });
   }
   return data;
 }

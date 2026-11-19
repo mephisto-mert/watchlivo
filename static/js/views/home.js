@@ -1,17 +1,17 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261119_v217';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261119_v219';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261119_v217';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261119_v217';
-import { api } from '../api.js?v=20261119_v217';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261119_v217';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v217';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261119_v217';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261119_v217';
+} from '../store.js?v=20261119_v219';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261119_v219';
+import { api } from '../api.js?v=20261119_v219';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261119_v219';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v219';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261119_v219';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261119_v219';
 
 let refreshTimer = null;
 let homeDrawTimer = null;
@@ -62,7 +62,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261119_v217', alt: 'Watchlivo', width: '28', height: '28' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261119_v219', alt: 'Watchlivo', width: '28', height: '28' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -149,20 +149,41 @@ export function renderHome(app) {
   destroyHome();
   setBackground(null);
   const self = state.self;
-  const isMember = Boolean(self && !self.isGuest && (self.email || self.authToken));
-  const isConfirmedGuest = Boolean(self && self.isGuest && self.guestConfirmed);
+  const computeNavAccountInfo = (s) => {
+    const isMem = Boolean(s && !s.isGuest && (s.email || s.authToken));
+    const isConfGuest = Boolean(s && s.isGuest && s.guestConfirmed);
+    return {
+      title: isMem
+        ? `${s.name} (@${s.handle}) — Hesap Ayarları`
+        : (isConfGuest ? `${s.name} (Misafir) — Giriş Yap / Hesap Aç` : 'Watchlivo Giriş Yap / Misafir İzle'),
+      uname: isMem ? s.name : (isConfGuest ? s.name : 'Giriş Yap / Misafir Gir'),
+      utag: isMem
+        ? `✓ @${s.handle || 'uye'}`
+        : (isConfGuest ? '👤 Misafir · Hesap Aç' : '🔓 Kayıtsız İzle / Giriş'),
+    };
+  };
+  const getSelfSig = (s) => JSON.stringify([
+    s?.id || '',
+    s?.name || '',
+    s?.handle || '',
+    s?.color || '',
+    s?.avatarUrl || s?.avatar || '',
+    Boolean(s && !s.isGuest && (s.email || s.authToken)),
+    Boolean(s && s.isGuest && s.guestConfirmed),
+  ]);
+  const initialAccInfo = computeNavAccountInfo(self);
   const nav = h('header', { class: 'top-nav-capsule navbar' },
     h('div', { class: 'nav-left navbar-left' },
       h('button', {
         class: 'user-profile-badge wl-nav-account-btn',
         id: 'nav-account-btn',
-        title: isMember ? `${self.name} (@${self.handle}) — Hesap Ayarları` : (isConfirmedGuest ? `${self.name} (Misafir) — Giriş Yap / Hesap Aç` : 'Watchlivo Giriş Yap / Misafir İzle'),
-        onclick: () => profileSetup({ current: self, dismissable: true, onDone: (p) => { if (p) set({ self: p }); renderHome(app); } }),
+        title: initialAccInfo.title,
+        onclick: () => profileSetup({ current: state.self, dismissable: true, onDone: (p) => { if (p) set({ self: p }); } }),
       },
       avatar(self, 30),
       h('div', { class: 'user-meta wl-nav-account-text' },
-        h('span', { class: 'uname' }, isMember ? self.name : (isConfirmedGuest ? self.name : 'Giriş Yap / Misafir Gir')),
-        h('span', { class: 'utag wl-nav-account-sub' }, isMember ? `✓ @${self.handle || 'uye'}` : (isConfirmedGuest ? '👤 Misafir · Hesap Aç' : '🔓 Kayıtsız İzle / Giriş')))),
+        h('span', { class: 'uname' }, initialAccInfo.uname),
+        h('span', { class: 'utag wl-nav-account-sub' }, initialAccInfo.utag))),
       navIcon('rooms', 'Odalar', () => {
         const anchor = document.getElementById('lobby-anchor');
         if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -195,7 +216,7 @@ export function renderHome(app) {
       },
       h('span', { html: icons.android, style: { display: 'flex' } }),
       h('span', { class: 'wl-btn-apk-text' }, 'APK İndir (v2.0.2)')) : null,
-      h('button', { class: 'btn-create-room btn primary', id: 'btn-create-room', onclick: async (ev) => {
+      h('button', { type: 'button', class: 'btn-create-room btn primary', id: 'btn-create-room', onclick: async (ev) => {
         const btnEl = ev?.currentTarget;
         if (btnEl?.dataset?.busy === '1') return;
         if (btnEl) { btnEl.dataset.busy = '1'; btnEl.disabled = true; }
@@ -218,10 +239,10 @@ export function renderHome(app) {
         const cleanMedia = { ...media, currentTime: Number(media.currentTime) > 0 ? Number(media.currentTime) : 0 };
         await window.vortexActions.pickMedia(cleanMedia);
         window.vortexRestoreRoom?.();
-        return;
+        return true;
       } catch (e) { /* fallback to createRoomWithMedia */ }
     }
-    try { await createRoomWithMedia(media); } catch (e) { toast(e.message || 'Oda oluşturulamadı'); }
+    try { await createRoomWithMedia(media); return true; } catch (e) { toast(e.message || 'Oda oluşturulamadı'); return false; }
   } });
   activeSelection = selection;
   selection.id = 'home-selection';
@@ -350,7 +371,12 @@ export function renderHome(app) {
       }, 40);
     }),
     makeDockBtn('profile', 'Profilim & Ayarlar', icons.friends, false, () => {
-      profileSetup({ current: state.self, dismissable: true, onDone: (p) => { if (p) set({ self: p }); renderHome(app); } });
+      const openProfile = document.querySelector('.popup-backdrop[data-popup-kind="profile"]:not(.is-closing)');
+      if (openProfile) {
+        openProfile._closePopup?.();
+        return;
+      }
+      profileSetup({ current: state.self, dismissable: true, onDone: (p) => { if (p) set({ self: p }); } });
     }),
     h('div', { class: 'dock-studio-meta' },
       h('span', { class: 'dock-archive-pill' },
@@ -479,8 +505,29 @@ export function renderHome(app) {
     b.textContent = n > 9999 ? '9.9B+' : String(n);
   };
 
+  let lastSelfSig = getSelfSig(state.self);
+  const syncNavAccountBtn = (s = state.self) => {
+    const btn = nav.querySelector('#nav-account-btn');
+    if (!btn) return;
+    const info = computeNavAccountInfo(s);
+    btn.title = info.title;
+    const unameEl = btn.querySelector('.uname');
+    if (unameEl) unameEl.textContent = info.uname;
+    const utagEl = btn.querySelector('.utag');
+    if (utagEl) utagEl.textContent = info.utag;
+    const oldAv = btn.querySelector('.avatar');
+    const newAv = avatar(s, 30);
+    if (oldAv) oldAv.replaceWith(newAv);
+    else btn.prepend(newAv);
+  };
+
   unsubHomeStore = subscribe(() => {
     if (!nav.isConnected) return;
+    const nextSelfSig = getSelfSig(state.self);
+    if (nextSelfSig !== lastSelfSig) {
+      lastSelfSig = nextSelfSig;
+      syncNavAccountBtn(state.self);
+    }
     const reqC = Number(state.social?.requestCount || 0);
     const frC = reqC > 0 ? reqC : getFriends().length;
     setNavBadge('nav-friends-btn', frC, reqC > 0);

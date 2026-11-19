@@ -1,12 +1,12 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261119_v217';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261119_v217';
-import { renderHome, destroyHome } from './views/home.js?v=20261119_v217';
-import { api } from './api.js?v=20261119_v217';
-import { h, toast } from './ui.js?v=20261119_v217';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261119_v219';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261119_v219';
+import { renderHome, destroyHome } from './views/home.js?v=20261119_v219';
+import { api, getEdgeToken, humanApiError } from './api.js?v=20261119_v219';
+import { h, toast } from './ui.js?v=20261119_v219';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v181'; } catch (_) { return '20261110_v181'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261119_v219'; } catch (_) { return '20261119_v219'; }
 })();
 
 let _meshMod = null;
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261119_v217')
+    _meshModPromise = import('./views/mesh.js?v=20261119_v219')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -178,6 +178,12 @@ async function route() {
         activeMeshRoomId = null;
         leaveMeshSafe(true);
       }
+      for (const overlayId of ['popup-root', 'toast-root']) {
+        const ov = document.getElementById(overlayId);
+        if (ov && meshRoot.contains(ov) && document.body) {
+          document.body.appendChild(ov);
+        }
+      }
       meshRoot.replaceChildren();
       meshRoot.classList.add('hidden');
     } else {
@@ -334,8 +340,12 @@ async function boot() {
           saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
           toast(`✓ E-posta bağlantısı ile giriş yapıldı: @${res.user.handle}`);
           history.replaceState({}, '', '/');
+        } else if (res && res.ok === false) {
+          toast(res.error || 'E-posta bağlantısı doğrulanamadı.');
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        toast(humanApiError(e, 'E-posta bağlantısı doğrulanamadı.', 'E-posta ile giriş şu an kenar sunucuda kullanılamıyor.'));
+      }
     }
   }
   const isRedirectPending = Boolean(localStorage.getItem('watchlivo_auth_pending_redirect'));
@@ -360,10 +370,13 @@ async function boot() {
     if (!initialProfile.isGuest) {
       verifyAndRefreshSession().catch(() => {});
     } else if (typeof fetch === 'function' && (initialProfile.uid || initialProfile.id)) {
+      const gHdrs = { 'Content-Type': 'application/json' };
+      const edgeTok = getEdgeToken();
+      if (edgeTok) gHdrs['X-Watchlivo-Token'] = edgeTok;
       fetch('/api/rave/social/guest', {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
+        headers: gHdrs,
         body: JSON.stringify({
           uid: initialProfile.uid || initialProfile.id,
           name: initialProfile.name || '',
@@ -372,13 +385,16 @@ async function boot() {
           avatarUrl: initialProfile.avatarUrl || '',
         }),
       }).then((r) => (r.ok ? r.json() : null)).then((d) => {
-        if (d?.guestToken) {
-          initialProfile.guestToken = d.guestToken;
-          if (state.self && (state.self.uid === initialProfile.uid || state.self.id === initialProfile.id)) {
-            state.self.guestToken = d.guestToken;
-          }
-          try { localStorage.setItem('vortex_profile_v2', JSON.stringify(initialProfile)); } catch (_) {}
+        if (!d || !state.self?.isGuest) return;
+        if (d.uid) { initialProfile.uid = String(d.uid); initialProfile.id = String(d.uid); }
+        if (d.handle) initialProfile.handle = String(d.handle);
+        if (d.guestToken) initialProfile.guestToken = String(d.guestToken);
+        if (state.self && (state.self.uid === initialProfile.uid || state.self.id === initialProfile.id)) {
+          if (d.uid) { state.self.uid = String(d.uid); state.self.id = String(d.uid); }
+          if (d.handle) state.self.handle = String(d.handle);
+          if (d.guestToken) state.self.guestToken = String(d.guestToken);
         }
+        try { localStorage.setItem('vortex_profile_v2', JSON.stringify(initialProfile)); } catch (_) {}
       }).catch(() => {});
     }
   } else {
@@ -405,10 +421,13 @@ async function boot() {
     }
     start(guestFallback);
     if (typeof fetch === 'function' && guestFallback.uid) {
+      const gHdrs = { 'Content-Type': 'application/json' };
+      const edgeTok = getEdgeToken();
+      if (edgeTok) gHdrs['X-Watchlivo-Token'] = edgeTok;
       fetch('/api/rave/social/guest', {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
+        headers: gHdrs,
         body: JSON.stringify({
           uid: guestFallback.uid,
           name: guestFallback.name,
@@ -416,13 +435,16 @@ async function boot() {
           color: guestFallback.color,
         }),
       }).then((r) => (r.ok ? r.json() : null)).then((d) => {
-        if (d?.guestToken) {
-          guestFallback.guestToken = d.guestToken;
-          if (state.self && state.self.uid === guestFallback.uid) {
-            state.self.guestToken = d.guestToken;
-          }
-          try { sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(guestFallback)); } catch (_) {}
+        if (!d || !state.self?.isGuest) return;
+        if (d.uid) { guestFallback.uid = String(d.uid); guestFallback.id = String(d.uid); }
+        if (d.handle) guestFallback.handle = String(d.handle);
+        if (d.guestToken) guestFallback.guestToken = String(d.guestToken);
+        if (state.self && (state.self.uid === guestFallback.uid || state.self.id === guestFallback.id)) {
+          if (d.uid) { state.self.uid = String(d.uid); state.self.id = String(d.uid); }
+          if (d.handle) state.self.handle = String(d.handle);
+          if (d.guestToken) state.self.guestToken = String(d.guestToken);
         }
+        try { sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(guestFallback)); } catch (_) {}
       }).catch(() => {});
     }
     if (!isRedirectPending && (sp.get('login') === '1' || sp.get('auth') === '1')) {
@@ -571,6 +593,7 @@ function initRaveNotifications() {
             closeCard();
             const r = await updateFriendAction('accept', { requestId: payload.requestId || '', targetUid: payload.fromUid || '' });
             if (r?.ok) toast(`🎉 ${payload.fromName || 'Kullanıcı'} ile artık karşılıklı arkadaşsınız!`);
+            else toast(r?.error || 'İstek kabul edilemedi.');
           },
         }, '✓ Kabul Et'),
         h('button', {
@@ -578,7 +601,8 @@ function initRaveNotifications() {
           class: 'btn sm',
           onclick: async () => {
             closeCard();
-            await updateFriendAction('decline', { requestId: payload.requestId || '', targetUid: payload.fromUid || '' });
+            const r = await updateFriendAction('decline', { requestId: payload.requestId || '', targetUid: payload.fromUid || '' });
+            if (!r?.ok) toast(r?.error || 'İşlem tamamlanamadı.');
           },
         }, 'Reddet')
       );
@@ -761,39 +785,112 @@ function initRaveNotifications() {
     } catch (_) {}
   };
 
-  setInterval(async () => {
+  let notifStopped = false;
+  let notifInFlight = false;
+  let notif404Count = 0;
+  let notifFailCount = 0;
+  let notifEdgeIdleCount = 0;
+  let notifTimer = null;
+  let lastNotifPollAt = 0;
+
+  const scheduleNextNotifPoll = (delayMs = 4500) => {
+    clearTimeout(notifTimer);
+    if (notifStopped) return;
+    notifTimer = setTimeout(runNotifPoll, delayMs);
+  };
+
+  const runNotifPoll = async () => {
+    if (notifStopped || notifInFlight) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      scheduleNextNotifPoll(15000);
+      return;
+    }
     const uid = state.self?.uid || state.self?.id || state.clientId || '';
-    if (!uid) return;
-    const name = state.self?.name || '';
-    const res = await api(`/api/rave/notifications/poll?uid=${encodeURIComponent(uid)}&name=${encodeURIComponent(name)}&since=${encodeURIComponent(lastNotifTs)}`).catch(() => null);
-    if (!res?.ok) return;
-
-    const prevReq = Number(state.social?.requestCount || 0);
-    const prevUnr = Number(state.social?.totalUnread || 0);
-    const nextReq = Number.isFinite(Number(res.requestCount)) ? Number(res.requestCount) : prevReq;
-    const nextUnr = Number.isFinite(Number(res.totalUnread)) ? Number(res.totalUnread) : prevUnr;
-    if (nextReq !== prevReq || nextUnr !== prevUnr) {
-      set({ social: { ...(state.social || {}), requestCount: nextReq, totalUnread: nextUnr } });
+    if (!uid) {
+      scheduleNextNotifPoll(4500);
+      return;
     }
-
-    if (Array.isArray(res.notifications) && res.notifications.length) {
-      let needSocialRefresh = false;
-      for (const item of res.notifications) {
-        if (!item?.id || seenNotifIds.has(item.id)) continue;
-        rememberSeen(item.id);
-        lastNotifTs = Math.max(lastNotifTs, Number(item.ts || 0));
-        if (['friend_request', 'friend_accepted', 'dm', 'room_invite', 'invite_cancelled'].includes(item.type)) {
-          needSocialRefresh = true;
-        }
-        if (item.type === 'invite_cancelled') continue;
-        if (item.type === 'dm' && document.querySelector('.wl-dm-root')) continue;
-        if (item.roomId && item.roomId === state.mesh?.id && item.type === 'room_invite') continue;
-        window.vortexShowNotificationCard?.({ ...item });
+    notifInFlight = true;
+    lastNotifPollAt = Date.now();
+    let nextDelay = 4500;
+    try {
+      const name = state.self?.name || '';
+      const res = await api(`/api/rave/notifications/poll?uid=${encodeURIComponent(uid)}&name=${encodeURIComponent(name)}&since=${encodeURIComponent(lastNotifTs)}`, { timeout: 9000 });
+      if (res?.pollingDisabled === true) {
+        notifStopped = true;
+        return;
       }
-      if (needSocialRefresh) syncSocialState(true).catch(() => {});
+      notif404Count = 0;
+      notifFailCount = 0;
+      if (res?.ok) {
+        const prevReq = Number(state.social?.requestCount || 0);
+        const prevUnr = Number(state.social?.totalUnread || 0);
+        const nextReq = Number.isFinite(Number(res.requestCount)) ? Number(res.requestCount) : prevReq;
+        const nextUnr = Number.isFinite(Number(res.totalUnread)) ? Number(res.totalUnread) : prevUnr;
+        if (nextReq !== prevReq || nextUnr !== prevUnr) {
+          set({ social: { ...(state.social || {}), requestCount: nextReq, totalUnread: nextUnr } });
+        }
+
+        const hasItems = Array.isArray(res.notifications) && res.notifications.length > 0;
+        if (hasItems) {
+          let needSocialRefresh = false;
+          for (const item of res.notifications) {
+            if (!item?.id || seenNotifIds.has(item.id)) continue;
+            rememberSeen(item.id);
+            lastNotifTs = Math.max(lastNotifTs, Number(item.ts || 0));
+            if (['friend_request', 'friend_accepted', 'dm', 'room_invite', 'invite_cancelled'].includes(item.type)) {
+              needSocialRefresh = true;
+            }
+            if (item.type === 'invite_cancelled') continue;
+            if (item.type === 'dm' && document.querySelector('.wl-dm-root')) continue;
+            if (item.roomId && item.roomId === state.mesh?.id && item.type === 'room_invite') continue;
+            window.vortexShowNotificationCard?.({ ...item });
+          }
+          if (needSocialRefresh) syncSocialState(true).catch(() => {});
+        }
+        if (res.serverTs) lastNotifTs = Math.max(lastNotifTs, Number(res.serverTs) - 1);
+
+        if (res.mode === 'cf-autonomous-edge') {
+          if (hasItems) {
+            notifEdgeIdleCount = 0;
+            nextDelay = 10000;
+          } else {
+            notifEdgeIdleCount += 1;
+            nextDelay = Math.min(60000, 15000 * Math.pow(2, Math.min(2, notifEdgeIdleCount - 1)));
+          }
+        } else {
+          notifEdgeIdleCount = 0;
+          nextDelay = 4500;
+        }
+      }
+    } catch (err) {
+      const st = Number(err?.status || 0);
+      if (st === 404 || st === 501) {
+        notif404Count += 1;
+        if (notif404Count >= 2) {
+          notifStopped = true;
+          return;
+        }
+        nextDelay = 15000;
+      } else {
+        notifFailCount += 1;
+        nextDelay = Math.min(60000, 4500 * Math.pow(2, Math.min(4, notifFailCount)));
+      }
+    } finally {
+      notifInFlight = false;
     }
-    if (res.serverTs) lastNotifTs = Math.max(lastNotifTs, Number(res.serverTs) - 1);
-  }, 4500);
+    if (!notifStopped) scheduleNextNotifPoll(nextDelay);
+  };
+
+  if (typeof document !== 'undefined' && !window.__wlNotifVisBound) {
+    window.__wlNotifVisBound = true;
+    document.addEventListener('visibilitychange', () => {
+      if (!notifStopped && document.visibilityState === 'visible' && (Date.now() - lastNotifPollAt) >= 4500) {
+        scheduleNextNotifPoll(150);
+      }
+    });
+  }
+  scheduleNextNotifPoll(4500);
 
   initSpatialTvNavigation();
 }
@@ -938,6 +1035,7 @@ function sendWatchlivoAnalytics(ev = 'pageview', extra = {}) {
     const isPwa = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true;
     const ua = navigator.userAgent || '';
     const dev = isPwa ? 'pwa' : (/iPhone|iPad|iPod/i.test(ua) ? 'ios' : (/Android/i.test(ua) ? 'android' : 'desktop'));
+    if (window.__wlAnalyticsDisabled) return;
     fetch('/api/rave/analytics', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -949,6 +1047,10 @@ function sendWatchlivoAnalytics(ev = 'pageview', extra = {}) {
         query: extra.query || '',
       }),
       keepalive: true,
+    }).then((r) => {
+      if (r && (r.status === 404 || r.status === 410 || r.status === 501)) {
+        window.__wlAnalyticsDisabled = true;
+      }
     }).catch(() => {});
   } catch (_) {}
 }

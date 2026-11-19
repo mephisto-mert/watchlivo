@@ -89,8 +89,10 @@
     try { localStorage.setItem(cidKey, cid); } catch (_) {}
   }
   var sid = String(Math.floor(Date.now() / 1000));
+  var gaDisabled = false;
   function sendGaHit(tid, evName, params) {
     try {
+      if (gaDisabled || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
       var p = params || {};
       var qs = new URLSearchParams({
         v: '2',
@@ -109,7 +111,13 @@
         _et: '15000',
         _ee: '1'
       }).toString();
-      fetch('/api/rave/ga-collect/g/collect?' + qs, { method: 'POST', keepalive: true }).catch(function () {});
+      fetch('/api/rave/ga-collect/g/collect?' + qs, { method: 'POST', keepalive: true })
+        .then(function (r) {
+          if (r && (r.status === 404 || r.status === 410 || r.status === 501)) {
+            gaDisabled = true;
+          }
+        })
+        .catch(function () {});
     } catch (_) {}
   }
   function gtag(cmd, target, params) {

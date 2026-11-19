@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261119_v217';
-import { avatar, openDmModal } from '../profile.js?v=20261119_v217';
-import { getProvider } from '../providers.js?v=20261119_v217';
-import { api, qs } from '../api.js?v=20261119_v217';
+import { h, icons, popup, toast } from '../ui.js?v=20261119_v219';
+import { avatar, openDmModal } from '../profile.js?v=20261119_v219';
+import { getProvider } from '../providers.js?v=20261119_v219';
+import { api, qs } from '../api.js?v=20261119_v219';
 import {
   state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261119_v217';
-import { expectedPosition } from '../sync.js?v=20261119_v217';
+} from '../store.js?v=20261119_v219';
+import { expectedPosition } from '../sync.js?v=20261119_v219';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -338,7 +338,8 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
               class: `wl-best-star ${f.bestFriend ? 'on' : ''}`,
               title: f.bestFriend ? 'Yakın arkadaşlardan çıkar' : 'Yakın arkadaş olarak işaretle',
               onclick: async () => {
-                await updateFriendAction('toggle_best', { targetUid: fUid });
+                const r = await updateFriendAction('toggle_best', { targetUid: fUid });
+                if (!r?.ok) { toast(r?.error || 'İşlem tamamlanamadı.'); return; }
                 renderModalContent();
               },
             }, f.bestFriend ? '⭐' : '☆')),
@@ -361,7 +362,8 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
           class: `btn sm ${invId ? '' : 'primary'}`,
           onclick: async () => {
             if (invId) {
-              await sendRoomInvite({ action: 'cancel', inviteId: invId, targetUid: fUid, roomId: state.mesh?.id });
+              const r = await sendRoomInvite({ action: 'cancel', inviteId: invId, targetUid: fUid, roomId: state.mesh?.id });
+              if (!r?.ok) { toast(r?.error || 'Davet iptal edilemedi.'); return; }
               sentRoomInvites.delete(fUid);
               toast('Davet geri çekildi');
             } else {
@@ -392,6 +394,7 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
           onclick: async () => {
             const r = await sendRoomInvite({ action: 'poke', targetUid: f.uid });
             if (r?.ok) toast(`👋 ${f.name} kişisine el salladın!`);
+            else toast(r?.error || 'İşlem tamamlanamadı.');
           },
         }, '👋'),
         h('button', {
@@ -400,7 +403,8 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
           title: 'Kullanıcıyı Engelle',
           'aria-label': 'Engelle',
           onclick: async () => {
-            await updateFriendAction('block', { targetUid: f.uid || fUid, targetName: f.name });
+            const r = await updateFriendAction('block', { targetUid: f.uid || fUid, targetName: f.name });
+            if (!r?.ok) { toast(r?.error || 'Kullanıcı engellenemedi.'); return; }
             toast(`🚫 ${f.name} engellendi`);
             renderModalContent();
             onRefresh?.();
@@ -411,7 +415,8 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
           class: 'btn sm ghost',
           title: 'Arkadaşlıktan çıkar',
           onclick: async () => {
-            await updateFriendAction('remove', { targetUid: f.uid });
+            const r = await updateFriendAction('remove', { targetUid: f.uid });
+            if (!r?.ok) { toast(r?.error || 'Arkadaş çıkarılamadı.'); return; }
             toast(`${f.name} arkadaş listesinden çıkarıldı`);
             renderModalContent();
             onRefresh?.();
@@ -451,6 +456,7 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
           style: { width: '100%', justifyContent: 'center' },
           onclick: async () => {
             const r = await sendRoomInvite({ action: 'invite_all_online' });
+            if (!r?.ok) { toast(r?.error || 'Davet gönderilemedi.'); return; }
             toast(r?.sentCount ? `📩 ${r.sentCount} çevrimiçi arkadaşın odaya çağrıldı!` : 'Çevrimiçi arkadaş bulunamadı');
           },
         }, `🔔 Tüm Çevrimiçi Arkadaşları Odaya Çağır (${onlineFriends.length})`) : null,
@@ -477,7 +483,8 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
             h('button', {
               type: 'button', class: 'btn sm primary',
               onclick: async () => {
-                await updateFriendAction('accept', { requestId: req.id, targetUid: req.fromUid });
+                const r = await updateFriendAction('accept', { requestId: req.id, targetUid: req.fromUid });
+                if (!r?.ok) { toast(r?.error || 'İstek kabul edilemedi.'); return; }
                 toast(`🎉 ${req.fromName} ile artık arkadaşsınız!`);
                 if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('vortex_friends_updated'));
                 renderModalContent();
@@ -487,7 +494,8 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
             h('button', {
               type: 'button', class: 'btn sm ghost',
               onclick: async () => {
-                await updateFriendAction('decline', { requestId: req.id, targetUid: req.fromUid });
+                const r = await updateFriendAction('decline', { requestId: req.id, targetUid: req.fromUid });
+                if (!r?.ok) { toast(r?.error || 'İstek reddedilemedi.'); return; }
                 toast('İstek reddedildi');
                 renderModalContent();
               },
@@ -502,7 +510,8 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
           h('button', {
             type: 'button', class: 'btn sm ghost',
             onclick: async () => {
-              await updateFriendAction('cancel', { requestId: req.id, targetUid: req.toUid });
+              const r = await updateFriendAction('cancel', { requestId: req.id, targetUid: req.toUid });
+              if (!r?.ok) { toast(r?.error || 'İstek iptal edilemedi.'); return; }
               toast('Gönderilen istek iptal edildi');
               renderModalContent();
             },
@@ -555,10 +564,10 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
                   h('div', { class: 'wl-friend-title-line' }, h('b', {}, uCard.name), h('span', { class: 'wl-friend-handle' }, uCard.handle)),
                   h('div', { class: `wl-friend-status is-${uCard.presenceState || 'offline'}` }, uCard.status || ''))),
               st === 'FRIENDS' ? h('span', { class: 'wl-friend-pill ok' }, '✓ Arkadaş')
-                : st === 'OUTGOING_PENDING' ? h('button', { type: 'button', class: 'btn sm ghost', onclick: async () => { await updateFriendAction('cancel', { targetUid: uCard.uid }); searchResults = await searchUsersServer(searchQuery); renderModalContent(); } }, '⏳ İstek Gönderildi · İptal')
-                : st === 'INCOMING_PENDING' ? h('button', { type: 'button', class: 'btn sm primary', onclick: async () => { await updateFriendAction('accept', { targetUid: uCard.uid }); toast(`🎉 ${uCard.name} ile artık arkadaşsınız!`); if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('vortex_friends_updated')); searchResults = await searchUsersServer(searchQuery); renderModalContent(); } }, '✓ Seni Ekledi · Onayla')
+                : st === 'OUTGOING_PENDING' ? h('button', { type: 'button', class: 'btn sm ghost', onclick: async () => { const r = await updateFriendAction('cancel', { targetUid: uCard.uid }); if (!r?.ok) { toast(r?.error || 'İşlem tamamlanamadı.'); return; } searchResults = await searchUsersServer(searchQuery); renderModalContent(); } }, '⏳ İstek Gönderildi · İptal')
+                : st === 'INCOMING_PENDING' ? h('button', { type: 'button', class: 'btn sm primary', onclick: async () => { const r = await updateFriendAction('accept', { targetUid: uCard.uid }); if (!r?.ok) { toast(r?.error || 'İstek kabul edilemedi.'); return; } toast(`🎉 ${uCard.name} ile artık arkadaşsınız!`); if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('vortex_friends_updated')); searchResults = await searchUsersServer(searchQuery); renderModalContent(); } }, '✓ Seni Ekledi · Onayla')
                 : h('button', { type: 'button', class: 'btn sm primary', onclick: () => triggerSendReq(uCard.handle || uCard.name, { targetUid: uCard.uid }) }, '+ Arkadaş Ekle'));
-          })) : (searchQuery.length >= 2 && !searching ? h('div', { class: 'dim', style: { fontSize: '.8rem', padding: '8px 2px' } }, `"${searchQuery}" ile eşleşen kayıtlı kullanıcı bulunamadı.`) : null));
+          })) : (searchQuery.length >= 2 && !searching ? h('div', { class: 'dim', style: { fontSize: '.8rem', padding: '8px 2px' } }, searchResults?._error || `"${searchQuery}" ile eşleşen kayıtlı kullanıcı bulunamadı.`) : null));
     } else {
       bodyNode = h('div', { class: 'wl-social-pane' },
         h('div', { class: 'wl-friends-sec-head' }, '🟢 ÇEVRİMİÇİ DURUM GÖRÜNÜRLÜĞÜ'),
@@ -569,7 +578,8 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
         ].map(([k, lbl, dsc]) => h('button', {
           type: 'button', class: priv.presenceVisibility === k ? 'on' : '',
           onclick: async () => {
-            await updateFriendAction('privacy', { presenceVisibility: k });
+            const r = await updateFriendAction('privacy', { presenceVisibility: k });
+            if (!r?.ok) { toast(r?.error || 'Gizlilik ayarı güncellenemedi.'); return; }
             await pushPresenceHeartbeat({ visibility: k });
             renderModalContent();
           },
@@ -580,7 +590,8 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
             type: 'button', class: `btn sm ${priv.hideWatching ? 'primary' : ''}`,
             onclick: async () => {
               const next = !priv.hideWatching;
-              await updateFriendAction('privacy', { hideWatching: next });
+              const r = await updateFriendAction('privacy', { hideWatching: next });
+              if (!r?.ok) { toast(r?.error || 'Gizlilik ayarı güncellenemedi.'); return; }
               await pushPresenceHeartbeat({ hideWatching: next });
               renderModalContent();
             },
@@ -589,7 +600,7 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
           h('div', { class: 'wl-friends-sec-head' }, `🚫 ENGELLENENLER (${blocked.length})`),
           ...blocked.map((b) => h('div', { class: 'wl-friend-row' },
             h('span', {}, b.name || b.uid),
-            h('button', { type: 'button', class: 'btn sm', onclick: async () => { await updateFriendAction('unblock', { targetUid: b.uid }); renderModalContent(); } }, 'Engeli Kaldır')))) : null);
+            h('button', { type: 'button', class: 'btn sm', onclick: async () => { const r = await updateFriendAction('unblock', { targetUid: b.uid }); if (!r?.ok) { toast(r?.error || 'Engel kaldırılamadı.'); return; } renderModalContent(); } }, 'Engeli Kaldır')))) : null);
     }
 
     const wasInpFocused = typeof document !== 'undefined' && document.activeElement?.id === 'friend-name-input';
@@ -818,7 +829,14 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
               type: 'button',
               class: 'friend-remove',
               title: 'Arkadaşlardan çıkar',
-              onclick: async () => { container.dataset.layoutSig = ''; if (f.uid || f.id) await updateFriendAction('remove', { targetUid: f.uid || f.id }); renderLobbySections(container, rooms, onOpen, { filter, query }); },
+              onclick: async () => {
+                if (f.uid || f.id) {
+                  const r = await updateFriendAction('remove', { targetUid: f.uid || f.id });
+                  if (!r?.ok) { toast(r?.error || 'Arkadaş çıkarılamadı.'); return; }
+                }
+                container.dataset.layoutSig = '';
+                renderLobbySections(container, rooms, onOpen, { filter, query });
+              },
             }, '×')))
         : [h('span', { class: 'dim', style: { fontSize: '.78rem' } }, 'Arkadaşlarını ekleyerek özel odalarını burada görebilirsin.')]),
       h('button', {

@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v217';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v217';
-import { api, qs } from '../api.js?v=20261119_v217';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v217';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v217';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v217';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v217';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v219';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v219';
+import { api, qs, humanApiError } from '../api.js?v=20261119_v219';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v219';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v219';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v219';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v219';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261119_v217';
+} from '../store.js?v=20261119_v219';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -476,7 +476,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let trendingLoading = false;
   let latestEpsItems = [
     { id: 'ep-95479-s2e23', tmdbId: '95479', mediaType: 'tv', title: 'Jujutsu Kaisen', originalTitle: 'Jujutsu Kaisen', season: 2, episode: 23, episodeLabel: 'S2:B23', episodeTitle: 'Shibuya Incident', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/fHpKWq9ayzSk8nSwqRuaAUemRKh.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/gmECX1DvFgdUPjtio2zaL8BPYPu.jpg', year: '2024', rating: 8.6 },
-    { id: 'ep-127532-s2e12', tmdbId: '127532', mediaType: 'tv', title: 'Solo Leveling', originalTitle: 'Ore dake Level Up na Ken', season: 2, episode: 12, episodeLabel: 'S2:B12', episodeTitle: 'Arise from the Shadow', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuEWJt6dJ1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/od5S7r2v306B2eR0E5t6vP8K2wG.jpg', year: '2025', rating: 8.7 },
+    { id: 'ep-127532-s2e12', tmdbId: '127532', mediaType: 'tv', title: 'Solo Leveling', originalTitle: 'Ore dake Level Up na Ken', season: 2, episode: 12, episodeLabel: 'S2:B12', episodeTitle: 'Arise from the Shadow', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuEWJt6dJ1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/xMNH87maNLt9n2bMDYeI6db5VFm.jpg', year: '2025', rating: 8.7 },
     { id: 'ep-228853-s3e1', tmdbId: '228853', mediaType: 'tv', title: 'Prens', originalTitle: 'Prens', season: 3, episode: 1, episodeLabel: 'S3:B1', episodeTitle: 'Yeni Sezon Bölümü', sourceBadge: '🇹🇷 Yeni Yerli Bölüm', provider: 'blutv', poster: 'https://image.tmdb.org/t/p/w500/oDtYdl5i8rRLmB9xAU6VOwHKjMQ.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/88DMFlyPDuyUeFrUDswbWSV2CQg.jpg', year: '2025', rating: 8.6 },
     { id: 'ep-115678-s5e13', tmdbId: '115678', mediaType: 'tv', title: 'Gibi', originalTitle: 'Gibi', season: 5, episode: 13, episodeLabel: 'S5:B13', episodeTitle: 'Sezon Finali', sourceBadge: '🇹🇷 Exxen Yeni Bölüm', provider: 'exxen', poster: 'https://image.tmdb.org/t/p/w500/sOzTUfTc1djfZM46PgsjuOjs5U1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/p7VgbdDN2LK41JTavzJ9x3i4ktE.jpg', year: '2025', rating: 8.9 },
     { id: 'ep-280030-s1e10', tmdbId: '280030', mediaType: 'tv', title: 'Gassal', originalTitle: 'Gassal', season: 1, episode: 10, episodeLabel: 'S1:B10', episodeTitle: '1. Sezon 10. Bölüm', sourceBadge: '🇹🇷 tabii Yeni Bölüm', provider: 'tabii', poster: 'https://image.tmdb.org/t/p/w500/dvTFLhkIlCJaaDi32MxG7ke4vv1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/6YMuWmlXKQkhQ0FiwDo9zmIsnEb.jpg', year: '2025', rating: 8.7 },
@@ -491,6 +491,31 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let autoRotateTicks = 0;
   let autoRotateTimer = null;
   let superSearchSeq = 0;
+  const isBadTmdbHash = (u) => /4Mt7WHox67uJ1yErwTBFcV8KWgG|od5S7r2v306B2eR0E5t6vP8K2wG/i.test(String(u || ''));
+  const _superSearchCache = new Map();
+  const _superSearchInFlight = new Map();
+  function fetchSuperSearch(q, timeout = 15000) {
+    const cleanQ = String(q || '').trim();
+    const key = cleanQ.toLowerCase();
+    if (!key) return Promise.resolve({ tmdb: [], justwatch: [], youtube: [] });
+    const cached = _superSearchCache.get(key);
+    if (cached && (Date.now() - cached.ts) < 8000) {
+      return Promise.resolve(cached.data);
+    }
+    if (_superSearchInFlight.has(key)) {
+      return _superSearchInFlight.get(key);
+    }
+    const p = api(`/api/rave/supersearch?${qs({ q: cleanQ })}`, { timeout })
+      .then((data) => {
+        _superSearchCache.set(key, { ts: Date.now(), data });
+        return data;
+      })
+      .finally(() => {
+        _superSearchInFlight.delete(key);
+      });
+    _superSearchInFlight.set(key, p);
+    return p;
+  }
 
   let _lastAuthWatchSig = `${Boolean(state.self && !state.self.isGuest)}|${getAccountStorageScope()}|${state.cloudSyncedAt || 0}`;
   const _unsubHomeYt = subscribe((st) => {
@@ -507,7 +532,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       return;
     }
     const dd = root.querySelector('#wl-cmdk-dropdown');
-    if (dd && dd.style.display !== 'none' && !ev.target.closest?.('.wl-cmdk-host')) {
+    if (dd && dd.style.display !== 'none' && !ev.target.closest?.('.wl-cmdk-host, #wl-cmdk-dropdown')) {
       dd.style.display = 'none';
     }
   };
@@ -590,8 +615,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
 
   const pickSafe = async (media) => {
     const p = getProvider(media.provider);
-    if (p && !providerUsable(p)) { popup({ content: desktopOnlyCard(p), options: [{ label: 'Kapat' }] }); return; }
-    await onPick(media);
+    if (p && !providerUsable(p)) { popup({ content: desktopOnlyCard(p), options: [{ label: 'Kapat' }] }); return false; }
+    return (await onPick(media)) !== false;
   };
   let _unsubCloudMedia = null;
   if (!compact) {
@@ -717,10 +742,24 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             h('button', {
               type: 'button',
               class: 'btn primary wl-preview-play-btn',
-              onclick: async () => {
+              onclick: async (ev) => {
                 if (!checkProviderAuthGate(t, defProv)) return;
-                modalRef?.close?.();
-                if (onAction) await onAction();
+                const btn = ev.currentTarget;
+                if (btn.disabled) return;
+                const origTxt = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = isTv ? '📺 Açılıyor...' : '⏳ Hazırlanıyor...';
+                try {
+                  const ok = onAction ? await onAction() : true;
+                  if (ok !== false) modalRef?.close?.();
+                } catch (err) {
+                  toast(humanApiError(err, 'İçerik başlatılamadı, lütfen tekrar deneyin.'));
+                } finally {
+                  if (btn.isConnected) {
+                    btn.disabled = false;
+                    btn.textContent = origTxt;
+                  }
+                }
               },
             }, isTv ? '📺 Sezon & Bölüm Seç' : '▶ Şimdi Odada Başlat'),
             h('button', {
@@ -746,13 +785,19 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   function renderGrid() {
     const prevCatScroll = root.querySelector('.provider-cat-bar')?.scrollLeft || 0;
     const input = h('input', { placeholder: 'Film, dizi, anime veya link ara...', value: superQuery, 'aria-label': 'Ara' });
-    const results = h('div', { class: 'super-results' });
+    const results = h('div', { class: 'super-results hidden' });
     const cmdkDropdown = h('div', { class: 'wl-cmdk-dropdown', id: 'wl-cmdk-dropdown', style: { display: 'none' } });
     let cmdkTimer = null;
     let cmdkSeq = 0;
     let cmdkSelectedIdx = -1;
     let cmdkTriggers = [];
-    const hideCmdk = () => { cmdkDropdown.style.display = 'none'; cmdkSelectedIdx = -1; cmdkTriggers = []; };
+    const hideCmdk = () => {
+      clearTimeout(cmdkTimer);
+      cmdkSeq += 1;
+      cmdkDropdown.style.display = 'none';
+      cmdkSelectedIdx = -1;
+      cmdkTriggers = [];
+    };
     const syncCmdkSelection = () => {
       const rows = cmdkDropdown.querySelectorAll('.wl-cmdk-item');
       rows.forEach((r, idx) => r.classList.toggle('is-selected', idx === cmdkSelectedIdx));
@@ -760,7 +805,19 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         rows[cmdkSelectedIdx].scrollIntoView({ block: 'nearest' });
       }
     };
-    const run = () => { hideCmdk(); superQuery = input.value.trim(); if (superQuery) runSuperSearch(superQuery, results); else results.replaceChildren(); };
+    const run = () => {
+      hideCmdk();
+      const q = input.value.trim();
+      if (!q) {
+        superQuery = '';
+        results.replaceChildren();
+        results.classList.add('hidden');
+        return;
+      }
+      superQuery = q;
+      results.classList.remove('hidden');
+      runSuperSearch(superQuery, results);
+    };
     input.addEventListener('keydown', (e) => {
       if (cmdkDropdown.style.display !== 'none' && cmdkTriggers.length) {
         if (e.key === 'ArrowDown') {
@@ -792,9 +849,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     input.addEventListener('input', () => {
       clearTimeout(cmdkTimer);
       const q = input.value.trim();
-      if (!q && superQuery) {
+      if (!q) {
         superQuery = '';
         results.replaceChildren();
+        results.classList.add('hidden');
       }
       if (compact || q.length < 2 || parseVideoUrl(q)) {
         hideCmdk();
@@ -811,7 +869,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       );
       cmdkTimer = setTimeout(async () => {
         try {
-          const data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 10000 });
+          const data = await fetchSuperSearch(q, 10000);
           if (myCmdk !== cmdkSeq || input.value.trim() !== q) return;
           const items = [...(data.tmdb || []), ...(data.justwatch || [])].filter((x) => x && x.title).slice(0, 7);
           if (!items.length) {
@@ -834,14 +892,15 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 const normalized = { ...it, tmdbId: String(it.tmdbId || it.id || '') };
                 const triggerPlay = async () => {
                   hideCmdk();
-                  if (!checkProviderAuthGate(normalized, defProv)) return;
+                  if (!checkProviderAuthGate(normalized, defProv)) return false;
                   if (isTv) {
                     openTvSeriesModal(normalized, defProv);
-                  } else {
-                    toast(`🎬 ${it.title} hazırlanıyor...`);
-                    const media = await resolveCatalogItem(normalized, defProv, 1, 1);
-                    if (media) await pickSafe(media);
+                    return true;
                   }
+                  toast(`🎬 ${it.title} hazırlanıyor...`);
+                  const media = await resolveCatalogItem(normalized, defProv, 1, 1);
+                  if (!media) return false;
+                  return (await pickSafe(media)) !== false;
                 };
                 cmdkTriggers.push(triggerPlay);
                 return h('div', {
@@ -1101,11 +1160,11 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           },
             h('div', { class: 'wl-continue-thumb' },
               h('img', {
-                src: (item.poster && !item.poster.includes('watchlivo-poster.svg') && !item.poster.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))
+                src: (item.poster && !item.poster.includes('watchlivo-poster.svg') && !isBadTmdbHash(item.poster))
                   ? item.poster
-                  : ((item.thumbnail && !item.thumbnail.includes('watchlivo-poster.svg') && !item.thumbnail.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))
+                  : ((item.thumbnail && !item.thumbnail.includes('watchlivo-poster.svg') && !isBadTmdbHash(item.thumbnail))
                     ? item.thumbnail
-                    : ((item.backdrop && !item.backdrop.includes('watchlivo-poster.svg') && !item.backdrop.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))
+                    : ((item.backdrop && !item.backdrop.includes('watchlivo-poster.svg') && !isBadTmdbHash(item.backdrop))
                       ? item.backdrop
                       : `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim() || item.title, ot: item.originalTitle || '', y: item.year || '', mt: item.mediaType || 'movie' })}`)),
                 alt: item.title || '',
@@ -1202,18 +1261,27 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           },
             h('div', { class: 'wl-continue-thumb' },
               h('img', {
-                src: (epItem.still && !epItem.still.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))
+                src: (epItem.still && !isBadTmdbHash(epItem.still))
                   ? epItem.still
-                  : ((epItem.backdrop && !epItem.backdrop.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))
+                  : ((epItem.backdrop && !isBadTmdbHash(epItem.backdrop))
                     ? epItem.backdrop
-                    : (epItem.poster || `/api/rave/poster?${qs({ tid: epItem.tmdbId || '', t: epItem.title || '', mt: 'tv' })}`)),
+                    : ((epItem.poster && !isBadTmdbHash(epItem.poster))
+                      ? epItem.poster
+                      : `/api/rave/poster?${qs({ tid: epItem.tmdbId || '', t: epItem.title || '', mt: 'tv' })}`)),
                 alt: epItem.title || '',
                 loading: 'lazy',
                 onerror: (e) => {
-                  if (!e.target.src.includes('/api/rave/poster') && epItem.title) {
-                    e.target.src = `/api/rave/poster?${qs({ tid: epItem.tmdbId || '', t: epItem.title || '', mt: 'tv' })}`;
+                  const el = e.currentTarget || e.target;
+                  const step = Number(el.dataset.fbStep || 0);
+                  if (step === 0 && epItem.poster && !isBadTmdbHash(epItem.poster) && el.src !== epItem.poster) {
+                    el.dataset.fbStep = '1';
+                    el.src = epItem.poster;
+                  } else if (step < 2 && epItem.title) {
+                    el.dataset.fbStep = '2';
+                    el.src = `/api/rave/poster?${qs({ tid: epItem.tmdbId || '', t: epItem.title || '', mt: 'tv' })}`;
                   } else {
-                    e.target.src = '/static/watchlivo-poster.svg';
+                    el.onerror = null;
+                    el.src = '/static/watchlivo-poster.svg';
                   }
                 },
               }),
@@ -1236,13 +1304,13 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       input,
       voiceSearchBtn,
       !compact ? h('kbd', { class: 'wl-search-kbd', title: 'Hızlı Arama (Ctrl+K)', onclick: () => input.focus() }, '⌘K') : null,
-      h('button', { class: 'btn primary', onclick: run }, 'Ara'));
+      h('button', { type: 'button', class: 'btn primary', onclick: run }, 'Ara'));
     if (!compact && !document._cmdkOutsideBound) {
       document._cmdkOutsideBound = true;
       document.addEventListener('pointerdown', (ev) => {
         const dd = document.getElementById('wl-cmdk-dropdown');
         if (!dd || dd.style.display === 'none') return;
-        if (ev.target?.closest?.('.home-search, #wl-cmdk-dropdown')) return;
+        if (ev.target?.closest?.('.home-search, .wl-cmdk-host, #wl-cmdk-dropdown')) return;
         dd.style.display = 'none';
       }, { passive: true });
     }
@@ -1498,16 +1566,28 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       ...(latestEpsRail ? [latestEpsRail] : []),
       gridSection);
     if (prevCatScroll > 0) catBar.scrollLeft = prevCatScroll;
-    if (superQuery) runSuperSearch(superQuery, results);
+    if (superQuery) {
+      results.classList.remove('hidden');
+      runSuperSearch(superQuery, results);
+    } else {
+      results.classList.add('hidden');
+    }
   }
 
   async function runSuperSearch(q, box) {
+    const cleanQ = String(q || '').trim();
+    if (!cleanQ) {
+      box.replaceChildren();
+      box.classList.add('hidden');
+      return;
+    }
+    box.classList.remove('hidden');
     const mySearch = ++superSearchSeq;
     box.replaceChildren(buildShimmerGrid(6));
-    const pasted = parseVideoUrl(q);
-    if (pasted) { box.replaceChildren(); await pickFromUrl(q); return; }
+    const pasted = parseVideoUrl(cleanQ);
+    if (pasted) { box.replaceChildren(); box.classList.add('hidden'); await pickFromUrl(cleanQ); return; }
     let data = {};
-    try { data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 15000 }); } catch (e) { if (mySearch === superSearchSeq) box.replaceChildren(h('div', { class: 'lobby-empty' }, 'Arama başarısız oldu, tekrar dene.')); return; }
+    try { data = await fetchSuperSearch(cleanQ, 15000); } catch (e) { if (mySearch === superSearchSeq) box.replaceChildren(h('div', { class: 'lobby-empty' }, 'Arama başarısız oldu, tekrar dene.')); return; }
     if (mySearch !== superSearchSeq) return;
     const normTitle = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9ğüşıöç]+/gi, '').trim();
     const jwList = (data.justwatch || []).filter((t) => t && t.title);
@@ -1907,11 +1987,11 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
             const rowCleanTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim();
             const rowHistYear = item.year || (String(item.title || '').match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
             const rowMt = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(String(item.title || '')) ? 'tv' : 'movie');
-            const rowPoster = (item.poster && !item.poster.includes('watchlivo-poster.svg') && !item.poster.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))
+            const rowPoster = (item.poster && !item.poster.includes('watchlivo-poster.svg') && !isBadTmdbHash(item.poster))
               ? item.poster
-              : ((item.thumbnail && !item.thumbnail.includes('watchlivo-poster.svg') && !item.thumbnail.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))
+              : ((item.thumbnail && !item.thumbnail.includes('watchlivo-poster.svg') && !isBadTmdbHash(item.thumbnail))
                 ? item.thumbnail
-                : ((item.backdrop && !item.backdrop.includes('watchlivo-poster.svg') && !item.backdrop.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))
+                : ((item.backdrop && !item.backdrop.includes('watchlivo-poster.svg') && !isBadTmdbHash(item.backdrop))
                   ? item.backdrop
                   : `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: rowCleanTitle || item.title, ot: item.originalTitle || '', y: rowHistYear, mt: rowMt })}`));
             return h('div', { class: 'wl-history-row' },
@@ -1989,10 +2069,19 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
               h('button', {
                 type: 'button',
                 class: 'btn primary sm',
-                onclick: async () => {
-                  modalRef?.close?.();
-                  const resolved = await resolveMusicItem(m, getProvider('music'));
-                  if (resolved) await pickFn(resolved);
+                onclick: async (ev) => {
+                  const btn = ev.currentTarget;
+                  if (btn.disabled) return;
+                  btn.disabled = true;
+                  try {
+                    const resolved = await resolveMusicItem(m, getProvider('music'));
+                    if (resolved) {
+                      modalRef?.close?.();
+                      await pickFn(resolved);
+                    }
+                  } finally {
+                    if (btn.isConnected) btn.disabled = false;
+                  }
                 },
               }, '▶ Dinle'))))
         );

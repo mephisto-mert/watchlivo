@@ -3723,6 +3723,7 @@ async def http_sync(request: Request):
             or (safe_http_uid and f"uid:{safe_http_uid}" in room["kicked"])
         ):
             return JSONResponse({"error": "kicked"}, status_code=410)
+        existing_p = (room.get("participants") or {}).get(cid)
         pw_trusted_member = bool(existing_p and (signed_cid and signed_cid == cid))
         if has_password(room) and not pw_trusted_member:
             http_rl_key = f"http:{room_id}:{client_ip(request)}"

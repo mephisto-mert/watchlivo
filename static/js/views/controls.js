@@ -1,14 +1,15 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261119_v217';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261119_v217';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v217';
-import { getProvider } from '../providers.js?v=20261119_v217';
-import { expectedPosition } from '../sync.js?v=20261119_v217';
-import { thumbFor } from './lobby.js?v=20261119_v217';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261119_v217';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261119_v217';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261119_v217';
-import { avatar } from '../profile.js?v=20261119_v217';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261119_v219';
+import { api, qs as buildQs } from '../api.js?v=20261119_v219';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261119_v219';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v219';
+import { getProvider } from '../providers.js?v=20261119_v219';
+import { expectedPosition } from '../sync.js?v=20261119_v219';
+import { thumbFor } from './lobby.js?v=20261119_v219';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261119_v219';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261119_v219';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261119_v219';
+import { avatar } from '../profile.js?v=20261119_v219';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -704,8 +705,7 @@ export function buildControls(frame, ctx) {
     if (seasonMetaCache.has(cacheKey)) return seasonMetaCache.get(cacheKey);
     if (seasonMetaInflight.has(cacheKey)) return null;
     seasonMetaInflight.add(cacheKey);
-    fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m?.tmdbId || '')}&title=${encodeURIComponent(cleanSeries || '')}&mediaType=tv&season=${sNum}`)
-      .then((r) => (r.ok ? r.json() : null))
+    api(`/api/rave/seasons?${buildQs({ tmdbId: m?.tmdbId || '', title: cleanSeries || '', mediaType: 'tv', season: sNum })}`, { timeout: 8000 })
       .then((sData) => {
         if (!sData) return;
         const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
@@ -771,10 +771,8 @@ export function buildControls(frame, ctx) {
     let epName = '';
     try {
       try {
-        const sig1 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined;
-        const r = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig1 ? { signal: sig1 } : {});
-        if (r.ok) {
-          const sData = await r.json();
+        const sData = await api(`/api/rave/seasons?${buildQs({ tmdbId: m.tmdbId || '', title: cleanTitle, mediaType: 'tv', season: targetSeason })}`, { timeout: 6500 });
+        if (sData) {
           const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
           if (curE <= 1 && eps.length > 0) {
             targetEp = Number(eps[eps.length - 1]?.episode || eps.length);
@@ -854,10 +852,8 @@ export function buildControls(frame, ctx) {
       showOverlay(`⏭️ S${targetSeason}:B${targetEp} hazırlanıyor…`, 4500);
       if (manual) toast(`⏭️ S${targetSeason}:B${targetEp} bölümüne geçiliyor…`);
       try {
-        const sig1 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined;
-        const r = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig1 ? { signal: sig1 } : {});
-        if (r.ok) {
-          const sData = await r.json();
+        const sData = await api(`/api/rave/seasons?${buildQs({ tmdbId: m.tmdbId || '', title: cleanTitle, mediaType: 'tv', season: targetSeason })}`, { timeout: 6500 });
+        if (sData) {
           const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
           const seasons = Array.isArray(sData.seasons) ? sData.seasons : [];
           const foundEp = eps.find((x) => Number(x.episode) === targetEp);
@@ -870,10 +866,8 @@ export function buildControls(frame, ctx) {
             if (hasNextSeason) {
               targetSeason += 1;
               targetEp = 1;
-              const sig2 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined;
-              const r2 = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig2 ? { signal: sig2 } : {});
-              if (r2.ok) {
-                const s2 = await r2.json();
+              const s2 = await api(`/api/rave/seasons?${buildQs({ tmdbId: m.tmdbId || '', title: cleanTitle, mediaType: 'tv', season: targetSeason })}`, { timeout: 6500 });
+              if (s2) {
                 const ep1 = (s2.episodes || []).find((x) => Number(x.episode) === 1);
                 if (ep1?.name && !/^(?:1\.\s*bölüm|bölüm\s*1|episode\s*1)(?:\s*\([^)]*\))?$/i.test(ep1.name.trim())) {
                   epName = ep1.name.trim();
@@ -1816,24 +1810,20 @@ export function buildControls(frame, ctx) {
         episode: String(m.episode || 1),
         refresh: '1',
       });
-      const edgeTok = document.querySelector('meta[name="wl-edge-token"]')?.getAttribute('content') || '';
-      const r = await fetch(`/api/rave/resolve-catalog?${qs.toString()}`, edgeTok ? { headers: { 'X-Watchlivo-Token': edgeTok } } : undefined);
-      if (r.ok) {
-        const fresh = await r.json();
-        if (fresh && fresh.url) {
-          m.url = fresh.url;
-          if (Array.isArray(fresh.altUrls)) m.altUrls = fresh.altUrls;
-          if (Array.isArray(fresh.servers)) m.servers = fresh.servers;
-          if (Array.isArray(fresh.audioTracks) && fresh.audioTracks.length) m.audioTracks = fresh.audioTracks;
-          host.key = '';
-          host.loadedUrl = '';
-          await host.setMedia(m, curPos, true);
-          ctx.conn?.send('resolve_media', { ...m, currentTime: curPos });
-          loading.classList.add('hidden');
-          showOverlay('✅ Yayın kaynağı yenilendi', 2200);
-          update();
-          return;
-        }
+      const fresh = await api(`/api/rave/resolve-catalog?${qs.toString()}`, { timeout: 12000 });
+      if (fresh && fresh.url) {
+        m.url = fresh.url;
+        if (Array.isArray(fresh.altUrls)) m.altUrls = fresh.altUrls;
+        if (Array.isArray(fresh.servers)) m.servers = fresh.servers;
+        if (Array.isArray(fresh.audioTracks) && fresh.audioTracks.length) m.audioTracks = fresh.audioTracks;
+        host.key = '';
+        host.loadedUrl = '';
+        await host.setMedia(m, curPos, true);
+        ctx.conn?.send('resolve_media', { ...m, currentTime: curPos });
+        loading.classList.add('hidden');
+        showOverlay('✅ Yayın kaynağı yenilendi', 2200);
+        update();
+        return;
       }
     } catch (e) { /* ignore */ }
     if (m.url || m.videoId) {
@@ -2892,10 +2882,9 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261119_v217',
+            v: '20261119_v219',
           });
-          fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
-            .then((r) => (r.ok ? r.json() : null))
+          api(`/api/rave/seasons?${q.toString()}`, { timeout: 8000 })
             .then((inf) => {
               if (inf && (Array.isArray(inf.episodes) || Array.isArray(inf.seasons))) {
                 const payload = {
@@ -2912,9 +2901,15 @@ export function buildControls(frame, ctx) {
                   state.mesh.media.seasonsMeta = payload.seasonsMeta.length ? payload.seasonsMeta : (state.mesh.media.seasonsMeta || []);
                   update();
                 }
+              } else if (window.__wlSeasonsHydrated?.[hydKey] === 'pending') {
+                delete window.__wlSeasonsHydrated[hydKey];
               }
             })
-            .catch(() => {});
+            .catch(() => {
+              if (window.__wlSeasonsHydrated?.[hydKey] === 'pending') {
+                delete window.__wlSeasonsHydrated[hydKey];
+              }
+            });
         }
       }
     }
