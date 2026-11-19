@@ -38,10 +38,12 @@ function b64UrlDecode(sid) {
 
 export function inferStreamReferer(u) {
   if (!u || u.includes("hakunaymatata.com")) return "";
-  if (u.includes("pilavyer")) return "https://play2.pilavyerplay.top/";
+  if (u.includes("pilavyer")) return "https://pilavyerplay.top/";
+  if (u.includes("ddizimag.")) return "https://ddizimag.icu/";
+  if (u.includes("imgsapi.pro") || u.includes("ytenconline.xyz") || u.includes("filmmodu.")) return "https://www.filmmodu.one/";
   if (u.includes("dragonballzfans") || u.includes("hexa.su")) return "https://hexa.su/";
   if (u.includes("filmboom")) return "https://filmboom.top/";
-  if (u.includes("tau-video") || u.includes("irtau1.")) return "https://tau-video.xyz/";
+  if (u.includes("tau-video") || u.includes("irtau1.") || u.includes("niko-")) return "https://tau-video.xyz/";
   if (u.includes("fastplay.") || u.includes(".cfd/")) {
     return u.includes("ag2m5.cfd") ? "https://x.ag2m5.cfd/" : "https://fastplay.mom/";
   }
@@ -213,7 +215,8 @@ const OFFLOAD_BYPASS_HOSTS = [
   "ag2m5.cfd", "uk-traffic-", "fastplay.",
   "radyotvonline.com", "radyotvonline.net", "nexa.mov", "dplayer", "playmix.",
   "makesomthingup.", "cdnimages.", "ercdn.net", "daioncdn.net",
-  "dragonballzfans", "molystream.org", "irtau1.", "lightspeed.st",
+  "dragonballzfans", "molystream.org", "irtau1.", "tau-video.", "niko-", "lightspeed.st",
+  "pilavyerplay.", "ddizimag.", "imgsapi.pro", "ytenconline.xyz", "filmmodu.",
   "bright67.", "centralodsseyproud", "5d06cffcf9563c", "gamma.",
 ];
 
@@ -226,7 +229,8 @@ async function buildSignedProxyPath(targetUrl, ref, ext, env) {
   try { targetHost = new URL(targetUrl).hostname.toLowerCase(); } catch {}
   const useLocal = (targetHost ? OFFLOAD_BYPASS_HOSTS.some((h) => h.endsWith(".") ? targetHost.includes(h) : (targetHost === h || targetHost.endsWith(`.${h}`) || targetHost.includes(h))) : false)
     || targetUrl.includes("/sheila_")
-    || String(cleanRef || "").includes("molystream.org");
+    || String(cleanRef || "").includes("molystream.org")
+    || String(cleanRef || "").includes("tau-video.xyz");
   const base = useLocal ? "" : OFFLOAD_PROXY_ORIGIN;
   return `${base}/api/rave/stream-proxy?${q.toString()}`;
 }

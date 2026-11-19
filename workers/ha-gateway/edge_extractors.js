@@ -1168,14 +1168,14 @@ async function extractDizilife({ title, displayTitle, originalTitle, sourceUrl, 
   const seg = mtype === "tv" ? "dizi" : "film";
 
   const directDl = sourceUrl && /dizi\d*\.(?:life|plus)\/(?:dizi|film)\//i.test(sourceUrl)
-    ? sourceUrl.replace(/https?:\/\/dizi\d*\.(?:life|plus)/i, "https://dizi86.life")
+    ? sourceUrl.replace(/https?:\/\/dizi\d*\.(?:life|plus)/i, "https://dizi87.life")
     : "";
 
   const slugSteps = [];
   for (const x of [originalTitle, title, displayTitle]) {
     const sl = slugifyAscii(x);
     if (sl && sl.length >= 3) {
-      const u = `https://dizi86.life/${seg}/${sl}`;
+      const u = `https://dizi87.life/${seg}/${sl}`;
       if (!slugSteps.some((st) => st.val === u)) slugSteps.push({ mode: "SLUG", val: u });
     }
     if (slugSteps.length >= 2) break;
@@ -1209,13 +1209,13 @@ async function extractDizilife({ title, displayTitle, originalTitle, sourceUrl, 
 
   for (const step of steps) {
     let matchedUrl = "";
-    let baseDom = "https://dizi86.life";
+    let baseDom = "https://dizi87.life";
     if (step.mode === "DIRECT" || step.mode === "SLUG") {
       matchedUrl = step.val;
       try { baseDom = new URL(matchedUrl).origin; } catch {}
     } else {
       let sRes = null;
-      for (const dlHost of ["https://dizi86.life", "https://dizi84.life", "https://dizi82.life"]) {
+      for (const dlHost of ["https://dizi87.life", "https://dizi86.life", "https://dizi84.life"]) {
         sRes = await fetchHtmlWithBase(`${dlHost}/ara?q=${encodeURIComponent(step.val)}`, `${dlHost}/`, 3500);
         if (sRes?.rateLimited) return null;
         if (sRes?.html) break;
@@ -1559,8 +1559,10 @@ function mergeResolvedResults(resultList) {
   const rankStream = (st) => {
     const u = String(st.url || "").toLowerCase();
     if (/makesomthingup|centralodsseyproud|\/r6\//.test(u)) return 0;
+    if (/imgsapi\.pro|pilavyerplay\.top/.test(u)) return 1;
     if (/dbx\.molystream\.org/.test(u)) return 1;
     if (/sprintcdn|r66nv9ed|owphbf24|filemoon|byse/.test(u)) return 2;
+    if (/tau-video|irtau1/.test(u)) return 2;
     if (/dragonballzfans/.test(u)) return 3;
     if (!isVmpxOrVidmolyUrl(u)) return 4;
     return isCfPoisonedVmpxUrl(u) ? 6 : 5;
@@ -1574,6 +1576,389 @@ function mergeResolvedResults(resultList) {
     streams: filtered,
     tag: resultList.find((r) => r?.tag)?.tag || "hls_edge",
   };
+}
+
+async function extractFilmmoduMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn) {
+  const FM_ORIGIN = "https://www.filmmodu.one";
+  const reqTitles = [originalTitle, title, displayTitle]
+    .map((x) => String(x || "").replace(/\(\d{4}\)/g, "").trim())
+    .filter(Boolean);
+  if (!reqTitles.length) return null;
+  const qList = [];
+  for (const t of reqTitles) {
+    if (!qList.includes(t)) qList.push(t);
+    if (t.includes(":")) {
+      const pre = t.split(":")[0].trim();
+      if (pre.length >= 3 && !qList.includes(pre)) qList.push(pre);
+    }
+  }
+
+  let pageHtml = "";
+  let pageUrl = "";
+  for (const q of qList.slice(0, 2)) {
+    let resp, finalUrl;
+    try {
+      ({ resp, finalUrl } = await fetchPublicFn(
+        `${FM_ORIGIN}/film-ara?term=${encodeURIComponent(q)}`,
+        { "User-Agent": UA_EDGE, Referer: `${FM_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+        4,
+        4000
+      ));
+    } catch {
+      continue;
+    }
+    if (!resp || !resp.ok) {
+      resp?.body?.cancel?.();
+      continue;
+    }
+    const html = await resp.text();
+    const isDirectMovie =
+      /-film-izle$/i.test(finalUrl) &&
+      !/\/(?:turkce-dublaj|turkce-altyazili|film-tur|hd-populer|arsiv)/i.test(finalUrl);
+    if (isDirectMovie) {
+      const tm = html.match(/<title>([^<]+)<\/title>/i);
+      const rawT = tm ? tm[1].replace(/\s*(?:HD\s*)?(?:Türkçe\s*)?(?:Dublaj|Altyazılı|Film\s*İzle|İzle).*$/i, "").trim() : "";
+      if (!rawT || titlesMatchScore(rawT, reqTitles, year) >= 0.72) {
+        pageHtml = html;
+        pageUrl = finalUrl;
+        break;
+      }
+      continue;
+    }
+
+    // Parse search result cards (both relative and absolute hrefs ending in -film-izle)
+    let bestUrl = "";
+    let bestScore = 0;
+    const linkRe = /<a[^>]+href=["']((?:https?:\/\/www\.filmmodu\.one)?\/[a-z0-9-]+-film-izle)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = linkRe.exec(html)) !== null) {
+      const href = m[1].startsWith("http") ? m[1] : `${FM_ORIGIN}${m[1]}`;
+      if (/\/(?:turkce-dublaj|turkce-altyazili|film-tur|4k-film-izle|1080p-film-izle)/i.test(href)) continue;
+      const slugTitle = href
+        .replace(/^https?:\/\/[^/]+\//i, "")
+        .replace(/-(?:hd|4k|turkce-dublaj|turkce-altyazili|altyazili|dublaj)?-?film-izle$/i, "")
+        .replace(/-/g, " ")
+        .trim();
+      const innerText = m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      const sc = Math.max(
+        titlesMatchScore(slugTitle, reqTitles, year),
+        innerText ? titlesMatchScore(innerText, reqTitles, year) : 0
+      );
+      if (sc > bestScore) {
+        bestScore = sc;
+        bestUrl = href;
+      }
+    }
+    if (bestUrl && bestScore >= 0.72) {
+      const pHtml = await fetchTextSafe(
+        bestUrl,
+        { "User-Agent": UA_EDGE, Referer: `${FM_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+        fetchPublicFn,
+        4000
+      );
+      if (pHtml) {
+        pageHtml = pHtml;
+        pageUrl = bestUrl;
+        break;
+      }
+    }
+  }
+  if (!pageHtml) return null;
+
+  // Verify year on page if requested
+  if (year && /^\d{4}/.test(String(year))) {
+    const reqY = Number(String(year).slice(0, 4));
+    const ym = pageHtml.match(/<a[^>]+href="[^"]*\/yil\/(\d{4})"[^>]*>/i) || pageHtml.match(/"datePublished"\s*:\s*"(\d{4})/i);
+    if (ym && Math.abs(Number(ym[1]) - reqY) > 1) return null;
+  }
+
+  const vidM = pageHtml.match(/var\s+videoId\s*=\s*['"](\d+)['"]/i) || pageHtml.match(/videoId['"]?\s*[:=]\s*['"]?(\d+)/i);
+  if (!vidM) return null;
+  const vidId = vidM[1];
+
+  const fetchSrc = async (langType) => {
+    const raw = await fetchTextSafe(
+      `${FM_ORIGIN}/get-source?movie_id=${vidId}&type=${langType}`,
+      { "User-Agent": UA_EDGE, Referer: pageUrl || `${FM_ORIGIN}/`, "X-Requested-With": "XMLHttpRequest", Accept: "application/json, */*" },
+      fetchPublicFn,
+      4000
+    );
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  };
+
+  const [trRes, enRes] = await Promise.all([fetchSrc("tr"), fetchSrc("en")]);
+  const streams = [];
+  const subs = [];
+  const pushFromData = (data, tag) => {
+    if (!data || typeof data !== "object") return;
+    if (typeof data.subtitle === "string" && data.subtitle.trim()) {
+      const subU = data.subtitle.startsWith("http") ? data.subtitle : `${FM_ORIGIN}${data.subtitle.startsWith("/") ? "" : "/"}${data.subtitle}`;
+      if (!subs.some((x) => x.url === subU)) subs.push({ lang: "tr", url: subU, source: "filmmodu" });
+    }
+    const srcs = Array.isArray(data.sources) ? [...data.sources] : [];
+    srcs.sort((a, b) => Number(b?.res || 0) - Number(a?.res || 0));
+    const best = srcs.find((s) => typeof s?.src === "string" && s.src.startsWith("http"));
+    if (best && !streams.some((x) => x.url === best.src)) {
+      streams.push({ url: best.src, referer: `${FM_ORIGIN}/`, tag });
+    }
+  };
+  pushFromData(trRes, "hls_fm_tr");
+  pushFromData(enRes, "hls_fm_en");
+  if (!streams.length) return null;
+  return { url: streams[0].url, referer: streams[0].referer, subs, streams, tag: streams[0].tag };
+}
+
+async function extractDdizimag({ title, displayTitle, originalTitle, sourceUrl, year, mtype, s, e }, fetchPublicFn) {
+  const DM_BASE = "https://ddizimag.icu";
+  const reqTitles = [originalTitle, title, displayTitle]
+    .map((x) => String(x || "").replace(/\(\d{4}\)/g, "").trim())
+    .filter(Boolean);
+  if (!reqTitles.length) return null;
+
+  const tryEpisodePage = async (epUrl, preVerified = false) => {
+    const html = await fetchTextSafe(
+      epUrl,
+      { "User-Agent": UA_EDGE, Referer: `${DM_BASE}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+      fetchPublicFn,
+      4000
+    );
+    if (!html) return null;
+    const pvM = html.match(/data-pv="([^"]+)"/);
+    if (!pvM) return null;
+    if (!preVerified) {
+      const tm = html.match(/<title>([^<]+)<\/title>/i);
+      const pt = tm
+        ? tm[1]
+            .replace(/\s+\d+\.\s*Sezon.*$/i, "")
+            .replace(/\s+(?:izle|Full|HD|ddizimag|Dizimag).*$/i, "")
+            .trim()
+        : "";
+      if (pt && titlesMatchScore(pt, reqTitles, year) < 0.72) return null;
+    }
+    const coreM = html.match(/src="https:\/\/([^/"]+)\/assets\/js\/core\.js"/);
+    const pvDom = coreM ? coreM[1] : "pilavyerplay.top";
+    const sJs = await fetchTextSafe(
+      `https://${pvDom}/assets/js/s.php?s=${encodeURIComponent(pvM[1])}`,
+      { "User-Agent": UA_EDGE, Referer: epUrl, Accept: "*/*" },
+      fetchPublicFn,
+      4200
+    );
+    if (!sJs) return null;
+    const plM = sJs.match(/window\.__PLAYER__\s*=\s*(\{[\s\S]*?\});\s*<\/script>/);
+    if (!plM) return null;
+    let pl;
+    try {
+      pl = JSON.parse(plM[1]);
+    } catch {
+      return null;
+    }
+    const stUrl = String(pl?.stream || "").trim();
+    if (!stUrl.startsWith("https://")) return null;
+    if (mtype === "tv") {
+      const seM = String(pl?.title || "").match(/S(\d{1,2})\s*E(\d{1,3})/i);
+      if (seM && (Number(seM[1]) !== Number(s) || Number(seM[2]) !== Number(e))) return null;
+    }
+    const subs = [];
+    if (Array.isArray(pl?.subs)) {
+      for (const sub of pl.subs) {
+        if (!sub || typeof sub !== "object") continue;
+        const su = String(sub.src || "").trim();
+        const sl = String(sub.lang || "").toLowerCase().trim();
+        const slbl = String(sub.label || "").toLowerCase();
+        if (su.startsWith("https://") && ["tr", "tur", "en", "eng"].includes(sl) && !slbl.includes("forced")) {
+          const normL = sl.startsWith("tr") || sl === "tur" ? "tr" : "en";
+          if (!subs.some((x) => x.url === su)) subs.push({ lang: normL, url: su, source: "ddizimag" });
+        }
+      }
+    }
+    const ref = `https://${pvDom}/`;
+    return { url: stUrl, referer: ref, subs, streams: [{ url: stUrl, referer: ref, tag: "hls_pv" }], tag: "hls_pv" };
+  };
+
+  // 1. Direct sourceUrl or slug attempt
+  const slugCands = [];
+  if (sourceUrl && /ddizimag\./i.test(sourceUrl)) {
+    const clean = sourceUrl.replace(/^https?:\/\/(?:www\.)?ddizimag\.[a-z]{2,8}/i, DM_BASE).replace(/\/+$/, "");
+    slugCands.push({ url: mtype === "tv" && !/\/sezon-\d+/i.test(clean) ? `${clean}/sezon-${s}/bolum-${e}` : clean, pre: true });
+  }
+  const seg = mtype === "tv" ? "dizi" : "film";
+  for (const t of reqTitles.slice(0, 2)) {
+    const sl = slugifyAscii(t);
+    if (sl && sl.length >= 3) {
+      const u = mtype === "tv" ? `${DM_BASE}/${seg}/${sl}/sezon-${s}/bolum-${e}` : `${DM_BASE}/${seg}/${sl}`;
+      if (!slugCands.some((c) => c.url === u)) slugCands.push({ url: u, pre: false });
+    }
+  }
+  for (const cand of slugCands.slice(0, 2)) {
+    const out = await tryEpisodePage(cand.url, cand.pre);
+    if (out?.url) return out;
+  }
+
+  // 2. Fallback search via /ara?q=
+  const sHtml = await fetchTextSafe(
+    `${DM_BASE}/ara?q=${encodeURIComponent(reqTitles[0])}`,
+    { "User-Agent": UA_EDGE, Referer: `${DM_BASE}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+    fetchPublicFn,
+    3800
+  );
+  if (!sHtml) return null;
+  let bestHref = "";
+  let bestScore = 0;
+  const hitRe = /href="((?:https?:\/\/(?:www\.)?ddizimag\.[a-z]{2,8})?\/(dizi|film|anime)\/([a-z0-9-]+))"/gi;
+  let hm;
+  while ((hm = hitRe.exec(sHtml)) !== null) {
+    const kind = hm[2].toLowerCase();
+    if (mtype === "movie" && kind !== "film") continue;
+    if (mtype === "tv" && kind === "film") continue;
+    const sc = titlesMatchScore(hm[3].replace(/-/g, " "), reqTitles, year);
+    if (sc > bestScore) {
+      bestScore = sc;
+      bestHref = hm[1].startsWith("http") ? hm[1] : `${DM_BASE}${hm[1]}`;
+    }
+  }
+  if (bestHref && bestScore >= 0.72) {
+    const epU = mtype === "tv" ? `${bestHref}/sezon-${s}/bolum-${e}` : bestHref;
+    const out = await tryEpisodePage(epU, false);
+    if (out?.url) return out;
+  }
+  return null;
+}
+
+async function extractAnimecix({ title, displayTitle, originalTitle, year, mtype, s, e }, fetchPublicFn) {
+  const AC_HDRS = {
+    "User-Agent": UA_EDGE,
+    Referer: "https://animecix.tv/",
+    Accept: "application/json",
+    "X-Requested-With": "XMLHttpRequest",
+  };
+  const reqTitles = [originalTitle, title, displayTitle]
+    .map((x) => String(x || "").replace(/\(\d{4}\)/g, "").trim())
+    .filter(Boolean);
+  if (!reqTitles.length) return null;
+
+  let acId = 0;
+  for (const q of reqTitles.slice(0, 2)) {
+    const raw = await fetchTextSafe(
+      `https://animecix.tv/secure/search/${encodeURIComponent(q)}?limit=6`,
+      AC_HDRS,
+      fetchPublicFn,
+      3500
+    );
+    if (!raw) continue;
+    let obj;
+    try {
+      obj = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    const results = Array.isArray(obj?.results) ? obj.results : [];
+    let bestId = 0;
+    let bestScore = 0;
+    for (const item of results) {
+      if (!item || !item.id) continue;
+      if (mtype === "tv" && item.is_series === false) continue;
+      if (mtype === "movie" && item.is_series === true) continue;
+      const itemYear = String(item.year || "").slice(0, 4);
+      const sc = Math.max(
+        titlesMatchScore(String(item.name || ""), reqTitles, year || itemYear),
+        item.original_title ? titlesMatchScore(String(item.original_title), reqTitles, year || itemYear) : 0,
+        item.name_english ? titlesMatchScore(String(item.name_english), reqTitles, year || itemYear) : 0
+      );
+      if (sc > bestScore) {
+        bestScore = sc;
+        bestId = Number(item.id);
+      }
+    }
+    if (bestId && bestScore >= 0.72) {
+      acId = bestId;
+      break;
+    }
+  }
+  if (!acId) return null;
+
+  let vids = [];
+  if (mtype === "tv") {
+    const rawV = await fetchTextSafe(
+      `https://animecix.tv/secure/episode-videos?titleId=${acId}&episode=${e}&season=${s}`,
+      AC_HDRS,
+      fetchPublicFn,
+      3500
+    );
+    try {
+      const parsed = JSON.parse(rawV || "[]");
+      if (Array.isArray(parsed)) vids = parsed;
+    } catch {}
+  } else {
+    const rawV = await fetchTextSafe(
+      `https://animecix.tv/secure/videos?titleId=${acId}`,
+      AC_HDRS,
+      fetchPublicFn,
+      3500
+    );
+    try {
+      const parsed = JSON.parse(rawV || "{}");
+      const arr = parsed?.pagination?.data;
+      if (Array.isArray(arr)) {
+        vids = arr.filter(
+          (v) =>
+            v &&
+            Number(v.title_id || 0) === acId &&
+            !["teaser", "trailer", "clip", "opening", "ending"].includes(String(v.category || "").toLowerCase())
+        );
+      }
+    } catch {}
+  }
+  if (!vids.length) return null;
+
+  const tauCands = [];
+  for (const v of vids) {
+    const mTau = String(v?.url || "").match(/tau-video\.xyz\/embed\/([a-zA-Z0-9_-]+)/);
+    if (!mTau) continue;
+    const isDub = String(v?.extra || "").toLowerCase().includes("dublaj");
+    if (!tauCands.some((c) => c.id === mTau[1])) tauCands.push({ id: mTau[1], isDub });
+  }
+  tauCands.sort((a, b) => (a.isDub === b.isDub ? 0 : a.isDub ? -1 : 1));
+
+  const streams = [];
+  for (const cand of tauCands.slice(0, 2)) {
+    const tRaw = await fetchTextSafe(
+      `https://tau-video.xyz/api/video/${cand.id}`,
+      { "User-Agent": UA_EDGE, Referer: `https://tau-video.xyz/embed/${cand.id}`, Accept: "application/json" },
+      fetchPublicFn,
+      3800
+    );
+    if (!tRaw) continue;
+    let tObj;
+    try {
+      tObj = JSON.parse(tRaw);
+    } catch {
+      continue;
+    }
+    const uList = (Array.isArray(tObj?.urls) ? tObj.urls : []).filter(
+      (x) => x && typeof x.url === "string" && x.url.startsWith("https://")
+    );
+    uList.sort((a, b) => {
+      const la = String(a.label || "");
+      const lb = String(b.label || "");
+      const ra = la.includes("1080") ? 0 : la.includes("720") ? 1 : 2;
+      const rb = lb.includes("1080") ? 0 : lb.includes("720") ? 1 : 2;
+      return ra - rb;
+    });
+    if (uList[0]?.url && !streams.some((st) => st.url === uList[0].url)) {
+      streams.push({
+        url: uList[0].url,
+        referer: "https://tau-video.xyz/",
+        tag: cand.isDub ? "mp4_ac_dub" : "mp4_ac_sub",
+      });
+    }
+  }
+  if (!streams.length) return null;
+  return { url: streams[0].url, referer: streams[0].referer, subs: [], streams, tag: streams[0].tag };
 }
 
 export async function resolveTurkishCatalogStream({ title, displayTitle, originalTitle, sourceUrl, year = "", mtype, s, e, tmdbId = "", fetchPublicFn }) {
@@ -1593,22 +1978,53 @@ export async function resolveTurkishCatalogStream({ title, displayTitle, origina
       const wtHasNonVmpx = Boolean(wtRes?.streams?.some((st) => !isVmpxOrVidmolyUrl(st?.url)));
       if (wtRes?.url && wtHasNonVmpx) return wtRes;
 
-      const [hxRes, dlRes] = await Promise.allSettled([
-        extractHexa({ tmdbId, mtype: "movie", s, e }, fetchPublicFn),
+      const [fmRes, dlRes, hxRes] = await Promise.allSettled([
+        extractFilmmoduMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn),
         extractDizilife({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "movie", s, e }, fetchPublicFn),
+        extractHexa({ tmdbId, mtype: "movie", s, e }, fetchPublicFn),
       ]);
-      const merged = mergeResolvedResults([
+      const firstMerged = mergeResolvedResults([
         wtRes,
-        hxRes.status === "fulfilled" ? hxRes.value : null,
+        fmRes.status === "fulfilled" ? fmRes.value : null,
         dlRes.status === "fulfilled" ? dlRes.value : null,
+        hxRes.status === "fulfilled" ? hxRes.value : null,
       ]);
-      if (merged?.url) return merged;
+      const hasCleanStream = Boolean(firstMerged?.streams?.some((st) => !isVmpxOrVidmolyUrl(st?.url)));
+      if (firstMerged?.url && hasCleanStream) return firstMerged;
+
+      const [dmRes, acRes] = await Promise.allSettled([
+        extractDdizimag({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "movie", s, e }, fetchPublicFn),
+        extractAnimecix({ title, displayTitle, originalTitle, year, mtype: "movie", s, e }, fetchPublicFn),
+      ]);
+      const secondMerged = mergeResolvedResults([
+        firstMerged,
+        dmRes.status === "fulfilled" ? dmRes.value : null,
+        acRes.status === "fulfilled" ? acRes.value : null,
+      ]);
+      if (secondMerged?.url) return secondMerged;
       if (wtRes?.url) return wtRes;
     } else if (mtype === "tv") {
-      const dlRes = await extractDizilife({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "tv", s, e }, fetchPublicFn);
-      const dbxRes = await extractDiziboxEpisode({ title, displayTitle, originalTitle, sourceUrl: src, year, s, e }, fetchPublicFn);
-      const merged = mergeResolvedResults([dlRes, dbxRes]);
-      if (merged?.url) return merged;
+      const [dlRes, dbxRes] = await Promise.allSettled([
+        extractDizilife({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "tv", s, e }, fetchPublicFn),
+        extractDiziboxEpisode({ title, displayTitle, originalTitle, sourceUrl: src, year, s, e }, fetchPublicFn),
+      ]);
+      const firstMerged = mergeResolvedResults([
+        dlRes.status === "fulfilled" ? dlRes.value : null,
+        dbxRes.status === "fulfilled" ? dbxRes.value : null,
+      ]);
+      const hasCleanTv = Boolean(firstMerged?.streams?.some((st) => !isVmpxOrVidmolyUrl(st?.url)));
+      if (firstMerged?.url && hasCleanTv) return firstMerged;
+
+      const [dmRes, acRes] = await Promise.allSettled([
+        extractDdizimag({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "tv", s, e }, fetchPublicFn),
+        extractAnimecix({ title, displayTitle, originalTitle, year, mtype: "tv", s, e }, fetchPublicFn),
+      ]);
+      const secondMerged = mergeResolvedResults([
+        firstMerged,
+        dmRes.status === "fulfilled" ? dmRes.value : null,
+        acRes.status === "fulfilled" ? acRes.value : null,
+      ]);
+      if (secondMerged?.url) return secondMerged;
     }
   } catch {}
   return null;
