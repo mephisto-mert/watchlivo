@@ -909,12 +909,12 @@ struct WatchlivoWebView: UIViewRepresentable {
         config.allowsPictureInPictureMediaPlayback = true
         config.allowsAirPlayForMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
-        config.applicationNameForUserAgent = "Version/17.4 Mobile/15E148 Safari/604.1 WatchlivoIOS/2.2.9"
+        config.applicationNameForUserAgent = "Version/17.4 Mobile/15E148 Safari/604.1 WatchlivoIOS/2.2.10"
 
         let bridgeScript = """
         (function() {
           window.isWatchlivoNativeIOS = true;
-          window.watchlivoNativeVersion = '2.2.9';
+          window.watchlivoNativeVersion = '2.2.10';
           window.triggerHaptic = function(s) {
             try { window.webkit.messageHandlers.watchlivoHaptic.postMessage(String(s || 'medium')); } catch(e) {}
           };

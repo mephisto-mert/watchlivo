@@ -528,6 +528,10 @@ function normTitleTokens(s) {
     .filter((w) => w.length >= 2);
 }
 
+function normTitleTokensJoined(s) {
+  return normTitleTokens(String(s || "").replace(/['’`´]/g, ""));
+}
+
 function rot13Decode(s) {
   return String(s || "").replace(/[a-zA-Z]/g, (c) => {
     const b = c <= "Z" ? 65 : 97;
@@ -583,13 +587,15 @@ async function extractFullhdMoviePage(pageUrl, fetchPublicFn) {
 
 export async function extractFullhdSearchMovie({ title, displayTitle, originalTitle, year = "" }, fetchPublicFn) {
   const FHD_ORIGIN = "https://www.fullhdfilmizlesene.now";
-  const reqTitles = [originalTitle, title, displayTitle]
+  const reqTitles = [originalTitle, displayTitle, title]
     .map((x) => String(x || "").replace(/\(\d{4}\)/g, "").trim())
     .filter(Boolean);
   if (!reqTitles.length) return null;
   const qList = [];
   for (const t of reqTitles) {
     if (!qList.includes(t)) qList.push(t);
+  }
+  for (const t of reqTitles) {
     if (t.includes(":")) {
       const pre = t.split(":")[0].trim();
       if (pre.length >= 3 && !qList.includes(pre)) qList.push(pre);
@@ -598,7 +604,7 @@ export async function extractFullhdSearchMovie({ title, displayTitle, originalTi
 
   let bestUrl = "";
   let bestScore = 0;
-  for (const q of qList.slice(0, 2)) {
+  for (const q of qList.slice(0, 3)) {
     const html = await fetchTextSafe(
       `${FHD_ORIGIN}/arama/${encodeURIComponent(q)}`,
       { "User-Agent": UA_EDGE, Referer: `${FHD_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
@@ -721,8 +727,7 @@ function extractSequelTag(str) {
   return rom[raw] || raw;
 }
 
-function scoreTitleCandidate(rtNoYear, candToks, candSeq, candYearM, reqYear) {
-  const rToks = normTitleTokens(rtNoYear);
+function scoreTitleCandidateWithToks(rtNoYear, rToks, candToks, candSeq, candYearM, reqYear) {
   if (!rToks.length) return -1;
   const hits = rToks.filter((t) => candToks.includes(t)).length;
   if (hits === 0) return -1;
@@ -748,24 +753,66 @@ function scoreTitleCandidate(rtNoYear, candToks, candSeq, candYearM, reqYear) {
   return score;
 }
 
+function scoreTitleCandidate(rtNoYear, candToks, candSeq, candYearM, reqYear, candToksJoined = null) {
+  let best = scoreTitleCandidateWithToks(rtNoYear, normTitleTokens(rtNoYear), candToks, candSeq, candYearM, reqYear);
+  if (candToksJoined && /['’`´]/.test(rtNoYear)) {
+    const scJ = scoreTitleCandidateWithToks(rtNoYear, normTitleTokensJoined(rtNoYear), candToksJoined, candSeq, candYearM, reqYear);
+    if (scJ > best) best = scJ;
+  }
+  return best;
+}
+
+function scoreDualSlugMatch(slugClean, reqTitles, candYear = "", reqYear = "") {
+  const slugToks = normTitleTokensJoined(slugClean);
+  if (slugToks.length < 3) return -1;
+  const candYrNum = /^\d{4}$/.test(String(candYear || "")) ? Number(candYear) : 0;
+  const reqYrNum = /^\d{4}/.test(String(reqYear || "")) ? Number(String(reqYear).slice(0, 4)) : 0;
+  if (candYrNum && reqYrNum && Math.abs(candYrNum - reqYrNum) > 2) return -1;
+  const candSeq = extractSequelTag(slugClean);
+  let best = -1;
+  for (const rt of reqTitles) {
+    const rtNoYear = String(rt || "").replace(/\(\d{4}\)/g, "").trim();
+    if (!rtNoYear) continue;
+    const rSeq = extractSequelTag(rtNoYear);
+    if (candSeq && rSeq && candSeq !== rSeq) continue;
+    const tokVariants = [normTitleTokens(rtNoYear), normTitleTokensJoined(rtNoYear)];
+    for (const rToks of tokVariants) {
+      if (rToks.length < 2 || rToks.length >= slugToks.length) continue;
+      const prefixMatch = rToks.every((t, idx) => slugToks[idx] === t);
+      const suffixOff = slugToks.length - rToks.length;
+      const suffixMatch = rToks.every((t, idx) => slugToks[suffixOff + idx] === t);
+      if (!prefixMatch && !suffixMatch) continue;
+      let sc = 82;
+      if ((candSeq && !rSeq) || (!candSeq && rSeq)) sc -= 30;
+      if (candYrNum && reqYrNum) {
+        const diff = Math.abs(candYrNum - reqYrNum);
+        sc += diff === 0 ? 15 : 5;
+      }
+      if (sc > best) best = sc;
+    }
+  }
+  return best;
+}
+
 function titlesMatchScore(candRaw, reqTitles, reqYear = "") {
   const candClean = String(candRaw || "").replace(/\s+\d+\.\s*Sezon.*$/i, "").trim();
   const candYearM = candClean.match(/\((\d{4})\)/);
   const candNoYear = candClean.replace(/\(\d{4}\)/g, "").trim();
   const candToks = normTitleTokens(candNoYear);
+  const candToksJoined = normTitleTokensJoined(candNoYear);
   if (!candToks.length) return -1;
   const candSeq = extractSequelTag(candNoYear);
   let best = -1;
   for (const rt of reqTitles) {
     const rtNoYear = String(rt || "").replace(/\(\d{4}\)/g, "").trim();
-    const sc = scoreTitleCandidate(rtNoYear, candToks, candSeq, candYearM, reqYear);
+    const sc = scoreTitleCandidate(rtNoYear, candToks, candSeq, candYearM, reqYear, candToksJoined);
     if (sc > best) best = sc;
     if (rtNoYear.includes(":")) {
       const pre = rtNoYear.split(":")[0].trim();
       const reqYrNum = /^\d{4}/.test(String(reqYear || "").trim()) ? Number(String(reqYear).trim().slice(0, 4)) : 0;
       const yearMismatch = Boolean(reqYrNum && (!candYearM || reqYrNum !== Number(candYearM[1])));
       if (!yearMismatch && normTitleTokens(pre).length >= 2 && extractSequelTag(rtNoYear) === candSeq) {
-        const preSc = scoreTitleCandidate(pre, candToks, candSeq, candYearM, reqYear);
+        const preSc = scoreTitleCandidate(pre, candToks, candSeq, candYearM, reqYear, candToksJoined);
         if (preSc >= 0 && preSc - 18 > best) best = preSc - 18;
       }
     }
@@ -1842,7 +1889,7 @@ async function extractFilmmoduMovie({ title, displayTitle, originalTitle, year }
 }
 
 async function extractDdizimag({ title, displayTitle, originalTitle, sourceUrl, year, mtype, s, e }, fetchPublicFn) {
-  let dmBase = "https://ddizimag.icu";
+  let dmBase = "https://ddizimag2.icu";
   const reqTitles = [originalTitle, title, displayTitle]
     .map((x) => String(x || "").replace(/\(\d{4}\)/g, "").trim())
     .filter(Boolean);
@@ -1865,7 +1912,7 @@ async function extractDdizimag({ title, displayTitle, originalTitle, sourceUrl, 
       finalEpUrl = finalUrl || epUrl;
       try {
         const uo = new URL(finalEpUrl);
-        if (/ddizimag\./i.test(uo.hostname)) dmBase = uo.origin;
+        if (/ddizimag\d*\./i.test(uo.hostname)) dmBase = uo.origin;
       } catch {}
       html = await resp.text();
     } catch {
@@ -1926,8 +1973,8 @@ async function extractDdizimag({ title, displayTitle, originalTitle, sourceUrl, 
 
   // 1. Direct sourceUrl or slug attempt
   const slugCands = [];
-  if (sourceUrl && /ddizimag\./i.test(sourceUrl)) {
-    const clean = sourceUrl.replace(/^https?:\/\/(?:www\.)?ddizimag\.[a-z]{2,8}/i, dmBase).replace(/\/+$/, "");
+  if (sourceUrl && /ddizimag\d*\./i.test(sourceUrl)) {
+    const clean = sourceUrl.replace(/^https?:\/\/(?:www\.)?ddizimag\d*\.[a-z]{2,8}/i, dmBase).replace(/\/+$/, "");
     slugCands.push({ url: mtype === "tv" && !/\/sezon-\d+/i.test(clean) ? `${clean}/sezon-${s}/bolum-${e}` : clean, pre: true });
   }
   const seg = mtype === "tv" ? "dizi" : "film";
@@ -1953,7 +2000,7 @@ async function extractDdizimag({ title, displayTitle, originalTitle, sourceUrl, 
   if (!sHtml) return null;
   let bestHref = "";
   let bestScore = 0;
-  const hitRe = /href=["']((?:https?:\/\/(?:www\.)?ddizimag\.[a-z]{2,8})?\/(dizi|film|anime)\/([a-z0-9-]+))\/?["']/gi;
+  const hitRe = /href=["']((?:https?:\/\/(?:www\.)?ddizimag\d*\.[a-z]{2,8})?\/(dizi|film|anime)\/([a-z0-9-]+))\/?["']/gi;
   let hm;
   while ((hm = hitRe.exec(sHtml)) !== null) {
     const kind = hm[2].toLowerCase();
@@ -2156,15 +2203,21 @@ async function extractAnimecix({ title, displayTitle, originalTitle, tmdbId = ""
 
 const FILMIZLE_IN_HOST_RE = /^(?:[a-z0-9-]+\.)?filmizle\.in$/i;
 
-export async function extractSinemaccMovie({ title, displayTitle, originalTitle, year = "" }, fetchPublicFn) {
+export async function extractSinemaccMovie({ title, displayTitle, originalTitle, sourceUrl = "", year = "" }, fetchPublicFn) {
   const SC_ORIGIN = "https://sinemacc.com";
-  const reqTitles = [originalTitle, title, displayTitle]
+  const reqTitles = [originalTitle, displayTitle, title]
     .map((x) => String(x || "").replace(/\(\d{4}\)/g, "").trim())
     .filter(Boolean);
-  if (!reqTitles.length) return null;
+  const directScUrl = /^https?:\/\/(?:www\.)?sinemacc\.com\/film\/[a-z0-9-]+\/?$/i.test(String(sourceUrl || "").trim())
+    ? String(sourceUrl).trim()
+    : "";
+  if (!reqTitles.length && !directScUrl) return null;
+
   const qList = [];
   for (const t of reqTitles) {
     if (!qList.includes(t)) qList.push(t);
+  }
+  for (const t of reqTitles) {
     if (t.includes(":")) {
       const pre = t.split(":")[0].trim();
       if (pre.length >= 3 && !qList.includes(pre)) qList.push(pre);
@@ -2172,10 +2225,191 @@ export async function extractSinemaccMovie({ title, displayTitle, originalTitle,
   }
 
   const reqYrNum = /^\d{4}/.test(String(year || "")) ? Number(String(year).slice(0, 4)) : 0;
+
+  const extractFromSinemaccPage = async (pageUrl, skipYearCheck = false, knownYear = "") => {
+    const pageHtml = await fetchTextSafe(
+      pageUrl,
+      { "User-Agent": UA_EDGE, Referer: `${SC_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+      fetchPublicFn,
+      4000
+    );
+    if (!pageHtml) return null;
+    if (!skipYearCheck && !knownYear && reqYrNum) {
+      const pYrM = pageHtml.match(/<title>[^<]*\((\d{4})\)[^<]*<\/title>/i)
+        || pageHtml.match(/\/yil\/((?:19|20)\d{2})\//i)
+        || pageHtml.match(/(?:datePublished|Yapım\s*Yılı|Vizyon\s*Tarihi)[^0-9]{0,40}((?:19|20)\d{2})/i);
+      const pYr = pYrM?.[1] ? Number(pYrM[1]) : 0;
+      if (pYr && Math.abs(pYr - reqYrNum) > 2) return null;
+    }
+
+    const playerCands = [];
+    const seenHashes = new Set();
+    for (const bm of pageHtml.matchAll(/aHR0c[A-Za-z0-9+/=]{16,}/g)) {
+      try {
+        let b64 = bm[0];
+        while (b64.length % 4 !== 0) b64 += "=";
+        const decoded = atob(b64).trim();
+        const pu = new URL(decoded);
+        if (pu.protocol !== "https:" || !FILMIZLE_IN_HOST_RE.test(pu.hostname)) continue;
+        const hm = pu.pathname.match(/^\/video\/([a-f0-9]{16,})/i);
+        if (!hm) continue;
+        const hash = hm[1];
+        if (seenHashes.has(hash)) continue;
+        seenHashes.add(hash);
+        const isDub = decoded.includes("lng=tur");
+        const isSub = decoded.includes("lng=trsub");
+        const isTur = isDub || isSub;
+        playerCands.push({ url: decoded, origin: pu.origin, hash, isTur, isDub, isSub });
+      } catch {}
+    }
+    if (!playerCands.length) return null;
+    playerCands.sort((a, b) => (a.isTur === b.isTur ? (a.isDub === b.isDub ? 0 : a.isDub ? -1 : 1) : a.isTur ? -1 : 1));
+
+    const pickedCands = [];
+    const dubCand = playerCands.find((c) => c.isDub);
+    const subCand = playerCands.find((c) => c.isSub && c.hash !== dubCand?.hash);
+    if (dubCand) pickedCands.push(dubCand);
+    if (subCand) pickedCands.push(subCand);
+    for (const c of playerCands) {
+      if (pickedCands.length >= 2) break;
+      if (!pickedCands.some((x) => x.hash === c.hash)) pickedCands.push(c);
+    }
+
+    const resolveCand = async (cand) => {
+      const apiUrl = `${cand.origin}/player/index.php?data=${encodeURIComponent(cand.hash)}&do=getVideo`;
+      const postPromise = (async () => {
+        try {
+          const r = await fetch(apiUrl, {
+            method: "POST",
+            headers: {
+              "User-Agent": UA_EDGE,
+              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+              "X-Requested-With": "XMLHttpRequest",
+              Origin: cand.origin,
+              Referer: cand.url,
+            },
+            body: `hash=${encodeURIComponent(cand.hash)}&r=${encodeURIComponent(`${SC_ORIGIN}/`)}`,
+            redirect: "manual",
+            signal: AbortSignal.timeout(4200),
+          });
+          if (!r.ok) {
+            r.body?.cancel?.();
+            return null;
+          }
+          return await r.json().catch(() => null);
+        } catch {
+          return null;
+        }
+      })();
+      const htmlPromise = fetchTextSafe(
+        cand.url,
+        { "User-Agent": UA_EDGE, Referer: pageUrl, "Accept-Language": "tr-TR,tr;q=0.9" },
+        fetchPublicFn,
+        3800
+      );
+
+      const [vidJson, playerHtml] = await Promise.all([postPromise, htmlPromise]);
+      const masterUrl = String(vidJson?.securedLink || vidJson?.videoSource || "").trim();
+      if (!masterUrl.startsWith("https://")) return null;
+      try {
+        if (isBlockedAdHost(new URL(masterUrl).hostname)) return null;
+      } catch {
+        return null;
+      }
+
+      const m3Txt = await fetchTextSafe(
+        masterUrl,
+        { "User-Agent": UA_EDGE, Referer: `${cand.origin}/`, Accept: "*/*" },
+        fetchPublicFn,
+        3200
+      );
+      if (!m3Txt || !m3Txt.includes("#EXTM3U")) return null;
+
+      const subs = [];
+      const subRef = `${cand.origin}/`;
+      const pushSinemaSub = (lang, rawU) => {
+        const su = String(rawU || "").trim();
+        if (!su || !su.startsWith("https://") || subs.some((x) => x.url === su)) return;
+        subs.push({ lang, url: su, referer: subRef, source: "sinemacc" });
+      };
+      if (playerHtml) {
+        const mJsSub = playerHtml.match(/playerjsSubtitle\s*=\s*(["'])([\s\S]*?)\1/i);
+        if (mJsSub?.[2]) {
+          const rawSubStr = mJsSub[2].replace(/\\\//g, "/").trim();
+          const rawParts = rawSubStr.split(/,(?=\s*(?:\[[^\]]+\])?\s*https?:\/\/)/i).map((p) => p.trim()).filter(Boolean);
+          const parsedParts = [];
+          for (const part of rawParts) {
+            const pm = part.match(/^(?:\[([^\]]+)\])?\s*(https?:\/\/\S+)$/i);
+            if (!pm) continue;
+            const tagLbl = String(pm[1] || "").trim();
+            const su = pm[2].trim();
+            if (/forced/i.test(tagLbl) || /forced/i.test(su)) continue;
+            const detected = inferExtractorSubLang("", tagLbl, su);
+            parsedParts.push({ tagLbl, url: su, lang: detected });
+          }
+          const hasTaggedTr = parsedParts.some((p) => p.lang === "tr");
+          const hasTaggedEn = parsedParts.some((p) => p.lang === "en");
+          for (const p of parsedParts) {
+            const finalLang = p.lang || (parsedParts.length === 1 ? "tr" : (hasTaggedTr && !hasTaggedEn ? "en" : (!hasTaggedTr ? "tr" : "")));
+            if (finalLang) pushSinemaSub(finalLang, p.url);
+          }
+        }
+        if (!subs.length) {
+          const unp = unpackDeanEdwards(playerHtml).replace(/\\\//g, "/");
+          for (const tm of unp.matchAll(/\{[^{}]*"file"\s*:\s*"(https?:\/\/[^"]+)"[^{}]*\}/gi)) {
+            const blk = tm[0];
+            if (!/"kind"\s*:\s*"(?:captions|subtitles)"/i.test(blk) && !/"label"\s*:\s*"(?:Turkish|Türkçe|English|İngilizce)/i.test(blk)) continue;
+            const su = tm[1].trim();
+            const lm = blk.match(/"label"\s*:\s*"([^"]+)"/i);
+            const lang = inferExtractorSubLang("", lm?.[1] || "", su) || "tr";
+            pushSinemaSub(lang, su);
+          }
+        }
+      }
+
+      const label = cand.isDub
+        ? "📡 SinemaCC · Türkçe Dublaj (1080p HLS)"
+        : cand.isSub
+        ? "📡 SinemaCC · Türkçe Altyazılı (1080p HLS)"
+        : "📡 SinemaCC · Dual HD (1080p HLS)";
+      return {
+        url: masterUrl,
+        referer: `${cand.origin}/`,
+        subs,
+        stream: { url: masterUrl, referer: `${cand.origin}/`, label },
+      };
+    };
+
+    const resolved = (await Promise.all(pickedCands.map(resolveCand))).filter(Boolean);
+    if (!resolved.length) return null;
+    const streams = [];
+    const subs = [];
+    for (const item of resolved) {
+      if (!streams.some((s) => s.url === item.stream.url)) streams.push(item.stream);
+      for (const sb of item.subs) {
+        if (!subs.some((x) => x.url === sb.url)) subs.push(sb);
+      }
+    }
+    return {
+      url: streams[0].url,
+      referer: streams[0].referer,
+      subs,
+      streams,
+      tag: "hls_sinemacc",
+    };
+  };
+
+  // Direct fast-path when caller already passes a verified sinemacc.com film URL
+  if (directScUrl) {
+    const directHit = await extractFromSinemaccPage(directScUrl, true, "");
+    if (directHit?.url) return directHit;
+    if (!reqTitles.length) return null;
+  }
+
   let bestUrl = "";
   let bestScore = 0;
   let bestSlugYear = "";
-  for (const q of qList.slice(0, 2)) {
+  for (const q of qList.slice(0, 3)) {
     const html = await fetchTextSafe(
       `${SC_ORIGIN}/arama/?s=${encodeURIComponent(q)}`,
       { "User-Agent": UA_EDGE, Referer: `${SC_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
@@ -2185,22 +2419,38 @@ export async function extractSinemaccMovie({ title, displayTitle, originalTitle,
     if (!html) continue;
     const resIdx = html.indexOf("Arama Sonu");
     const scoped = resIdx >= 0 ? html.slice(resIdx) : html;
-    const cardRe = /<div[^>]+class=["'][^"']*\bfilm_kutusu\b[^"']*["'][^>]*>[\s\S]{0,600}?<a[^>]+href=["'](https?:\/\/(?:www\.)?sinemacc\.com\/film\/([a-z0-9-]+)\/?)["'][^>]*?(?:title=["']([^"']*)["'])?/gi;
+    const cardRe = /<div[^>]+class=["'][^"']*\bfilm_kutusu\b[^"']*["'][^>]*>([\s\S]{0,1200}?)<\/a>/gi;
     let m;
     while ((m = cardRe.exec(scoped)) !== null) {
-      const href = m[1];
-      const slug = m[2];
-      const rawTitleAttr = decodeHtmlEntitiesBasic(m[3] || "").replace(/\s*(?:İzle|izle|HD|Full)\s*$/i, "").trim();
-      const yrM = slug.match(/(?:^|-)((?:19|20)\d{2})$/);
+      const block = m[1];
+      const hrefM = block.match(/href=["'](https?:\/\/(?:www\.)?sinemacc\.com\/film\/([a-z0-9-]+)\/?)["']/i);
+      if (!hrefM?.[1] || !hrefM?.[2]) continue;
+      const href = hrefM[1];
+      const slug = hrefM[2];
+      const rawAttrM = block.match(/<a[^>]+title=["']([^"']+)["']/i);
+      const rawSpanM = block.match(/<span[^>]+class=["']text["'][^>]*>([\s\S]*?)<\/span>/i);
+      const rawTitleAttr = decodeHtmlEntitiesBasic(rawAttrM?.[1] || "").replace(/\s*(?:İzle|izle|HD|Full)\s*$/i, "").trim();
+      const rawSpanTitle = decodeHtmlEntitiesBasic(rawSpanM?.[1] || "").replace(/\s*(?:İzle|izle|HD|Full)\s*$/i, "").trim();
+      const yrM = slug.match(/(?:^|-)((?:19|20)\d{2})$/) || block.match(/<span[^>]+class=["']years["'][^>]*>\s*((?:19|20)\d{2})\b/i);
       const slugYear = yrM ? yrM[1] : "";
       if (slugYear && reqYrNum && Math.abs(Number(slugYear) - reqYrNum) > 2) continue;
       const slugClean = slug.replace(/-(?:19|20)\d{2}$/, "").replace(/-/g, " ").trim();
-      const cands = [rawTitleAttr, slugClean].filter(Boolean);
+      const cands = [rawTitleAttr, rawSpanTitle, slugClean].filter(Boolean);
       const yrBonus = (slugYear && reqYrNum && Math.abs(Number(slugYear) - reqYrNum) <= 1) ? 35 : 0;
+      const playableBonus = /icon_tr|icon_subtitle|icon_dublaj|flg/i.test(block) ? 10 : 0;
       for (const ct of cands) {
         const baseSc = titlesMatchScore(slugYear ? `${ct} (${slugYear})` : ct, reqTitles, year);
         if (baseSc < 45) continue;
-        const sc = baseSc + yrBonus;
+        const sc = baseSc + yrBonus + playableBonus;
+        if (sc > bestScore) {
+          bestScore = sc;
+          bestUrl = href;
+          bestSlugYear = slugYear;
+        }
+      }
+      const dualSc = scoreDualSlugMatch(slugClean, reqTitles, slugYear, year);
+      if (dualSc >= 45) {
+        const sc = dualSc + yrBonus + playableBonus;
         if (sc > bestScore) {
           bestScore = sc;
           bestUrl = href;
@@ -2211,144 +2461,8 @@ export async function extractSinemaccMovie({ title, displayTitle, originalTitle,
     if (bestScore >= 120) break;
   }
   if (!bestUrl || bestScore < 45) return null;
-
-  const pageHtml = await fetchTextSafe(
-    bestUrl,
-    { "User-Agent": UA_EDGE, Referer: `${SC_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
-    fetchPublicFn,
-    4000
-  );
-  if (!pageHtml) return null;
-  if (!bestSlugYear && reqYrNum) {
-    const pYrM = pageHtml.match(/<title>[^<]*\((\d{4})\)[^<]*<\/title>/i)
-      || pageHtml.match(/\/yil\/((?:19|20)\d{2})\//i)
-      || pageHtml.match(/(?:datePublished|Yapım\s*Yılı|Vizyon\s*Tarihi)[^0-9]{0,40}((?:19|20)\d{2})/i);
-    const pYr = pYrM?.[1] ? Number(pYrM[1]) : 0;
-    if (pYr && Math.abs(pYr - reqYrNum) > 2) return null;
-  }
-
-  const playerCands = [];
-  const seenHashes = new Set();
-  for (const bm of pageHtml.matchAll(/aHR0c[A-Za-z0-9+/=]{16,}/g)) {
-    try {
-      let b64 = bm[0];
-      while (b64.length % 4 !== 0) b64 += "=";
-      const decoded = atob(b64).trim();
-      const pu = new URL(decoded);
-      if (pu.protocol !== "https:" || !FILMIZLE_IN_HOST_RE.test(pu.hostname)) continue;
-      const hm = pu.pathname.match(/^\/video\/([a-f0-9]{16,})/i);
-      if (!hm) continue;
-      const hash = hm[1];
-      if (seenHashes.has(hash)) continue;
-      seenHashes.add(hash);
-      const isTur = decoded.includes("lng=tur") || decoded.includes("lng=trsub");
-      playerCands.push({ url: decoded, origin: pu.origin, hash, isTur });
-    } catch {}
-  }
-  if (!playerCands.length) return null;
-  playerCands.sort((a, b) => (a.isTur === b.isTur ? 0 : a.isTur ? -1 : 1));
-
-  for (const cand of playerCands.slice(0, 2)) {
-    const apiUrl = `${cand.origin}/player/index.php?data=${encodeURIComponent(cand.hash)}&do=getVideo`;
-    const postPromise = (async () => {
-      try {
-        const r = await fetch(apiUrl, {
-          method: "POST",
-          headers: {
-            "User-Agent": UA_EDGE,
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "X-Requested-With": "XMLHttpRequest",
-            Origin: cand.origin,
-            Referer: cand.url,
-          },
-          body: `hash=${encodeURIComponent(cand.hash)}&r=${encodeURIComponent(`${SC_ORIGIN}/`)}`,
-          redirect: "manual",
-          signal: AbortSignal.timeout(4200),
-        });
-        if (!r.ok) {
-          r.body?.cancel?.();
-          return null;
-        }
-        return await r.json().catch(() => null);
-      } catch {
-        return null;
-      }
-    })();
-    const htmlPromise = fetchTextSafe(
-      cand.url,
-      { "User-Agent": UA_EDGE, Referer: bestUrl, "Accept-Language": "tr-TR,tr;q=0.9" },
-      fetchPublicFn,
-      3800
-    );
-
-    const [vidJson, playerHtml] = await Promise.all([postPromise, htmlPromise]);
-    const masterUrl = String(vidJson?.securedLink || vidJson?.videoSource || "").trim();
-    if (!masterUrl.startsWith("https://")) continue;
-    try {
-      if (isBlockedAdHost(new URL(masterUrl).hostname)) continue;
-    } catch {
-      continue;
-    }
-
-    const m3Txt = await fetchTextSafe(
-      masterUrl,
-      { "User-Agent": UA_EDGE, Referer: `${cand.origin}/`, Accept: "*/*" },
-      fetchPublicFn,
-      3200
-    );
-    if (!m3Txt || !m3Txt.includes("#EXTM3U")) continue;
-
-    const subs = [];
-    const subRef = `${cand.origin}/`;
-    const pushSinemaSub = (lang, rawU) => {
-      const su = String(rawU || "").trim();
-      if (!su || !su.startsWith("https://") || subs.some((x) => x.url === su)) return;
-      subs.push({ lang, url: su, referer: subRef, source: "sinemacc" });
-    };
-    if (playerHtml) {
-      const mJsSub = playerHtml.match(/playerjsSubtitle\s*=\s*(["'])([\s\S]*?)\1/i);
-      if (mJsSub?.[2]) {
-        const rawSubStr = mJsSub[2].replace(/\\\//g, "/").trim();
-        const rawParts = rawSubStr.split(/,(?=\s*(?:\[[^\]]+\])?\s*https?:\/\/)/i).map((p) => p.trim()).filter(Boolean);
-        const parsedParts = [];
-        for (const part of rawParts) {
-          const pm = part.match(/^(?:\[([^\]]+)\])?\s*(https?:\/\/\S+)$/i);
-          if (!pm) continue;
-          const tagLbl = String(pm[1] || "").trim();
-          const su = pm[2].trim();
-          if (/forced/i.test(tagLbl) || /forced/i.test(su)) continue;
-          const detected = inferExtractorSubLang("", tagLbl, su);
-          parsedParts.push({ tagLbl, url: su, lang: detected });
-        }
-        const hasTaggedTr = parsedParts.some((p) => p.lang === "tr");
-        const hasTaggedEn = parsedParts.some((p) => p.lang === "en");
-        for (const p of parsedParts) {
-          const finalLang = p.lang || (parsedParts.length === 1 ? "tr" : (hasTaggedTr && !hasTaggedEn ? "en" : (!hasTaggedTr ? "tr" : "")));
-          if (finalLang) pushSinemaSub(finalLang, p.url);
-        }
-      }
-      if (!subs.length) {
-        const unp = unpackDeanEdwards(playerHtml).replace(/\\\//g, "/");
-        for (const tm of unp.matchAll(/\{[^{}]*"file"\s*:\s*"(https?:\/\/[^"]+)"[^{}]*\}/gi)) {
-          const blk = tm[0];
-          if (!/"kind"\s*:\s*"(?:captions|subtitles)"/i.test(blk) && !/"label"\s*:\s*"(?:Turkish|Türkçe|English|İngilizce)/i.test(blk)) continue;
-          const su = tm[1].trim();
-          const lm = blk.match(/"label"\s*:\s*"([^"]+)"/i);
-          const lang = inferExtractorSubLang("", lm?.[1] || "", su) || "tr";
-          pushSinemaSub(lang, su);
-        }
-      }
-    }
-
-    return {
-      url: masterUrl,
-      referer: `${cand.origin}/`,
-      subs,
-      streams: [{ url: masterUrl, referer: `${cand.origin}/`, label: "📡 SinemaCC · Dual HD (1080p HLS)" }],
-      tag: "hls_sinemacc",
-    };
-  }
-  return null;
+  if (bestUrl === directScUrl) return null;
+  return await extractFromSinemaccPage(bestUrl, false, bestSlugYear);
 }
 
 export async function extractDiziyouLove({ title, displayTitle, originalTitle, year = "", s, e }, fetchPublicFn) {
@@ -2729,11 +2843,11 @@ export async function extractVixsrc({ tmdbId = "", mtype, s, e }, fetchPublicFn)
 export async function resolveTurkishCatalogStream({ title, displayTitle, originalTitle, sourceUrl, year = "", mtype, s, e, tmdbId = "", fetchPublicFn }) {
   try {
     const src = String(sourceUrl || "").trim();
-    if (/fullhdfilmizlesene\./i.test(src)) {
-      const fhdRes = await extractFullhdMoviePage(src, fetchPublicFn);
-      if (fhdRes?.url) return fhdRes;
-    }
-    if (/hdfilmcehennemi\./i.test(src)) {
+    const isDirectFhd = /fullhdfilmizlesene\./i.test(src);
+    const isDirectHdfc = /hdfilmcehennemi\./i.test(src);
+    const isDirectSc = /^https?:\/\/(?:www\.)?sinemacc\.com\/film\/[a-z0-9-]+\/?$/i.test(src);
+
+    if (mtype === "tv" && isDirectHdfc) {
       const hdfcRes = await extractHdfcPage(src, mtype, s, e, fetchPublicFn);
       if (hdfcRes?.url) return hdfcRes;
     }
@@ -2773,28 +2887,36 @@ export async function resolveTurkishCatalogStream({ title, displayTitle, origina
     };
 
     if (mtype === "movie") {
-      const wtRes = await extractWebteizleMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn);
-      const wtHasNonVmpx = Boolean(wtRes?.streams?.some((st) => !isVmpxOrVidmolyUrl(st?.url)));
-      if (wtRes?.url && wtHasNonVmpx) return wtRes;
+      // Fast-path when a direct SinemaCC film URL was supplied (verified Vizyon cards): 1 hop, <600ms
+      if (isDirectSc) {
+        const scDirect = await extractSinemaccMovie({ title, displayTitle, originalTitle, sourceUrl: src, year }, fetchPublicFn);
+        if (scDirect?.url) return scDirect;
+      }
 
-      const [scVal, fmVal, dlVal, hxVal] = await settleWithFastClean([
-        extractSinemaccMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn),
-        extractFilmmoduMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn),
+      // Wave 1: Run all primary Turkish & global extractors in parallel (never serialize behind blocked hosts)
+      const wave1Tasks = [
+        isDirectSc ? Promise.resolve(null) : extractSinemaccMovie({ title, displayTitle, originalTitle, sourceUrl: src, year }, fetchPublicFn),
         extractDizilife({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "movie", s, e }, fetchPublicFn),
+        extractFilmmoduMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn),
+        extractWebteizleMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn),
+        extractVixsrc({ tmdbId, mtype: "movie", s, e }, fetchPublicFn),
         extractHexa({ tmdbId, mtype: "movie", s, e }, fetchPublicFn),
-      ], 1500);
-      const firstMerged = mergeResolvedResults([wtRes, scVal, fmVal, dlVal, hxVal]);
+        isDirectFhd ? extractFullhdMoviePage(src, fetchPublicFn) : Promise.resolve(null),
+        isDirectHdfc ? extractHdfcPage(src, mtype, s, e, fetchPublicFn) : Promise.resolve(null),
+      ];
+      const wave1Vals = await settleWithFastClean(wave1Tasks, 1200);
+      const firstMerged = mergeResolvedResults(wave1Vals);
       const hasCleanStream = Boolean(firstMerged?.streams?.some((st) => !isVmpxOrVidmolyUrl(st?.url)));
       if (firstMerged?.url && hasCleanStream) return firstMerged;
 
-      const [vixVal, dmVal, acVal] = await settleWithFastClean([
-        extractVixsrc({ tmdbId, mtype: "movie", s, e }, fetchPublicFn),
+      // Wave 2: Secondary fallbacks (FullHDFilm search, Ddizimag2, AnimeciX)
+      const [fhdSearchVal, dmVal, acVal] = await settleWithFastClean([
+        isDirectFhd ? Promise.resolve(null) : extractFullhdSearchMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn),
         extractDdizimag({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "movie", s, e }, fetchPublicFn),
         extractAnimecix({ title, displayTitle, originalTitle, tmdbId, year, mtype: "movie", s, e }, fetchPublicFn),
-      ], 1400);
-      const secondMerged = mergeResolvedResults([firstMerged, vixVal, dmVal, acVal]);
+      ], 1200);
+      const secondMerged = mergeResolvedResults([firstMerged, fhdSearchVal, dmVal, acVal]);
       if (secondMerged?.url) return secondMerged;
-      if (wtRes?.url) return wtRes;
     } else if (mtype === "tv") {
       const [dlVal, dbxVal, dnVal, dylVal, dmVal] = await settleWithFastClean([
         extractDizilife({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "tv", s, e }, fetchPublicFn),

@@ -19,6 +19,7 @@ import {
   filterM3u8AdDiscontinuities,
   unpackDeanEdwards,
   resolveTurkishCatalogStream,
+  extractSinemaccMovie,
 } from "../workers/ha-gateway/edge_extractors.js";
 import { isTrustedEmbedUrl } from "../static/js/players/embed.js";
 import fs from "node:fs";
@@ -27,7 +28,7 @@ import {
   handleEdgeRoomCreate,
   handleEdgeRoomSync,
 } from "../workers/ha-gateway/edge_rooms.js";
-import { handleAutonomousEdge } from "../workers/ha-gateway/edge_autonomous.js";
+import { handleAutonomousEdge, fetchLiveSinemaccVizyonMovies } from "../workers/ha-gateway/edge_autonomous.js";
 import { parseLrcToVtt, handleEdgeMusicRoute } from "../workers/ha-gateway/edge_music.js";
 import streamProxyWorker from "../workers/stream-proxy/worker.js";
 
@@ -514,7 +515,7 @@ test("edge_autonomous: UA gate, /r/ query preservation, single-slice catalog, tr
   const realFetchCat = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const u = String(typeof input === "string" ? input : input?.url || "");
-    if (u.includes("api.themoviedb.org")) return new Response("{}", { status: 503 });
+    if (u.includes("api.themoviedb.org") || u.includes("sinemacc.com")) return new Response("{}", { status: 503 });
     return realFetchCat(input, init);
   };
   try {
@@ -1377,6 +1378,133 @@ test("auth/oauth (Google Firebase), /manifest.json, and /api/rave/social/* + ana
       );
       assert.equal(rp.status, 200, `${p} expected 200`);
     }
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("vizyon: extractSinemaccMovie parses film_kutusu title/span, dual-language slugs, apostrophes, and direct sourceUrl", async () => {
+  const origFetch = globalThis.fetch;
+  const playerB64 = Buffer.from("https://player.filmizle.in/video/abcdef0123456789abcd?lng=tur").toString("base64");
+  const filmPageHtml = `<html><head><title>Test (2026)</title></head><body><script>var p="${playerB64}";</script></body></html>`;
+  const searchHtml = `
+    <html><body>
+      <h2>Arama Sonuçları</h2>
+      <div data-page="1" class="film_kutusu">
+        <a href="https://sinemacc.com/film/son-bir-atis-one-last-shot-2026/" title="Son Bir Atış İzle">
+          <span class="box type"><svg class="flg2 svgcon"><use href="/tema/_temaicons.svg#icon_subtitle"></use></svg></span>
+          <span class="title"><span class="text">Son Bir Atış</span><span class="years">2026 | Aksiyon</span></span>
+        </a>
+      </div>
+      <div data-page="1" class="film_kutusu">
+        <a href="https://sinemacc.com/film/kotu-elmalar-bad-apples-2026/" title="Kötü Elmalar İzle">
+          <span class="box type"><svg class="flg2 svgcon"><use href="/tema/_temaicons.svg#icon_tr"></use></svg></span>
+          <span class="title"><span class="text">Kötü Elmalar</span><span class="years">2026 | Komedi</span></span>
+        </a>
+      </div>
+      <div data-page="1" class="film_kutusu">
+        <a href="https://sinemacc.com/film/tadin-sihirli-lambasi-tad-and-the-magic-lamp-2026/" title="Tad'ın Sihirli Lambası İzle">
+          <span class="box type"><svg class="flg2 svgcon"><use href="/tema/_temaicons.svg#icon_tr"></use></svg></span>
+          <span class="title"><span class="text">Tad'ın Sihirli Lambası</span><span class="years">2026 | Animasyon</span></span>
+        </a>
+      </div>
+    </body></html>`;
+  const mockFetchPub = async (u) => {
+    const s = String(u);
+    if (s.includes("sinemacc.com/arama/")) {
+      return { resp: new Response(searchHtml, { status: 200 }), finalUrl: s };
+    }
+    if (s.includes("sinemacc.com/film/")) {
+      return { resp: new Response(filmPageHtml, { status: 200 }), finalUrl: s };
+    }
+    if (s.includes("player.filmizle.in/video/")) {
+      return { resp: new Response(`playerjsSubtitle = "[Türkçe]https://player.filmizle.in/sub/tr.vtt"`, { status: 200 }), finalUrl: s };
+    }
+    if (s.includes("player.filmizle.in/cdn/hls/")) {
+      return { resp: new Response("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2000000\n1080.m3u8\n", { status: 200 }), finalUrl: s };
+    }
+    return { resp: new Response("Not Found", { status: 404 }), finalUrl: s };
+  };
+  globalThis.fetch = async (u) => {
+    if (String(u).includes("do=getVideo")) {
+      return Response.json({ securedLink: "https://player.filmizle.in/cdn/hls/abcdef0123456789abcd/master.m3u8" });
+    }
+    return new Response("Not Found", { status: 404 });
+  };
+  try {
+    // 1. Dual-language slug where Turkish title differs (Çürük Elmalar vs Kötü Elmalar, matching Bad Apples suffix)
+    const rBad = await extractSinemaccMovie({ title: "Bad Apples", displayTitle: "Çürük Elmalar", originalTitle: "Bad Apples", year: "2025" }, mockFetchPub);
+    assert.ok(rBad?.url?.includes("player.filmizle.in/cdn/hls/"), "Bad Apples dual-slug match failed");
+    assert.equal(rBad.subs.length, 1);
+
+    // 2. Apostrophe possessive title (Tad'ın Sihirli Lambası)
+    const rTad = await extractSinemaccMovie({ title: "Tadeo Jones y la lámpara maravillosa", displayTitle: "Tad'ın Sihirli Lambası", originalTitle: "Tadeo Jones y la lámpara maravillosa", year: "2026" }, mockFetchPub);
+    assert.ok(rTad?.url?.includes("player.filmizle.in/cdn/hls/"), "Tad'ın Sihirli Lambası match failed");
+
+    // 3. Direct sourceUrl fast-path (skips /arama/)
+    const rDirect = await extractSinemaccMovie({ title: "Odyssey", sourceUrl: "https://sinemacc.com/film/odyssey-the-odyssey-2026/", year: "2026" }, mockFetchPub);
+    assert.ok(rDirect?.url?.includes("player.filmizle.in/cdn/hls/"), "Direct sinemacc sourceUrl fast-path failed");
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("vizyon: fetchLiveSinemaccVizyonMovies excludes trailer-only and DMCA abuse-telif cards and keeps verified playable 2026 films", async () => {
+  const origFetch = globalThis.fetch;
+  const kv = createMockKv();
+  const validB64 = Buffer.from("https://player.filmizle.in/video/112233445566778899aa?lng=trsub").toString("base64");
+  const abuseB64 = Buffer.from("https://sinemacc.com/abuse-telif").toString("base64");
+  const curYr = new Date().getUTCFullYear();
+  const listingHtml = `
+    <div class="film_kutusu">
+      <a href="https://sinemacc.com/film/trailer-only-${curYr}/" title="Trailer Only İzle">
+        <span class="imdb"><svg></svg>7.9</span>
+        <span class="title"><span class="text">Trailer Only</span><span class="years">${curYr} | Aksiyon</span></span>
+      </a>
+    </div>
+    <div class="film_kutusu">
+      <a href="https://sinemacc.com/film/dmca-film-${curYr}/" title="DMCA Film İzle">
+        <span class="box type"><svg class="flg2"><use href="#icon_subtitle"></use></svg></span>
+        <span class="imdb"><svg></svg>6.9</span>
+        <span class="title"><span class="text">DMCA Film</span><span class="years">${curYr} | Dram</span></span>
+      </a>
+    </div>
+    <div class="film_kutusu">
+      <a href="https://sinemacc.com/film/odyssey-the-odyssey-${curYr}/" title="Odyssey İzle">
+        <span class="box type"><svg class="flg2"><use href="#icon_subtitle"></use></svg></span>
+        <span class="imdb"><svg></svg>8.4</span>
+        <img data-src="https://sinemacc.com/uploads/filmler/odyssey.webp" />
+        <span class="title"><span class="text">Odyssey</span><span class="years">${curYr} | Macera</span></span>
+      </a>
+    </div>`;
+  globalThis.fetch = async (u) => {
+    const s = String(u);
+    if (s.includes(`/yil/${curYr}/`)) {
+      return new Response(s.includes("/page/") ? "" : listingHtml, { status: 200 });
+    }
+    if (s.includes(`dmca-film-${curYr}`)) {
+      return new Response(`<h1 class="baslik">DMCA Film İzle</h1><script>var p="${abuseB64}";</script>`, { status: 200 });
+    }
+    if (s.includes(`odyssey-the-odyssey-${curYr}`)) {
+      return new Response(
+        `<meta property="og:image" content="https://sinemacc.com/uploads/filmler/odyssey_f.webp" />
+         <h1 class="baslik">Odyssey İzle</h1><h2 class="baslik orj">The Odyssey</h2>
+         <a href="https://www.imdb.com/title/tt33764258/">IMDb</a><script>var p="${validB64}";</script>`,
+        { status: 200 }
+      );
+    }
+    return new Response("Not Found", { status: 404 });
+  };
+  try {
+    const items = await fetchLiveSinemaccVizyonMovies({ WATCHLIVO_KV: kv }, { forceRefresh: true, maxItems: 10 });
+    assert.equal(items.length, 1);
+    assert.equal(items[0].id, `sc-odyssey-the-odyssey-${curYr}`);
+    assert.equal(items[0].title, "Odyssey");
+    assert.equal(items[0].originalTitle, "The Odyssey");
+    assert.equal(items[0].imdbId, "tt33764258");
+    assert.equal(items[0].sourceUrl, `https://sinemacc.com/film/odyssey-the-odyssey-${curYr}/`);
+    assert.equal(items[0].isVizyon, true);
+    assert.equal(inferStreamReferer("https://ddizimag2.icu/film/test"), "https://ddizimag2.icu/");
   } finally {
     globalThis.fetch = origFetch;
   }

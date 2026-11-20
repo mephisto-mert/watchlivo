@@ -44,7 +44,7 @@ export function inferStreamReferer(u) {
   if (u.includes("filmizle.in") || u.includes("monacesfofestom") || /newmoviescenas\d*\.shop/i.test(u)) return "https://player.filmizle.in/";
   if (u.includes("vixsrc.") || u.includes("vix-content.") || u.includes("blackpuma")) return "https://vixsrc.to/";
   if (u.includes("pilavyer")) return "https://pilavyerplay.top/";
-  if (u.includes("ddizimag.")) return "https://ddizimag.icu/";
+  if (/ddizimag\d*\./i.test(u)) return "https://ddizimag2.icu/";
   if (u.includes("imgsapi.pro") || u.includes("ytenconline.xyz") || u.includes("filmmodu.")) return "https://www.filmmodu.one/";
   if (u.includes("dragonballzfans") || u.includes("hexa.su")) return "https://hexa.su/";
   if (u.includes("filmboom")) return "https://filmboom.top/";
@@ -282,7 +282,9 @@ async function buildSignedProxyPath(targetUrl, ref, ext, env) {
     || String(cleanRef || "").includes("filmizle.in")
     || String(cleanRef || "").includes("vixsrc.")
     || String(cleanRef || "").includes("diziyou.")
-    || String(cleanRef || "").includes("ksdpictures.");
+    || String(cleanRef || "").includes("ksdpictures.")
+    || String(cleanRef || "").includes("rapidvid.")
+    || /^s\d+\.[a-z0-9-]+\.shop$/i.test(targetHost);
   const base = useLocal ? "" : OFFLOAD_PROXY_ORIGIN;
   return `${base}/api/rave/stream-proxy?${q.toString()}`;
 }
@@ -571,11 +573,20 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
       : null;
     if (liveAc) return buildAnimeResp(liveAc);
 
+    let effectiveSourceUrl = offUrl;
+    if (!effectiveSourceUrl && mtype === "movie") {
+      if (/^sc-[a-z0-9-]+$/i.test(id)) {
+        effectiveSourceUrl = `https://sinemacc.com/film/${id.slice(3)}/`;
+      } else if (/^fhd-[a-z0-9-]+$/i.test(id)) {
+        effectiveSourceUrl = `https://www.fullhdfilmizlesene.now/film/${id.slice(4)}/`;
+      }
+    }
+
     const trLive = await resolveTurkishCatalogStream({
       title: reqTitle,
       displayTitle: url.searchParams.get("displayTitle") || reqTitle,
       originalTitle: reqOrigTitle,
-      sourceUrl: offUrl,
+      sourceUrl: effectiveSourceUrl,
       year: reqYear,
       mtype,
       s,

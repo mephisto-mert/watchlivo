@@ -41,6 +41,8 @@ function isEphemeralStoreKey(key) {
     k.startsWith("edge_sub:") ||
     k.startsWith("edge_cat:") ||
     k.startsWith("vizyon_cache:") ||
+    k.startsWith("live:") ||
+    k.startsWith("catdisc:") ||
     k.startsWith("cat_live:") ||
     k.startsWith("music:")
   );
@@ -605,6 +607,7 @@ function mapTmdbItem(r) {
     title,
     originalTitle: orig,
     year: rel,
+    releaseDate: String(r.release_date || r.first_air_date || ""),
     rating: r.vote_average ? Math.round(r.vote_average * 10) / 10 : 0,
     voteCount: Number(r.vote_count || 0),
     mediaType: mt,
@@ -862,6 +865,172 @@ const DISCOVER_GENRES = {
   western: ["37", "37"],
 };
 const _discoverMemCache = new Map();
+const _liveVizyonMemCache = { ts: 0, items: [] };
+
+function decodeHtmlBasicEdge(s) {
+  return String(s || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;|&apos;/gi, "'")
+    .replace(/&#8217;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export async function fetchLiveSinemaccVizyonMovies(env, { forceRefresh = false, maxItems = 18 } = {}) {
+  const now = Date.now();
+  if (!forceRefresh && _liveVizyonMemCache.items.length >= 6 && now - _liveVizyonMemCache.ts < 600_000) {
+    return _liveVizyonMemCache.items.slice(0, maxItems);
+  }
+  const kvKey = "live:sinemacc_vizyon_v2";
+  if (!forceRefresh && env?.WATCHLIVO_KV) {
+    const kvHit = await env.WATCHLIVO_KV.get(kvKey, "json").catch(() => null);
+    if (kvHit && Array.isArray(kvHit.items) && kvHit.items.length >= 6) {
+      _liveVizyonMemCache.ts = now;
+      _liveVizyonMemCache.items = kvHit.items;
+      return kvHit.items.slice(0, maxItems);
+    }
+  }
+
+  const SC_ORIGIN = "https://sinemacc.com";
+  const curYr = new Date().getUTCFullYear();
+  const minYr = curYr - 1;
+  const fetchScHtml = async (u, timeoutMs = 3200) => {
+    try {
+      const r = await fetch(u, {
+        headers: { "User-Agent": EDGE_UA, Referer: `${SC_ORIGIN}/`, "Accept-Language": "tr-TR,tr;q=0.9" },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!r.ok) { r.body?.cancel?.(); return ""; }
+      return await r.text();
+    } catch {
+      return "";
+    }
+  };
+
+  // Fetch latest current-year listing pages in parallel (3 subrequests)
+  const listingPages = await Promise.all([
+    fetchScHtml(`${SC_ORIGIN}/yil/${curYr}/`, 3200),
+    fetchScHtml(`${SC_ORIGIN}/yil/${curYr}/page/2/`, 3200),
+    fetchScHtml(`${SC_ORIGIN}/yil/${curYr}/page/3/`, 3200),
+  ]);
+
+  const rawCands = [];
+  const seenSlugs = new Set();
+  const cardRe = /<div[^>]+class=["'][^"']*\bfilm_kutusu\b[^"']*["'][^>]*>([\s\S]{0,1200}?)<\/a>/gi;
+  for (const html of listingPages) {
+    if (!html) continue;
+    let m;
+    while ((m = cardRe.exec(html)) !== null) {
+      const block = m[1];
+      // Require an actual dub/sub playback badge — excludes trailer-only unreleased theater titles
+      if (!/icon_tr|icon_subtitle|icon_dublaj|flg/i.test(block)) continue;
+      if (/fragman|yakinda|yakında/i.test(block)) continue;
+      const hrefM = block.match(/href=["'](https?:\/\/(?:www\.)?sinemacc\.com\/film\/([a-z0-9-]+)\/?)["']/i);
+      if (!hrefM?.[1] || !hrefM?.[2]) continue;
+      const href = hrefM[1];
+      const slug = hrefM[2];
+      if (seenSlugs.has(slug)) continue;
+      seenSlugs.add(slug);
+      const spanTitle = decodeHtmlBasicEdge(block.match(/<span[^>]+class=["']text["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] || "");
+      const attrTitle = decodeHtmlBasicEdge(block.match(/<a[^>]+title=["']([^"']+)["']/i)?.[1] || "").replace(/\s*(?:İzle|izle|HD|Full)\s*$/i, "").trim();
+      const title = spanTitle || attrTitle;
+      if (!title) continue;
+      const yrM = slug.match(/(?:^|-)((?:19|20)\d{2})$/) || block.match(/<span[^>]+class=["']years["'][^>]*>\s*((?:19|20)\d{2})\b/i);
+      const yrStr = yrM?.[1] || String(curYr);
+      const yrNum = Number(yrStr) || curYr;
+      if (yrNum < minYr || yrNum > curYr) continue;
+      const imdbM = block.match(/class=['"]imdb[^'"]*['"][^>]*>[\s\S]{0,120}?<\/svg>\s*([0-9.]+)/i);
+      const rating = imdbM?.[1] ? Math.min(9.9, Math.max(4.0, Number(imdbM[1]) || 6.5)) : 6.5;
+      const dataSrc = block.match(/data-src=["'](https?:\/\/[^"']+)["']/i)?.[1] || "";
+      const hasDubFlag = /icon_tr|icon_dublaj/i.test(block);
+      const hasSubFlag = /icon_subtitle/i.test(block);
+      rawCands.push({ href, slug, title, year: yrStr, rating, poster: dataSrc, hasDubFlag, hasSubFlag, idx: rawCands.length });
+    }
+  }
+  if (!rawCands.length) return [];
+
+  // Prioritize recognizable higher-rated current-year releases while preserving freshness
+  rawCands.sort((a, b) => {
+    const scoreA = (a.rating >= 7.0 ? 25 : a.rating >= 6.0 ? 12 : 0) + (a.hasDubFlag ? 6 : 0) - a.idx * 0.6;
+    const scoreB = (b.rating >= 7.0 ? 25 : b.rating >= 6.0 ? 12 : 0) + (b.hasDubFlag ? 6 : 0) - b.idx * 0.6;
+    return scoreB - scoreA;
+  });
+
+  // Verify up to 18 pages in parallel for active filmizle.in video players (excludes DMCA abuse-telif & trailer-only pages)
+  const verifyCand = async (c) => {
+    const ph = await fetchScHtml(c.href, 2800);
+    if (!ph) return null;
+    let hasPlayer = false;
+    let hasDub = c.hasDubFlag;
+    let hasSub = c.hasSubFlag;
+    for (const bm of ph.matchAll(/aHR0c[A-Za-z0-9+/=]{16,}/g)) {
+      try {
+        let b64 = bm[0];
+        while (b64.length % 4 !== 0) b64 += "=";
+        const decoded = atob(b64).trim();
+        if (/^https:\/\/(?:[a-z0-9-]+\.)?filmizle\.in\/video\/[a-f0-9]{16,}/i.test(decoded)) {
+          hasPlayer = true;
+          if (decoded.includes("lng=tur")) hasDub = true;
+          if (decoded.includes("lng=trsub")) hasSub = true;
+        }
+      } catch {}
+    }
+    if (!hasPlayer) return null;
+
+    const h1Title = decodeHtmlBasicEdge(ph.match(/<h1[^>]*class=["'][^"']*baslik[^"']*["'][^>]*>([\s\S]{0,160}?)<\/h1>/i)?.[1] || "")
+      .replace(/\s*(?:İzle|izle|HD|Full)\s*$/i, "")
+      .trim();
+    const h2Orig = decodeHtmlBasicEdge(ph.match(/<h2[^>]*class=["'][^"']*orj[^"']*["'][^>]*>([\s\S]{0,160}?)<\/h2>/i)?.[1] || "");
+    const imdbId = ph.match(/\b(tt\d{7,9})\b/)?.[1] || "";
+    const ogImg = ph.match(/property=["']og:image["'][^>]+content=["'](https?:\/\/[^"']+)["']/i)?.[1]
+      || ph.match(/content=["'](https?:\/\/[^"']+)["'][^>]+property=["']og:image["']/i)?.[1]
+      || "";
+    const poster = ogImg || c.poster || `/api/rave/poster?t=${encodeURIComponent(h1Title || c.title)}&mt=movie`;
+    const finalTitle = h1Title || c.title;
+    const finalOrig = h2Orig || finalTitle;
+    const audioText = hasDub && hasSub ? "Dublaj & Altyazı" : hasDub ? "Türkçe Dublaj" : "Türkçe Altyazı";
+    const cats = ["vizyon", "movies", "trend"];
+    if (hasDub) cats.push("dublaj");
+
+    return {
+      id: `sc-${c.slug}`,
+      tmdbId: "",
+      imdbId,
+      mediaType: "movie",
+      title: finalTitle,
+      originalTitle: finalOrig,
+      year: c.year,
+      rating: Number(c.rating.toFixed(1)),
+      voteCount: 250,
+      hasTrDub: hasDub,
+      poster,
+      backdrop: poster,
+      still: poster,
+      categories: cats,
+      genreLabel: `🇹🇷 Vizyon ${c.year} · ${audioText} · 1080p`,
+      episodeLabel: `🎬 VİZYON ${c.year}`,
+      sourceBadge: "🍿 Yeni Vizyon Filmi",
+      provider: "cinema",
+      sourceUrl: c.href,
+      officialUrl: c.href,
+      isVizyon: true,
+    };
+  };
+
+  const verified = (await Promise.all(rawCands.slice(0, 18).map(verifyCand))).filter(Boolean);
+  if (verified.length >= 4) {
+    _liveVizyonMemCache.ts = now;
+    _liveVizyonMemCache.items = verified;
+    if (env?.WATCHLIVO_KV) {
+      await env.WATCHLIVO_KV.put(kvKey, JSON.stringify({ items: verified, ts: Math.floor(now / 1000) }), { expirationTtl: 1800 }).catch(() => {});
+    }
+  }
+  return verified.slice(0, maxItems);
+}
 
 async function fetchTmdbDiscoverPage(u, dtype) {
   try {
@@ -883,11 +1052,12 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
   const cat = (url.searchParams.get("category") || url.searchParams.get("genre") || "all").trim().toLowerCase();
   const mtFlt = (url.searchParams.get("mediaType") || url.searchParams.get("type") || "").trim().toLowerCase();
   const pg = Math.max(1, Math.min(500, Number(url.searchParams.get("page") || 1) || 1));
-  const cacheKey = `catdisc:v3:${provider}:${cat}:${mtFlt}:${pg}`;
+  const forceRefresh = url.searchParams.get("refresh") === "1";
+  const cacheKey = `catdisc:v4:${provider}:${cat}:${mtFlt}:${pg}`;
   const now = Date.now();
   const mem = _discoverMemCache.get(cacheKey);
-  if (mem && now - mem.ts < 600_000) return mem.payload;
-  if (env?.WATCHLIVO_KV) {
+  if (!forceRefresh && mem && now - mem.ts < 600_000) return mem.payload;
+  if (!forceRefresh && env?.WATCHLIVO_KV) {
     const kvHit = await env.WATCHLIVO_KV.get(cacheKey, "json").catch(() => null);
     if (kvHit && Array.isArray(kvHit.items) && kvHit.items.length) {
       _discoverMemCache.set(cacheKey, { ts: now, payload: kvHit });
@@ -898,6 +1068,8 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
   const apiKey = encodeURIComponent(String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim());
   const today = new Date().toISOString().slice(0, 10);
   const mvCut = new Date(Date.now() - 21 * 86400_000).toISOString().slice(0, 10);
+  const vizyonMinCut = new Date(Date.now() - 365 * 86400_000).toISOString().slice(0, 10);
+  const vizyonVodCut = new Date(Date.now() - 35 * 86400_000).toISOString().slice(0, 10);
   const isTrCat = cat === "tr" || cat === "dublaj" || cat === "yerli";
   const tvMinVotes = isTrCat ? 5 : (cat === "anime" ? 20 : 5);
   const mvMinVotes = isTrCat ? 10 : 25;
@@ -925,10 +1097,15 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
   const wantMv = mtFlt !== "tv" && cat !== "series" && cat !== "anime";
   const eps = [];
   if (cat === "vizyon") {
-    eps.push([`https://api.themoviedb.org/3/movie/now_playing?api_key=${apiKey}&language=tr-TR&region=TR&page=${pg}`, "movie"]);
-    eps.push([`https://api.themoviedb.org/3/trending/movie/week?api_key=${apiKey}&language=tr-TR&page=${pg}`, "movie"]);
-    eps.push([`https://api.themoviedb.org/3/tv/on_the_air?api_key=${apiKey}&language=tr-TR&page=${pg}`, "tv"]);
-    eps.push([`https://api.themoviedb.org/3/trending/tv/week?api_key=${apiKey}&language=tr-TR&page=${pg}`, "tv"]);
+    if (wantMv) {
+      // Use digitally-released recent films (VOD window >=35d) instead of theater-only trailers from movie/now_playing
+      eps.push([`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=tr-TR&primary_release_date.gte=${vizyonMinCut}&primary_release_date.lte=${vizyonVodCut}&vote_count.gte=40&sort_by=popularity.desc&page=${pg}`, "movie"]);
+      eps.push([`https://api.themoviedb.org/3/trending/movie/week?api_key=${apiKey}&language=tr-TR&page=${pg}`, "movie"]);
+    }
+    if (wantTv) {
+      eps.push([`https://api.themoviedb.org/3/tv/on_the_air?api_key=${apiKey}&language=tr-TR&page=${pg}`, "tv"]);
+      eps.push([`https://api.themoviedb.org/3/trending/tv/week?api_key=${apiKey}&language=tr-TR&page=${pg}`, "tv"]);
+    }
   } else {
     const p1 = (pg - 1) * 2 + 1;
     const p2 = p1 + 1;
@@ -941,7 +1118,13 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
       eps.push([`${baseMv}&sort_by=popularity.desc&page=${p2}`, "movie"]);
     }
   }
-  const results = await Promise.all(eps.map(([u, t]) => fetchTmdbDiscoverPage(u, t)));
+  const liveVizyonPromise = (cat === "vizyon" && pg === 1 && wantMv)
+    ? fetchLiveSinemaccVizyonMovies(env, { forceRefresh, maxItems: 18 }).catch(() => [])
+    : Promise.resolve([]);
+  const [results, liveVizyon] = await Promise.all([
+    Promise.all(eps.map(([u, t]) => fetchTmdbDiscoverPage(u, t))),
+    liveVizyonPromise,
+  ]);
   let totTv = 0;
   let totMv = 0;
   const seen = new Set();
@@ -951,6 +1134,7 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
     for (const r of results) {
       const it = r.items[i];
       if (!it) continue;
+      if (cat === "vizyon" && it.mediaType === "movie" && it.releaseDate && it.releaseDate > vizyonVodCut) continue;
       const k = `${it.mediaType}:${it.tmdbId}`;
       if (seen.has(k)) continue;
       seen.add(k);
@@ -961,17 +1145,21 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
     if (r.dtype === "tv") totTv = Math.max(totTv, r.total);
     else totMv = Math.max(totMv, r.total);
   }
-  if (!tmdbItems.length) return null;
+  if (!tmdbItems.length && !liveVizyon.length) return null;
 
   let items = tmdbItems;
   const { list: localList } = filterCatalogUnpaged(boot.catalog, url);
   const localFiltered = localList.filter((x) => (mtFlt === "tv" ? x.mediaType === "tv" : mtFlt === "movie" ? x.mediaType !== "tv" : true));
-  if (pg === 1 && localFiltered.length) {
+  if (pg === 1 && cat === "vizyon" && liveVizyon.length) {
+    const liveNormTitles = new Set(liveVizyon.flatMap((x) => [normalizeSearchText(x.title), normalizeSearchText(x.originalTitle)]).filter(Boolean));
+    const filteredTmdb = tmdbItems.filter((x) => !liveNormTitles.has(normalizeSearchText(x.title)) && !liveNormTitles.has(normalizeSearchText(x.originalTitle)));
+    items = [...liveVizyon, ...filteredTmdb];
+  } else if (pg === 1 && localFiltered.length) {
     const localKeys = new Set(localFiltered.map((x) => (x.tmdbId ? `${x.mediaType === "tv" ? "tv" : "movie"}:${x.tmdbId}` : "")).filter(Boolean));
     items = [...localFiltered.slice(0, 24), ...tmdbItems.filter((x) => !localKeys.has(`${x.mediaType}:${x.tmdbId}`))];
   }
   const localTv = localFiltered.filter((x) => x.mediaType === "tv").length;
-  const localMv = localFiltered.length - localTv;
+  const localMv = Math.max(localFiltered.length - localTv, liveVizyon.length);
   const totalTv = Math.max(totTv, localTv);
   const totalMovies = Math.max(totMv, localMv);
   const payload = {
@@ -2233,12 +2421,22 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       }
       return edgeJson({ ok: true, item, totalCustom: pool.length });
     }
-    const customPool = env?.WATCHLIVO_KV ? (await env.WATCHLIVO_KV.get("vizyon:custom_releases", "json").catch(() => null)) || [] : [];
+    const forceRefreshNr = url.searchParams.get("refresh") === "1";
+    const [customPoolRaw, liveVizyonNr] = await Promise.all([
+      env?.WATCHLIVO_KV ? env.WATCHLIVO_KV.get("vizyon:custom_releases", "json").catch(() => null) : Promise.resolve(null),
+      fetchLiveSinemaccVizyonMovies(env, { forceRefresh: forceRefreshNr, maxItems: 18 }).catch(() => []),
+    ]);
+    const customPool = Array.isArray(customPoolRaw) ? customPoolRaw : [];
+    const fallbackBootNr = liveVizyonNr.length >= 6
+      ? []
+      : (boot.newReleases || []).filter((x) => Number(String(x?.year || "").slice(0, 4)) >= 2025);
     const seenNr = new Set();
     const mergedNr = [];
-    for (const it of [...(Array.isArray(customPool) ? customPool : []), ...(boot.newReleases || [])]) {
+    for (const it of [...customPool, ...liveVizyonNr, ...fallbackBootNr]) {
       if (!it || isItemBlocked(it, blockedSet)) continue;
-      const k = it.tmdbId ? `${it.mediaType || "movie"}:${it.tmdbId}` : `t:${normalizeSearchText(it.title)}`;
+      const k = it.tmdbId
+        ? `${it.mediaType || "movie"}:${it.tmdbId}`
+        : (it.id && String(it.id).startsWith("sc-") ? `id:${it.id}` : `t:${normalizeSearchText(it.title)}`);
       if (seenNr.has(k)) continue;
       seenNr.add(k);
       mergedNr.push(it);
@@ -2247,7 +2445,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   }
   if (safePath === "/api/rave/latest-episodes") {
     const forceRefresh = url.searchParams.get("refresh") === "1";
-    const kvCacheKey = "live:latest_vizyon_eps_v1";
+    const kvCacheKey = "live:latest_vizyon_eps_v2";
     const filterBlocked = (arr) => (blockedSet.size ? arr.filter((it) => it && !isItemBlocked(it, blockedSet)) : arr.filter(Boolean));
     if (!forceRefresh && env?.WATCHLIVO_KV) {
       const cached = await env.WATCHLIVO_KV.get(kvCacheKey, "json").catch(() => null);
@@ -2259,6 +2457,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const apiKey = String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim();
     const todayIso = new Date().toISOString().slice(0, 10);
     const cutoffDate = new Date(Date.now() - 210 * 86400 * 1000).toISOString().slice(0, 10);
+    const vodCutoffDate = new Date(Date.now() - 35 * 86400 * 1000).toISOString().slice(0, 10);
 
     const fetchJsonSafe = async (u, hdrs = {}, timeoutMs = 4200) => {
       try {
@@ -2270,49 +2469,60 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       }
     };
 
-    const [npTr, npGlob, onAir, acLatest] = await Promise.all([
-      fetchJsonSafe(`https://api.themoviedb.org/3/movie/now_playing?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&region=TR&page=1`),
-      fetchJsonSafe(`https://api.themoviedb.org/3/movie/now_playing?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&page=1`),
+    const [liveVizyonMovies, discVod, onAir, acLatest] = await Promise.all([
+      fetchLiveSinemaccVizyonMovies(env, { forceRefresh, maxItems: 10 }).catch(() => []),
+      fetchJsonSafe(`https://api.themoviedb.org/3/discover/movie?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&primary_release_date.gte=${cutoffDate}&primary_release_date.lte=${vodCutoffDate}&vote_count.gte=40&sort_by=popularity.desc&page=1`),
       fetchJsonSafe(`https://api.themoviedb.org/3/tv/on_the_air?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&page=1`),
       fetchJsonSafe("https://animecix.tv/secure/last-episodes?page=1&perPage=10", { Referer: "https://animecix.tv/", Accept: "application/json" }),
     ]);
 
-    // 1. Newly released theater/streaming movies (TMDB now_playing)
+    // 1. Live verified playable 2025/2026 movies first (excludes trailer-only theater releases), with VOD-window TMDB fallback
     const freshMovies = [];
     const seenMov = new Set();
-    for (const m of [...(npTr?.results || []), ...(npGlob?.results || [])]) {
-      if (!m || !m.id || !m.poster_path) continue;
-      const rd = String(m.release_date || "");
-      if (rd && (rd > todayIso || rd < cutoffDate)) continue;
-      if (Number(m.vote_count || 0) < 12) continue;
-      const tid = String(m.id);
-      if (seenMov.has(tid)) continue;
-      seenMov.add(tid);
-      const yr = rd ? rd.slice(0, 4) : todayIso.slice(0, 4);
-      freshMovies.push({
-        id: `tmdb-movie-${tid}`,
-        tmdbId: tid,
-        mediaType: "movie",
-        title: String(m.title || m.original_title || "").trim(),
-        originalTitle: String(m.original_title || m.title || "").trim(),
-        year: yr,
-        rating: Number(Number(m.vote_average || 0).toFixed(1)) || 7.2,
-        poster: `https://image.tmdb.org/t/p/w342${m.poster_path}`,
-        backdrop: m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : `https://image.tmdb.org/t/p/w342${m.poster_path}`,
-        still: m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : `https://image.tmdb.org/t/p/w342${m.poster_path}`,
-        releaseDate: rd,
-        episodeLabel: `🎬 VİZYON ${yr}`,
-        sourceBadge: "🍿 Yeni Vizyon Filmi",
-        provider: "cinema",
-      });
+    for (const lm of liveVizyonMovies) {
+      if (!lm || !lm.title) continue;
+      const mk = `t:${normalizeSearchText(lm.title)}`;
+      if (seenMov.has(mk)) continue;
+      seenMov.add(mk);
+      freshMovies.push(lm);
       if (freshMovies.length >= 8) break;
+    }
+    if (freshMovies.length < 8) {
+      for (const m of (discVod?.results || [])) {
+        if (!m || !m.id || !m.poster_path) continue;
+        const rd = String(m.release_date || "");
+        if (rd && (rd > vodCutoffDate || rd < cutoffDate)) continue;
+        const tid = String(m.id);
+        const mk = `t:${normalizeSearchText(m.title || m.original_title || "")}`;
+        if (seenMov.has(tid) || seenMov.has(mk)) continue;
+        seenMov.add(tid);
+        seenMov.add(mk);
+        const yr = rd ? rd.slice(0, 4) : todayIso.slice(0, 4);
+        freshMovies.push({
+          id: `tmdb-movie-${tid}`,
+          tmdbId: tid,
+          mediaType: "movie",
+          title: String(m.title || m.original_title || "").trim(),
+          originalTitle: String(m.original_title || m.title || "").trim(),
+          year: yr,
+          rating: Number(Number(m.vote_average || 0).toFixed(1)) || 7.2,
+          poster: `https://image.tmdb.org/t/p/w342${m.poster_path}`,
+          backdrop: m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : `https://image.tmdb.org/t/p/w342${m.poster_path}`,
+          still: m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : `https://image.tmdb.org/t/p/w342${m.poster_path}`,
+          releaseDate: rd,
+          episodeLabel: `🎬 VİZYON ${yr}`,
+          sourceBadge: "🍿 Yeni Vizyon Filmi",
+          provider: "cinema",
+        });
+        if (freshMovies.length >= 8) break;
+      }
     }
 
     // 2. Currently airing TV series with REAL last_episode_to_air season & episode numbers
     const airCands = (onAir?.results || [])
       .filter((t) => t && t.id && t.poster_path && Number(t.vote_count || 0) >= 20 && !String(t.original_language || "").match(/^(zh|th|vi|tl)$/i))
       .sort((a, b) => Number(b.popularity || 0) - Number(a.popularity || 0))
-      .slice(0, 10);
+      .slice(0, 8);
     const tvDetails = await Promise.all(
       airCands.map((t) => fetchJsonSafe(`https://api.themoviedb.org/3/tv/${t.id}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR`, {}, 3500))
     );
