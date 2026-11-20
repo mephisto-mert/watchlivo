@@ -611,7 +611,7 @@ export function openThemeModal() {
         href: '/download/ipa',
         download: 'Watchlivo.ipa',
         onclick: () => toast('🍎 iPhone IPA indiriliyor...', 4000)
-      }, '🍎 iPhone IPA İndir (v2.2.8)'),
+      }, '🍎 iPhone IPA İndir (v2.2.9)'),
       h('a', {
         class: 'btn wl-btn-apk-dl',
         href: '/download/Watchlivo-v2.0.apk',
@@ -638,7 +638,7 @@ export function openDownloadModal() {
         h('div', { class: 'wl-download-icon' }, h('span', { style: { fontSize: '1.45rem' } }, '🍎')),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'iPhone & iPad (iOS IPA)'),
-          h('small', {}, 'v2.2.8 • iOS 16+ Native SwiftUI • PiP, Google Giriş & AltStore / SideStore / TrollStore'),
+          h('small', {}, 'v2.2.9 • iOS 16+ Native SwiftUI • PiP, Google Giriş & AltStore / SideStore / TrollStore'),
           h('p', {}, 'Uygulamadan çıkınca tam sistem PiP penceresi, kamera/mikrofon ve arka plan ses desteği.')
         ),
         h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },

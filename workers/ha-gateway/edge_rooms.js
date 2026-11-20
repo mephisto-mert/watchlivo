@@ -1323,6 +1323,7 @@ export class WatchlivoRoomDO {
     this.room = null;
     this.sockets = new Map();
     this.voiceRelay = [];
+    this.memKv = new Map();
   }
 
   async _load(roomId, seed = null, curatedSeed = null) {
@@ -1392,6 +1393,65 @@ export class WatchlivoRoomDO {
 
   async fetch(request) {
     const u = new URL(request.url);
+    if (u.pathname === "/__kv") {
+      const b = await request.json().catch(() => ({}));
+      const op = String(b.op || "");
+      const key = String(b.key || "").slice(0, 512);
+      const ephemeral = Boolean(b.ephemeral);
+      const nowS = Math.floor(Date.now() / 1000);
+      if (!key) return Response.json({ ok: false, error: "missing_key" }, { status: 400 });
+      if (ephemeral) {
+        if (op === "get") {
+          const rec = this.memKv.get(key);
+          if (!rec) return Response.json({ ok: true, found: false, value: null });
+          if (rec.exp && rec.exp > 0 && rec.exp < nowS) {
+            this.memKv.delete(key);
+            return Response.json({ ok: true, found: false, value: null });
+          }
+          return Response.json({ ok: true, found: true, deleted: Boolean(rec.d), value: rec.d ? null : rec.v });
+        }
+        if (op === "put") {
+          const ttl = Number(b.ttl || 0);
+          const exp = ttl > 0 ? nowS + Math.round(ttl) : nowS + 3600;
+          if (this.memKv.size > 4000) {
+            for (const [mk, mv] of this.memKv.entries()) {
+              if (!mv?.exp || mv.exp < nowS) this.memKv.delete(mk);
+              if (this.memKv.size <= 3000) break;
+            }
+          }
+          this.memKv.set(key, { v: String(b.value ?? ""), exp, d: false });
+          return Response.json({ ok: true });
+        }
+        if (op === "delete" || op === "tombstone") {
+          this.memKv.set(key, { v: null, exp: nowS + 3600, d: true });
+          return Response.json({ ok: true });
+        }
+        return Response.json({ ok: false, error: "bad_op" }, { status: 400 });
+      }
+      const sKey = `kv:${key}`;
+      if (op === "get") {
+        const rec = await this.state.storage.get(sKey);
+        if (!rec || typeof rec !== "object") {
+          return Response.json({ ok: true, found: false, deleted: false, value: null });
+        }
+        if (rec.exp && rec.exp > 0 && rec.exp < nowS) {
+          await this.state.storage.delete(sKey).catch(() => {});
+          return Response.json({ ok: true, found: false, deleted: false, value: null });
+        }
+        return Response.json({ ok: true, found: true, deleted: Boolean(rec.d), value: rec.d ? null : (rec.v ?? null) });
+      }
+      if (op === "put") {
+        const ttl = Number(b.ttl || 0);
+        const exp = ttl > 0 ? nowS + Math.round(ttl) : 0;
+        await this.state.storage.put(sKey, { v: String(b.value ?? ""), exp, d: false });
+        return Response.json({ ok: true });
+      }
+      if (op === "delete" || op === "tombstone") {
+        await this.state.storage.put(sKey, { v: null, exp: 0, d: true });
+        return Response.json({ ok: true });
+      }
+      return Response.json({ ok: false, error: "bad_op" }, { status: 400 });
+    }
     const roomId = u.searchParams.get("roomId") || "room";
     const headerSeed = parseTrustedSeedHeader(request);
 
@@ -1752,7 +1812,7 @@ export async function handleEdgeRoomCreate(request, env, jsonResp) {
     rm.createdFromApi = true;
     await setRoomPassword(rm, body.password || "");
     applyRoomAction(rm, cid, { type: "init", username: rm.creator, color: body.color || "#27DCC8" }, { initialDirty: true, tokenVerified: true });
-    if (env.WATCHLIVO_KV) await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 });
+    if (env.WATCHLIVO_KV) await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
     out = { ok: true, clientId: cid, clientToken: await signRoomClientToken(roomId, cid, env), room: await serializeEdgeRoom(rm, cid, env) };
   }
   if (env.WATCHLIVO_KV && out?.room?.privacy === "public") {
@@ -1871,7 +1931,7 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
   if (kvIdxRefresh) rm._lastIdxSync = tKvNow;
   const serialized = await serializeEdgeRoom(rm, cid, env);
   if ((res.dirty || pruned || healed || res.pendingPassword !== undefined || kvIdxRefresh) && env.WATCHLIVO_KV) {
-    await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 });
+    await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
     if (
       ["init", "join", "leave", "media", "set_media", "change_media", "resolve_media", "host_action", "kick", "privacy"].includes(body.type) ||
       Boolean(body.activeMedia) ||

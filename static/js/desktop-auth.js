@@ -186,8 +186,8 @@ async function exchangeFirebaseUser(fbUser, pw) {
       password: pw,
     }),
   });
-  const data = await apiRes.json();
-  if (!data.ok || !data.user) throw new Error(data.error || 'Sunucu doğrulaması başarısız.');
+  const data = await apiRes.json().catch(() => ({}));
+  if (!apiRes.ok || !data.ok || !data.user) throw new Error(data.error || `Sunucu doğrulaması başarısız (HTTP ${apiRes.status}).`);
   localStorage.setItem('vortex_profile_v2', JSON.stringify({ ...data.user, authToken: data.authToken, isGuest: false, verified: true }));
   await sendToDesktop(data.user, data.authToken);
 }

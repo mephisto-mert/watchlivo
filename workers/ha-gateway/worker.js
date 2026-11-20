@@ -519,7 +519,7 @@ async function safeFetchSecondary(
   }
 
   if (hasAutonomousEdge(env)) {
-    tunnelOfflineUntil = Date.now() + 25_000;
+    tunnelOfflineUntil = Date.now() + (sawExplicitSuspension ? 300_000 : 25_000);
     return await runAutonomousFallback(request, url, safePath, bodyBuf, env, ctx);
   }
 
@@ -851,7 +851,21 @@ export default {
         safePath.startsWith("/uploads/");
 
       const edgeOnlyHttp = isAdminEdge(request, env) && url.searchParams.get("__edge_only") === "1";
-      if (hasAutonomousEdge(env) && (edgeOnlyHttp || Date.now() < tunnelOfflineUntil)) {
+      const isDirectEdgeAuthRoute =
+        safePath === "/api/auth/oauth" ||
+        safePath === "/api/auth/login" ||
+        safePath === "/api/auth/register" ||
+        safePath === "/api/auth/me" ||
+        safePath === "/api/auth/profile" ||
+        safePath === "/api/auth/password" ||
+        safePath === "/api/auth/change-password" ||
+        safePath === "/api/auth/email-action" ||
+        safePath === "/api/auth/reset-password" ||
+        safePath === "/api/auth/logout" ||
+        safePath === "/api/auth/delete" ||
+        safePath === "/api/auth/account/delete" ||
+        safePath === "/api/auth/account";
+      if (hasAutonomousEdge(env) && (edgeOnlyHttp || isDirectEdgeAuthRoute || Date.now() < tunnelOfflineUntil)) {
         return await runAutonomousFallback(request, url, safePath, bodyBuf, env, ctx);
       }
 
@@ -928,6 +942,7 @@ export default {
 
       return primaryResp;
     } catch (_topErr) {
+      try { console.error("[ha-gateway topErr]", url?.pathname || "", String(_topErr?.message || _topErr || "")); } catch {}
       return buildGracefulOverloadResponse(request, url);
     }
   },

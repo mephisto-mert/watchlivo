@@ -26,8 +26,158 @@ import { handleEdgeMusicRoute } from "./edge_music.js";
 let _bootCache = null;
 let _curatedMap = null;
 const _edgeSearchCache = new Map();
+const _authRateLimitMap = new Map();
 let _blockedCache = { ts: 0, set: new Set() };
 const DEFAULT_TMDB_KEY = "4f042878f22ef63cb94f25e60cb4ec6e";
+
+function isEphemeralStoreKey(key) {
+  const k = String(key || "");
+  return (
+    k.startsWith("rl:") ||
+    k.startsWith("soc:pres:") ||
+    k.startsWith("soc:typ:") ||
+    k.startsWith("tmdb_q:") ||
+    k.startsWith("sub:") ||
+    k.startsWith("edge_sub:") ||
+    k.startsWith("edge_cat:") ||
+    k.startsWith("vizyon_cache:") ||
+    k.startsWith("cat_live:") ||
+    k.startsWith("music:")
+  );
+}
+
+function createDurableKvAdapter(env) {
+  const rawKv = env?.WATCHLIVO_KV || null;
+  const roomDo = env?.ROOM_DO || null;
+  if (!roomDo) return rawKv;
+
+  const getStub = (ephemeral) => {
+    const shard = ephemeral ? "__watchlivo_ephemeral_v1__" : "__watchlivo_auth_store_v1__";
+    return roomDo.get(roomDo.idFromName(shard));
+  };
+
+  const callDoKv = async (payload) => {
+    const stub = getStub(Boolean(payload.ephemeral));
+    const resp = await stub.fetch(new Request("https://do.local/__kv", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }));
+    if (!resp.ok) throw new Error(`do_kv_${resp.status}`);
+    return await resp.json();
+  };
+
+  return {
+    async get(key, typeOrOpts) {
+      const wantJson = typeOrOpts === "json" || (typeOrOpts && typeof typeOrOpts === "object" && typeOrOpts.type === "json");
+      const eph = isEphemeralStoreKey(key);
+      try {
+        const res = await callDoKv({ op: "get", key: String(key), ephemeral: eph });
+        if (res && res.found) {
+          if (res.deleted || res.value === null || res.value === undefined) return null;
+          if (wantJson) {
+            try { return JSON.parse(res.value); } catch { return null; }
+          }
+          return res.value;
+        }
+      } catch {
+        // Fall through to legacy KV read if DO stub does not support /__kv (e.g., partial unit test mock)
+      }
+      if (rawKv && typeof rawKv.get === "function") {
+        return await rawKv.get(key, typeOrOpts).catch(() => null);
+      }
+      return null;
+    },
+    async put(key, value, opts = {}) {
+      const strVal = typeof value === "string" ? value : JSON.stringify(value);
+      const ttl = Number(opts?.expirationTtl || 0);
+      const eph = isEphemeralStoreKey(key);
+      try {
+        await callDoKv({ op: "put", key: String(key), value: strVal, ttl, ephemeral: eph });
+        return;
+      } catch {
+        // Only fall back to legacy KV if DO stub rejected /__kv (never throw on KV daily limit 10048)
+        if (rawKv && typeof rawKv.put === "function") {
+          await rawKv.put(key, strVal, opts).catch(() => {});
+        }
+      }
+    },
+    async delete(key) {
+      const eph = isEphemeralStoreKey(key);
+      try {
+        await callDoKv({ op: "tombstone", key: String(key), ephemeral: eph });
+      } catch {}
+      if (rawKv && typeof rawKv.delete === "function") {
+        await rawKv.delete(key).catch(() => {});
+      }
+    },
+  };
+}
+
+function b64UrlEncodeUtf8(str) {
+  const bytes = new TextEncoder().encode(String(str || ""));
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function b64UrlDecodeUtf8(str) {
+  const s = String(str || "").replace(/-/g, "+").replace(/_/g, "/");
+  const pad = s.length % 4 ? "=".repeat(4 - (s.length % 4)) : "";
+  const bin = atob(s + pad);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+async function signMemberSessionToken(user, sv, env) {
+  const exp = Math.floor(Date.now() / 1000) + 2592000;
+  const claims = {
+    uid: String(user.uid || user.id || ""),
+    email: String(user.email || "").trim().toLowerCase(),
+    name: String(user.name || "").slice(0, 40),
+    handle: String(user.handle || "").slice(0, 32),
+    color: String(user.color || "#00f5d4").slice(0, 16),
+    authProvider: String(user.authProvider || "email").slice(0, 16),
+    sv: Number(sv || 0),
+    exp,
+    jti: makeNonce().slice(0, 12),
+  };
+  const bodyB64 = b64UrlEncodeUtf8(JSON.stringify(claims));
+  const sig = await hmacTokenHex(`wl2.${bodyB64}`, env);
+  if (sig) {
+    return `wl2.${bodyB64}.${sig}`;
+  }
+  return `${claims.uid || "u"}_${makeNonce()}${makeNonce()}`;
+}
+
+async function verifyMemberSessionToken(tok, env) {
+  const s = String(tok || "").trim();
+  if (!s.startsWith("wl2.")) return null;
+  const parts = s.split(".");
+  if (parts.length !== 3) return null;
+  const [, bodyB64, sig] = parts;
+  if (!bodyB64 || !sig) return null;
+  const expected = await hmacTokenHex(`wl2.${bodyB64}`, env);
+  if (!expected || !timingSafeEqualStr(sig, expected)) return null;
+  try {
+    const claims = JSON.parse(b64UrlDecodeUtf8(bodyB64));
+    if (!claims || typeof claims !== "object") return null;
+    if (Number(claims.exp || 0) < Math.floor(Date.now() / 1000)) return null;
+    if (!claims.uid || !claims.email) return null;
+    return claims;
+  } catch {
+    return null;
+  }
+}
+
+async function issueAuthSessionToken(user, sv, env) {
+  const authToken = await signMemberSessionToken(user, sv, env);
+  if (env?.WATCHLIVO_KV) {
+    await env.WATCHLIVO_KV.put(`session:${authToken}`, JSON.stringify({ ...user, _sv: Number(sv || 0) }), { expirationTtl: 2592000 }).catch(() => {});
+  }
+  return authToken;
+}
 
 const CRAWLER_BOT_RX = /(?:googlebot|bingbot|yandex|baiduspider|slurp|duckduckbot|ahrefsbot|semrushbot|dotbot|mj12bot|bytespider|petalbot|markmonitor|corsearch|opsec|digimarc|muso|leakix|censys|shodan|netcraft|screaming\s*frog|turnitin|scrapy)/i;
 const SOCIAL_PREVIEW_BOT_RX = /(?:telegrambot|twitterbot|discordbot|whatsapp|facebookexternalhit|slackbot)/i;
@@ -284,7 +434,45 @@ function extractSessionToken(request, body = null) {
 async function resolveAuthUser(request, env, body = null) {
   const tok = extractSessionToken(request, body);
   if (!tok) return { user: null, token: "", invalidToken: false };
-  if (tok.length < 16 || !env?.WATCHLIVO_KV) return { user: null, token: tok, invalidToken: true };
+  if (tok.length < 16) return { user: null, token: tok, invalidToken: true };
+
+  // Fast-path: Stateless HMAC-SHA256 signed wl2 session token (immune to KV quota limits!)
+  if (tok.startsWith("wl2.")) {
+    const claims = await verifyMemberSessionToken(tok, env);
+    if (!claims) return { user: null, token: tok, invalidToken: true };
+    if (env?.WATCHLIVO_KV) {
+      const revKey = `revoked:${(await sha256Hex(tok)).slice(0, 24)}`;
+      const isRevoked = await env.WATCHLIVO_KV.get(revKey).catch(() => null);
+      if (isRevoked) return { user: null, token: tok, invalidToken: true };
+      const delAt = Number(await env.WATCHLIVO_KV.get(`deleted_acct:${claims.email}`).catch(() => 0)) || 0;
+      const issuedAt = Number(claims.exp || 0) - 2592000;
+      if (delAt > 0 && delAt >= issuedAt) {
+        return { user: null, token: tok, invalidToken: true };
+      }
+      const rec = await env.WATCHLIVO_KV.get(`acct:${claims.email}`, "json").catch(() => null);
+      if (rec) {
+        if (!rec.user || Number(rec.sv || 0) !== Number(claims.sv || 0)) {
+          return { user: null, token: tok, invalidToken: true };
+        }
+        return { user: normalizeMemberUserObj(rec.user, claims.email), token: tok, invalidToken: false };
+      }
+    }
+    const fallbackUser = normalizeMemberUserObj({
+      id: claims.uid,
+      uid: claims.uid,
+      email: claims.email,
+      name: claims.name || claims.email.split("@")[0],
+      username: claims.name || claims.email.split("@")[0],
+      handle: claims.handle,
+      color: claims.color,
+      authProvider: claims.authProvider || "google",
+      verified: true,
+      isGuest: false,
+    }, claims.email);
+    return { user: fallbackUser, token: tok, invalidToken: false };
+  }
+
+  if (!env?.WATCHLIVO_KV) return { user: null, token: tok, invalidToken: true };
   const raw = await env.WATCHLIVO_KV.get(`session:${tok}`, "json").catch(() => null);
   if (!raw || typeof raw !== "object") return { user: null, token: tok, invalidToken: true };
   const { _sv: sessSv, ...user } = raw;
@@ -1715,6 +1903,9 @@ async function persistEdgeAudioNote(env, rawAn) {
 }
 
 export async function handleAutonomousEdge(request, url, safePath, env, ctx = null) {
+  if (env?.ROOM_DO && !env._durableWrapped) {
+    env = { ...env, WATCHLIVO_KV: createDurableKvAdapter(env), _durableWrapped: true };
+  }
   const boot = await getBootstrap(env);
 
   // 1. Native WebSockets (/ws/<roomId>)
@@ -2629,17 +2820,23 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     return await handleEdgeRoomInfo(decodeURIComponent(roomInfoMatch[1]), request, env, edgeJson, _curatedMap);
   }
 
-  // 7. KV-backed Auth & Per-User Lists
-  if ((safePath === "/api/auth/register" || safePath === "/api/auth/login" || safePath === "/api/auth/oauth") && request.method === "POST" && env?.WATCHLIVO_KV) {
+  // 7. Durable DO/KV-backed Auth & Per-User Lists
+  if ((safePath === "/api/auth/register" || safePath === "/api/auth/login" || safePath === "/api/auth/oauth") && request.method === "POST") {
     const ip = (request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "unknown").split(",")[0].trim();
     const bucket = Math.floor(Date.now() / 60000);
     const ipHash = (await sha256Hex(ip)).slice(0, 16);
-    const rlKey = `rl:auth:${ipHash}:${bucket}`;
-    const attempts = Number(await env.WATCHLIVO_KV.get(rlKey).catch(() => 0)) || 0;
-    if (attempts >= 20) {
+    const rlKey = `${ipHash}:${bucket}`;
+    if (_authRateLimitMap.size > 2000) {
+      for (const k of _authRateLimitMap.keys()) {
+        if (!k.endsWith(`:${bucket}`)) _authRateLimitMap.delete(k);
+        if (_authRateLimitMap.size <= 1000) break;
+      }
+    }
+    const attempts = Number(_authRateLimitMap.get(rlKey) || 0);
+    if (attempts >= 30) {
       return edgeJson({ ok: false, error: "Çok fazla deneme. Lütfen bir dakika sonra tekrar deneyin." }, 429);
     }
-    await env.WATCHLIVO_KV.put(rlKey, String(attempts + 1), { expirationTtl: 120 }).catch(() => {});
+    _authRateLimitMap.set(rlKey, attempts + 1);
   }
   if (safePath === "/api/auth/me" && request.method !== "DELETE") {
     const authRes = await resolveMemberUser(request, env);
@@ -2696,16 +2893,16 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       passwordSet: true,
       isGuest: false,
     }, email);
-    await env.WATCHLIVO_KV.put(`acct:${email}`, JSON.stringify({ user, passHash }));
-    await env.WATCHLIVO_KV.put(`acct_handle:${cleanH}`, email);
+    await env.WATCHLIVO_KV.delete(`deleted_acct:${email}`).catch(() => {});
+    await env.WATCHLIVO_KV.put(`acct:${email}`, JSON.stringify({ user, passHash })).catch(() => {});
+    await env.WATCHLIVO_KV.put(`acct_handle:${cleanH}`, email).catch(() => {});
     const nameKey = normalizeSearchText(displayName);
-    if (nameKey && !(await env.WATCHLIVO_KV.get(`acct_name:${nameKey}`))) {
-      await env.WATCHLIVO_KV.put(`acct_name:${nameKey}`, email);
+    if (nameKey && !(await env.WATCHLIVO_KV.get(`acct_name:${nameKey}`).catch(() => null))) {
+      await env.WATCHLIVO_KV.put(`acct_name:${nameKey}`, email).catch(() => {});
     }
     await upsertSocialDir(env, user);
     await ensureUserSocial(env, uid, user, true);
-    const authToken = `${uid}_${makeNonce()}${makeNonce()}`;
-    await env.WATCHLIVO_KV.put(`session:${authToken}`, JSON.stringify(user), { expirationTtl: 2592000 });
+    const authToken = await issueAuthSessionToken(user, 0, env);
     return edgeJson({ ok: true, authToken, user }, 200, {
       "Set-Cookie": `wl_auth=${encodeURIComponent(authToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     });
@@ -2733,8 +2930,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       await env.WATCHLIVO_KV.put(`acct_handle:${normUser.handle}`, ident).catch(() => {});
     }
     await upsertSocialDir(env, normUser);
-    const authToken = `${normUser.id}_${makeNonce()}${makeNonce()}`;
-    await env.WATCHLIVO_KV.put(`session:${authToken}`, JSON.stringify({ ...normUser, _sv: Number(rec.sv || 0) }), { expirationTtl: 2592000 });
+    const authToken = await issueAuthSessionToken(normUser, Number(rec.sv || 0), env);
     return edgeJson({ ok: true, authToken, user: normUser }, 200, {
       "Set-Cookie": `wl_auth=${encodeURIComponent(authToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     });
@@ -2754,7 +2950,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ idToken }),
-        signal: AbortSignal.timeout(5500),
+        signal: AbortSignal.timeout(7500),
       });
       if (fbResp.ok) {
         const fbData = await fbResp.json().catch(() => ({}));
@@ -2829,17 +3025,21 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       const pass = String(b.password || "");
       const passHash = pass.length >= 6 ? await hashPasswordPbkdf2(pass) : "";
       if (passHash) user.passwordSet = true;
-      await env.WATCHLIVO_KV.put(`acct:${fbEmail}`, JSON.stringify({ user, passHash }));
-      await env.WATCHLIVO_KV.put(`acct_handle:${handleBase}`, fbEmail);
+      await env.WATCHLIVO_KV.delete(`deleted_acct:${fbEmail}`).catch(() => {});
+      await env.WATCHLIVO_KV.put(`acct:${fbEmail}`, JSON.stringify({ user, passHash, sv: 0 })).catch(() => {});
+      await env.WATCHLIVO_KV.put(`acct_handle:${handleBase}`, fbEmail).catch(() => {});
       const nameKey = normalizeSearchText(displayName);
-      if (nameKey && !(await env.WATCHLIVO_KV.get(`acct_name:${nameKey}`))) {
-        await env.WATCHLIVO_KV.put(`acct_name:${nameKey}`, fbEmail);
+      if (nameKey && !(await env.WATCHLIVO_KV.get(`acct_name:${nameKey}`).catch(() => null))) {
+        await env.WATCHLIVO_KV.put(`acct_name:${nameKey}`, fbEmail).catch(() => {});
       }
+    } else if (!rec?.passHash && String(b.password || "").length >= 6) {
+      const passHash = await hashPasswordPbkdf2(String(b.password));
+      user.passwordSet = true;
+      await env.WATCHLIVO_KV.put(`acct:${fbEmail}`, JSON.stringify({ user, passHash, sv: Number(rec?.sv || 0) })).catch(() => {});
     }
     await upsertSocialDir(env, user);
     await ensureUserSocial(env, user.uid, user, true);
-    const authToken = `${user.id}_${makeNonce()}${makeNonce()}`;
-    await env.WATCHLIVO_KV.put(`session:${authToken}`, JSON.stringify({ ...user, _sv: Number(rec?.sv || 0) }), { expirationTtl: 2592000 });
+    const authToken = await issueAuthSessionToken(user, Number(rec?.sv || 0), env);
     return edgeJson({ ok: true, authToken, user }, 200, {
       "Set-Cookie": `wl_auth=${encodeURIComponent(authToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     });
@@ -2849,6 +3049,10 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const tok = extractSessionToken(request, b);
     if (tok && env?.WATCHLIVO_KV) {
       await env.WATCHLIVO_KV.delete(`session:${tok}`).catch(() => {});
+      if (tok.startsWith("wl2.")) {
+        const revKey = `revoked:${(await sha256Hex(tok)).slice(0, 24)}`;
+        await env.WATCHLIVO_KV.put(revKey, "1", { expirationTtl: 2592000 }).catch(() => {});
+      }
     }
     return edgeJson({ ok: true }, 200, {
       "Set-Cookie": "wl_auth=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
@@ -2882,10 +3086,12 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const oldH = foldHandleBase(rec.user?.handle || user.handle || "");
     const oldNameKey = normalizeSearchText(rec.user?.name || user.name || "");
     await Promise.allSettled([
+      email ? env.WATCHLIVO_KV.put(`deleted_acct:${email}`, String(Math.floor(Date.now() / 1000)), { expirationTtl: 2592000 }) : Promise.resolve(),
       email ? env.WATCHLIVO_KV.delete(`acct:${email}`) : Promise.resolve(),
       oldH ? env.WATCHLIVO_KV.delete(`acct_handle:${oldH}`) : Promise.resolve(),
       oldNameKey ? env.WATCHLIVO_KV.delete(`acct_name:${oldNameKey}`) : Promise.resolve(),
       token ? env.WATCHLIVO_KV.delete(`session:${token}`) : Promise.resolve(),
+      token && token.startsWith("wl2.") ? env.WATCHLIVO_KV.put(`revoked:${(await sha256Hex(token)).slice(0, 24)}`, "1", { expirationTtl: 2592000 }) : Promise.resolve(),
       env.WATCHLIVO_KV.delete(`ulist:${uid}:progress`),
       env.WATCHLIVO_KV.delete(`ulist:${uid}:watchlist`),
       env.WATCHLIVO_KV.delete(`ulist:${uid}:music-history`),
@@ -2942,7 +3148,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     if ("hideFriends" in b) curUser.hideFriends = Boolean(b.hideFriends);
     if ("hideLocation" in b) curUser.hideLocation = Boolean(b.hideLocation);
 
-    await env.WATCHLIVO_KV.put(`acct:${email}`, JSON.stringify({ user: curUser, passHash: rec.passHash || "", sv: Number(rec.sv || 0) }));
+    await env.WATCHLIVO_KV.put(`acct:${email}`, JSON.stringify({ user: curUser, passHash: rec.passHash || "", sv: Number(rec.sv || 0) })).catch(() => {});
     if (curUser.handle && curUser.handle !== oldHandle) {
       if (oldHandle) await env.WATCHLIVO_KV.delete(`acct_handle:${oldHandle}`).catch(() => {});
       await env.WATCHLIVO_KV.put(`acct_handle:${curUser.handle}`, email).catch(() => {});
@@ -2983,10 +3189,14 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const newHash = await hashPasswordPbkdf2(newPw);
     const normUser = normalizeMemberUserObj({ ...rec.user, passwordSet: true }, email);
     const nextSv = Number(rec.sv || 0) + 1;
-    await env.WATCHLIVO_KV.put(`acct:${email}`, JSON.stringify({ user: normUser, passHash: newHash, sv: nextSv }));
-    if (token) await env.WATCHLIVO_KV.delete(`session:${token}`).catch(() => {});
-    const newTok = `${normUser.id}_${makeNonce()}${makeNonce()}`;
-    await env.WATCHLIVO_KV.put(`session:${newTok}`, JSON.stringify({ ...normUser, _sv: nextSv }), { expirationTtl: 2592000 });
+    await env.WATCHLIVO_KV.put(`acct:${email}`, JSON.stringify({ user: normUser, passHash: newHash, sv: nextSv })).catch(() => {});
+    if (token) {
+      await env.WATCHLIVO_KV.delete(`session:${token}`).catch(() => {});
+      if (token.startsWith("wl2.")) {
+        await env.WATCHLIVO_KV.put(`revoked:${(await sha256Hex(token)).slice(0, 24)}`, "1", { expirationTtl: 2592000 }).catch(() => {});
+      }
+    }
+    const newTok = await issueAuthSessionToken(normUser, nextSv, env);
     return edgeJson({ ok: true, user: normUser, authToken: newTok, message: "Şifreniz başarıyla güncellendi." }, 200, {
       "Set-Cookie": `wl_auth=${encodeURIComponent(newTok)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     });
@@ -3080,10 +3290,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
         }
       }
       await upsertSocialDir(env, user);
-      const authToken = `${user.id}_${makeNonce()}${makeNonce()}`;
-      if (env?.WATCHLIVO_KV) {
-        await env.WATCHLIVO_KV.put(`session:${authToken}`, JSON.stringify({ ...user, _sv: Number(rec?.sv || 0) }), { expirationTtl: 2592000 }).catch(() => {});
-      }
+      const authToken = await issueAuthSessionToken(user, Number(rec?.sv || 0), env);
       return edgeJson({ ok: true, user, authToken }, 200, {
         "Set-Cookie": `wl_auth=${encodeURIComponent(authToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
       });

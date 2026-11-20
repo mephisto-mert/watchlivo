@@ -909,12 +909,12 @@ struct WatchlivoWebView: UIViewRepresentable {
         config.allowsPictureInPictureMediaPlayback = true
         config.allowsAirPlayForMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
-        config.applicationNameForUserAgent = "Version/17.4 Mobile/15E148 Safari/604.1 WatchlivoIOS/2.2.8"
+        config.applicationNameForUserAgent = "Version/17.4 Mobile/15E148 Safari/604.1 WatchlivoIOS/2.2.9"
 
         let bridgeScript = """
         (function() {
           window.isWatchlivoNativeIOS = true;
-          window.watchlivoNativeVersion = '2.2.8';
+          window.watchlivoNativeVersion = '2.2.9';
           window.triggerHaptic = function(s) {
             try { window.webkit.messageHandlers.watchlivoHaptic.postMessage(String(s || 'medium')); } catch(e) {}
           };
@@ -1015,7 +1015,7 @@ struct WatchlivoWebView: UIViewRepresentable {
         } else {
             initialURL = bridgeRef.homeURL
         }
-        webView.load(URLRequest(url: initialURL, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 30))
+        webView.load(URLRequest(url: initialURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
         return container
     }
 

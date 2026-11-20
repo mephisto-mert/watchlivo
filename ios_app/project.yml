@@ -15,8 +15,8 @@ targets:
       base:
         INFOPLIST_FILE: Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: online.watchlivo.app
-        MARKETING_VERSION: 2.2.8
-        CURRENT_PROJECT_VERSION: 228
+        MARKETING_VERSION: 2.2.9
+        CURRENT_PROJECT_VERSION: 229
         SWIFT_VERSION: "5.9"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
