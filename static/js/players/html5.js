@@ -1,11 +1,11 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261121_v232';
-import { api } from '../api.js?v=20261121_v232';
-import { expectedPosition } from '../sync.js?v=20261121_v232';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261121_v232';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261121_v232';
-import { ensureHlsJs } from './hls-loader.js?v=20261121_v232';
-import { AdaptiveQualityController, buildHlsAbrConfig, formatHeightTag, getNetworkSnapshot, isLowBandwidthMode, setLowBandwidthMode, withEdgeAbrParams } from './abr.js?v=20261121_v232';
+import { SubtitleDubController } from './subtitles.js?v=20261121_v233';
+import { api } from '../api.js?v=20261121_v233';
+import { expectedPosition } from '../sync.js?v=20261121_v233';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261121_v233';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261121_v233';
+import { ensureHlsJs } from './hls-loader.js?v=20261121_v233';
+import { AdaptiveQualityController, buildHlsAbrConfig, formatHeightTag, getNetworkSnapshot, isLowBandwidthMode, setLowBandwidthMode, withEdgeAbrParams } from './abr.js?v=20261121_v233';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -1046,8 +1046,11 @@ export class Html5Adapter {
         if (effStart >= 0.5 && v.readyState >= 1 && Math.abs((v.currentTime || 0) - effStart) > 1.2) {
           try { v.currentTime = effStart; } catch (err) { /* ignore */ }
         }
-        this.subs.mergeHlsAudioTracks((this.hls.audioTracks?.length ? this.hls.audioTracks : data?.audioTracks) || []);
-        this.subs._applyHlsAudioSelection();
+        const liveHlsAuds = Array.isArray(this.hls.audioTracks) && this.hls.audioTracks.length
+          ? this.hls.audioTracks
+          : (data?.audioTracks || []);
+        this.subs.mergeHlsAudioTracks(liveHlsAuds);
+        this.subs._applyHlsAudioSelection(false);
         if (this.wantPlaying) this.tryPlay();
         if (v.readyState >= 2) {
           clearBuf();
@@ -1067,14 +1070,15 @@ export class Html5Adapter {
         }
       });
       this.hls.on(window.Hls.Events.LEVEL_SWITCHED, () => {
+        if (this.hls?.audioTracks?.length > 1) {
+          this.subs.mergeHlsAudioTracks(this.hls.audioTracks);
+        }
         this.events.onTracksChanged?.();
       });
-      this.hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, (_e, data) => {
-        this.subs.mergeHlsAudioTracks((data?.audioTracks?.length ? data.audioTracks : this.hls?.audioTracks) || []);
-        this.subs._applyHlsAudioSelection();
-      });
-      this.hls.on(window.Hls.Events.AUDIO_TRACK_LOADED, () => {
-        this.subs._applyHlsAudioSelection();
+      this.hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, () => {
+        if (this.hls?.audioTracks?.length > 1) {
+          this.subs.mergeHlsAudioTracks(this.hls.audioTracks);
+        }
       });
       let netRetries = 0;
       let mediaRetries = 0;

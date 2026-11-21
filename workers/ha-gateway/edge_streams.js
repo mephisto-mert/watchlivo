@@ -1083,7 +1083,7 @@ export function applyMasterAudioPreference(lines, audParam = "") {
     for (const e of entries) {
       const isWinner = e.idx === targetEntry.idx;
       let nextLn = setHlsMediaAttr(e.line, "DEFAULT", isWinner ? "YES" : "NO");
-      nextLn = setHlsMediaAttr(nextLn, "AUTOSELECT", isWinner ? "YES" : "NO");
+      nextLn = setHlsMediaAttr(nextLn, "AUTOSELECT", "YES");
       out[e.idx] = nextLn;
     }
   }
@@ -1340,6 +1340,7 @@ export async function handleEdgeStreamProxy(request, url, env) {
     let cloakedMime = "";
     const needsCloakSniff =
       upCt.includes("text/html") ||
+      upCt.includes("text/css") ||
       upCt.includes("javascript") ||
       upCt.includes("ecmascript") ||
       upCt.includes("text/plain") ||
@@ -1400,6 +1401,7 @@ export async function handleEdgeStreamProxy(request, url, env) {
       !outHdrs.has("Content-Type") ||
       rawOutCt.includes("octet-stream") ||
       rawOutCt.includes("font/") ||
+      rawOutCt.includes("text/css") ||
       rawOutCt.includes("javascript") ||
       rawOutCt.includes("ecmascript")
     ) {

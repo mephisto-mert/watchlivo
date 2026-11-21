@@ -612,3 +612,138 @@ test("v232 sync: source-matched stream sub ordering, overlapping cue fast-path a
     globalThis.fetch = origFetch;
   }
 });
+
+test("v233 dub audio silence fixes: text/css MPEG-TS cloak sniff, AUTOSELECT=YES, no manual BUFFER_FLUSHING, active audioGroupId sync & MSE error fallback reload", async () => {
+  const origFetch = globalThis.fetch;
+  try {
+    // 1. Cloaked text/css MPEG-TS segment (e.g. Inception audio seg[10] .css) -> sniffed & rewritten to video/mp2t
+    const tsUrl = "https://cdn.inception.test/hls/seg_10_aud_tr.css";
+    const cssUrl = "https://cdn.inception.test/assets/real_style.css";
+    const tsPayload = new Uint8Array(376);
+    tsPayload[0] = 0x47;
+    tsPayload[1] = 0x41;
+    tsPayload[2] = 0x00;
+    tsPayload[3] = 0x10;
+    tsPayload[188] = 0x47;
+    tsPayload[189] = 0x01;
+    tsPayload[190] = 0x00;
+    tsPayload[191] = 0x11;
+    globalThis.fetch = async (input) => {
+      const u = typeof input === "string" ? input : input.url;
+      if (u === tsUrl) {
+        return new Response(tsPayload, { status: 200, headers: { "Content-Type": "text/css" } });
+      }
+      if (u === cssUrl) {
+        return new Response("body { color: red; font-size: 14px; }", { status: 200, headers: { "Content-Type": "text/css" } });
+      }
+      return new Response("Not Found", { status: 404 });
+    };
+
+    const sigTs = await signProxySig(tsUrl, "", TEST_ENV);
+    const reqTs = new Request(`https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(tsUrl)}&sig=${sigTs}&ext=.ts`);
+    const resTs = await handleEdgeStreamProxy(reqTs, new URL(reqTs.url), TEST_ENV);
+    assert.equal(resTs.status, 200);
+    assert.equal(resTs.headers.get("Content-Type"), "video/mp2t", "Cloaked text/css MPEG-TS must be rewritten to video/mp2t");
+    assert.equal((await resTs.arrayBuffer()).byteLength, 376);
+
+    const sigCss = await signProxySig(cssUrl, "", TEST_ENV);
+    const reqCss = new Request(`https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(cssUrl)}&sig=${sigCss}`);
+    const resCss = await handleEdgeStreamProxy(reqCss, new URL(reqCss.url), TEST_ENV);
+    assert.equal(resCss.status, 502, "Real text/css stylesheet must still be rejected");
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+
+  // 2. applyMasterAudioPreference preserves AUTOSELECT=YES on both winner and alternate renditions (RFC 8216)
+  const masterLines = [
+    "#EXTM3U",
+    '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="English",LANGUAGE="eng",DEFAULT=YES,AUTOSELECT=YES,URI="en.m3u8"',
+    '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Turkish",LANGUAGE="tur",DEFAULT=NO,AUTOSELECT=NO,URI="tr.m3u8"',
+  ];
+  const trMaster = applyMasterAudioPreference(masterLines, "tr");
+  const trLine = trMaster.find((l) => l.includes('LANGUAGE="tur"'));
+  const enLine = trMaster.find((l) => l.includes('LANGUAGE="eng"'));
+  assert.ok(trLine.includes("DEFAULT=YES") && trLine.includes("AUTOSELECT=YES"), "Winner must have DEFAULT=YES,AUTOSELECT=YES");
+  assert.ok(enLine.includes("DEFAULT=NO") && enLine.includes("AUTOSELECT=YES"), "Alternate must keep AUTOSELECT=YES");
+
+  // 3. _applyHlsAudioSelection MUST NOT trigger BUFFER_FLUSHING, must honor active audioGroupId, and must recover via switchStreamSource on MSE audio error
+  const prevWin = globalThis.window;
+  globalThis.window = {
+    Hls: {
+      Events: {
+        BUFFER_FLUSHING: "hlsBufferFlushing",
+        ERROR: "hlsError",
+      },
+    },
+  };
+  try {
+    let flushTriggered = 0;
+    const hlsListeners = new Map();
+    const switchedUrls = [];
+    const mockHls = {
+      currentLevel: 1,
+      loadLevel: 1,
+      levels: [
+        { height: 1080, audioGroupId: "audio" },
+        { height: 480, audioGroupId: "audio-lo" },
+      ],
+      audioTracks: [
+        { groupId: "audio", lang: "en", name: "English" },
+        { groupId: "audio", lang: "tr", name: "Turkish" },
+        { groupId: "audio-lo", lang: "en", name: "English" },
+        { groupId: "audio-lo", lang: "tr", name: "Turkish" },
+      ],
+      audioTrack: 2,
+      bufferController: {},
+      trigger(ev) {
+        if (ev === "hlsBufferFlushing") flushTriggered += 1;
+      },
+      on(ev, fn) {
+        if (!hlsListeners.has(ev)) hlsListeners.set(ev, new Set());
+        hlsListeners.get(ev).add(fn);
+      },
+      off(ev, fn) {
+        hlsListeners.get(ev)?.delete(fn);
+      },
+    };
+    const mockVideo = {
+      currentTime: 42,
+      paused: false,
+      seeking: false,
+      readyState: 4,
+      muted: false,
+      volume: 0.8,
+      webkitAudioDecodedByteCount: 50000,
+    };
+    const adapter = {
+      currentUrl: "/api/rave/stream?sid=inception123&aud=orig&ext=.m3u8",
+      hls: mockHls,
+      video: mockVideo,
+      events: { onTracksChanged() {} },
+      getTime() { return mockVideo.currentTime; },
+      switchStreamSource(u) { switchedUrls.push(u); },
+    };
+    const ctrl = new SubtitleDubController(adapter);
+    ctrl.audioTracks = [
+      { id: "tr-dub", lang: "tr", targetLang: "tr", audioLang: "tr", hlsIndex: 1, mode: "stream", url: "/api/rave/stream?sid=inception123&aud=tr&ext=.m3u8" },
+      { id: "orig", lang: "orig", targetLang: "orig", audioLang: "en", hlsIndex: 0, mode: "stream", url: "/api/rave/stream?sid=inception123&aud=orig&ext=.m3u8" },
+    ];
+    ctrl.selectedAudioId = "tr-dub";
+
+    ctrl._applyHlsAudioSelection(true);
+    assert.equal(flushTriggered, 0, "Manual BUFFER_FLUSHING must NEVER be triggered on audio switch");
+    assert.equal(mockHls.audioTrack, 3, "Must resolve Turkish audio index inside active audioGroupId (audio-lo -> idx 3), not stale idx 1");
+    assert.equal(ctrl.audioTracks[0].hlsIndex, 3);
+
+    // Simulate MSE bufferAppendError right after 44.1kHz -> 48kHz audio switch
+    for (const fn of hlsListeners.get("hlsError") || []) {
+      fn("hlsError", { details: "bufferAppendError", frag: { type: "audio" } });
+    }
+    assert.equal(switchedUrls.length, 1, "MSE audio switch error must trigger clean stream reload");
+    assert.ok(switchedUrls[0].includes("aud=tr"), "Clean reload must target Turkish dub URL");
+    ctrl.destroy();
+  } finally {
+    if (prevWin === undefined) delete globalThis.window;
+    else globalThis.window = prevWin;
+  }
+});

@@ -1,17 +1,17 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal, handleWindowsAppDownload } from '../ui.js?v=20261121_v232';
+import { h, icons, toast, confirmPopup, fill, openThemeModal, handleWindowsAppDownload } from '../ui.js?v=20261121_v233';
 import {
   state, setUiPref, subscribe, isLeader, isHostOnly, isFriend,
   getWatchHistory, getMusicHistory,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite,
-} from '../store.js?v=20261121_v232';
-import { avatar } from '../profile.js?v=20261121_v232';
-import { clock } from '../sync.js?v=20261121_v232';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261121_v232';
-import { copyInvite, inviteUrl } from './chat.js?v=20261121_v232';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261121_v232';
-import { resolveMedia } from './selection.js?v=20261121_v232';
-import { resolveMusicItem, resolveCatalogItem } from './selection-kinds.js?v=20261121_v232';
+} from '../store.js?v=20261121_v233';
+import { avatar } from '../profile.js?v=20261121_v233';
+import { clock } from '../sync.js?v=20261121_v233';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261121_v233';
+import { copyInvite, inviteUrl } from './chat.js?v=20261121_v233';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261121_v233';
+import { resolveMedia } from './selection.js?v=20261121_v233';
+import { resolveMusicItem, resolveCatalogItem } from './selection-kinds.js?v=20261121_v233';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
