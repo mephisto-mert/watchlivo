@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { handleAutonomousEdge } from '../workers/ha-gateway/edge_autonomous.js';
-import { WatchlivoRoomDO } from '../workers/ha-gateway/edge_rooms.js';
+import { WatchlivoRoomDO, resetRoomDoQuotaGuardForTests } from '../workers/ha-gateway/edge_rooms.js';
 
 function createMockRoomDoNamespace(envRef) {
   const instances = new Map();
@@ -325,4 +325,180 @@ test('Rooms create/sync/info succeed with ZERO 503 when BOTH Durable Objects fre
   const info = await infoResp.json();
   assert.equal(info.ok, true);
   assert.equal(info.room?.id, rid);
+});
+
+test('v236 cross-device D1 ROOMS_DB sync: Host A (Isolate 1) and Friend B (Isolate 2) see each other immediately even when DO + KV quotas are both exhausted', async () => {
+  resetRoomDoQuotaGuardForTests();
+  const d1Rooms = new Map();
+  const d1Kv = new Map();
+  let roomWriteCount = 0;
+  const mockD1 = {
+    prepare(sql) {
+      const s = String(sql || '').trim();
+      const exec = (params) => ({
+        async run() {
+          if (s.startsWith('CREATE TABLE')) return { success: true };
+          if (s.startsWith('INSERT INTO edge_rooms')) {
+            const isClose = s.includes("VALUES (?, '{}', 1");
+            if (isClose) {
+              d1Rooms.set(params[0], { data: '{}', closed: 1, updated_at: params[1] });
+            } else {
+              if (params[0] !== '__public_index__') roomWriteCount += 1;
+              d1Rooms.set(params[0], { data: params[1], closed: 0, updated_at: params[2] });
+            }
+            return { success: true };
+          }
+          if (s.startsWith('DELETE FROM edge_rooms')) {
+            const cur = d1Rooms.get(params[0]);
+            if (cur && cur.closed === 1) d1Rooms.delete(params[0]);
+            return { success: true };
+          }
+          if (s.startsWith('INSERT INTO edge_kv')) {
+            const isDel = s.includes('VALUES (?, NULL, 0, 1)');
+            if (isDel) d1Kv.set(params[0], { v: null, exp: 0, deleted: 1 });
+            else d1Kv.set(params[0], { v: params[1], exp: params[2], deleted: 0 });
+            return { success: true };
+          }
+          if (s.startsWith('DELETE FROM edge_kv')) {
+            d1Kv.delete(params[0]);
+            return { success: true };
+          }
+          return { success: true };
+        },
+        async first() {
+          if (s.includes('FROM edge_rooms WHERE id = ?')) {
+            return d1Rooms.get(params[0]) || null;
+          }
+          if (s.includes('FROM edge_kv WHERE k = ?')) {
+            return d1Kv.get(params[0]) || null;
+          }
+          return null;
+        },
+      });
+      return {
+        bind(...params) { return exec(params); },
+        run() { return exec([]).run(); },
+        first() { return exec([]).first(); },
+      };
+    },
+  };
+
+  const quotaExceededDo = {
+    idFromName(name) { return name; },
+    get() {
+      return {
+        async fetch() { throw new Error('Exceeded allowed volume of requests in Durable Objects free tier.'); },
+      };
+    },
+  };
+  const env = {
+    ROOM_DO: quotaExceededDo,
+    WATCHLIVO_KV: createQuotaExhaustedKv(),
+    ROOMS_DB: mockD1,
+    PROXY_SECRET: 'test_secret_key_for_v236_d1_sync_123456',
+  };
+
+  // 1. Host A (PC, Isolate #1) creates a room
+  const createResp = await handleAutonomousEdge(
+    new Request('https://watchlivo.online/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Arkadaş Odası',
+        privacy: 'public',
+        creator: 'HostAli',
+        media: { title: 'Inception', url: '/api/rave/stream?sid=inc&ext=.m3u8', provider: 'hls' },
+      }),
+    }),
+    new URL('https://watchlivo.online/api/rooms'),
+    '/api/rooms',
+    env,
+  );
+  assert.equal(createResp.status, 200);
+  const created = await createResp.json();
+  const rid = created.room.id;
+  assert.equal(created.room.participants.length, 1);
+
+  // 2. Simulate Friend B hitting a COMPLETELY DIFFERENT Worker isolate / POP (empty local RAM!)
+  resetRoomDoQuotaGuardForTests();
+
+  // Friend B checks /api/rooms/:id/info -> MUST return 200 OK (NOT 404!)
+  const bInfoResp = await handleAutonomousEdge(
+    new Request(`https://watchlivo.online/api/rooms/${rid}/info`),
+    new URL(`https://watchlivo.online/api/rooms/${rid}/info`),
+    `/api/rooms/${rid}/info`,
+    env,
+  );
+  assert.equal(bInfoResp.status, 200);
+
+  // Friend B joins room via /sync init (no syncToken!)
+  const bInitResp = await handleAutonomousEdge(
+    new Request(`https://watchlivo.online/api/rooms/${rid}/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'init', username: 'ArkadasVeli', uid: 'uid_veli' }),
+    }),
+    new URL(`https://watchlivo.online/api/rooms/${rid}/sync`),
+    `/api/rooms/${rid}/sync`,
+    env,
+  );
+  assert.equal(bInitResp.status, 200);
+  const bInit = await bInitResp.json();
+  assert.equal(bInit.room.media.title, 'Inception', 'Friend B must receive Host A movie');
+  const bNames = bInit.room.participants.map((p) => p.name).sort();
+  assert.deepEqual(bNames, ['ArkadasVeli', 'HostAli'], 'Friend B must immediately see Host A AND themselves');
+
+  // 3. Friend B sends a chat message from Isolate #2
+  await handleAutonomousEdge(
+    new Request(`https://watchlivo.online/api/rooms/${rid}/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'chat',
+        clientId: bInit.clientId,
+        clientToken: bInit.clientToken,
+        username: 'ArkadasVeli',
+        text: 'Selam kanka geldim!',
+      }),
+    }),
+    new URL(`https://watchlivo.online/api/rooms/${rid}/sync`),
+    `/api/rooms/${rid}/sync`,
+    env,
+  );
+
+  // 4. Host A polls from Isolate #1 -> MUST see BOTH users & Friend B chat (no stale RAM split-brain!)
+  const writesBeforePoll = roomWriteCount;
+  const aPollResp = await handleAutonomousEdge(
+    new Request(`https://watchlivo.online/api/rooms/${rid}/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'poll',
+        clientId: created.clientId,
+        clientToken: created.clientToken,
+        username: 'HostAli',
+      }),
+    }),
+    new URL(`https://watchlivo.online/api/rooms/${rid}/sync`),
+    `/api/rooms/${rid}/sync`,
+    env,
+  );
+  assert.equal(aPollResp.status, 200);
+  const aPoll = await aPollResp.json();
+  const aNames = aPoll.room.participants.map((p) => p.name).sort();
+  assert.deepEqual(aNames, ['ArkadasVeli', 'HostAli'], 'Host A must immediately see Friend B');
+  assert.ok(aPoll.room.chat.some((m) => m.text === 'Selam kanka geldim!'), 'Host A must receive Friend B chat');
+  assert.equal(roomWriteCount, writesBeforePoll, 'Unchanged poll within 12s must NOT execute redundant D1 writes');
+
+  // 5. Public room list GET /api/rooms must surface the room globally from D1
+  const listResp = await handleAutonomousEdge(
+    new Request('https://watchlivo.online/api/rooms'),
+    new URL('https://watchlivo.online/api/rooms'),
+    '/api/rooms',
+    env,
+  );
+  assert.equal(listResp.status, 200);
+  const listData = await listResp.json();
+  assert.ok(listData.rooms.some((r) => r.id === rid && r.participantCount === 2), 'Public lobby list must show room with 2 participants');
+  resetRoomDoQuotaGuardForTests();
 });

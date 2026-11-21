@@ -20,6 +20,7 @@ import {
   handleEdgeRoomSync,
   handleEdgeRoomVoiceRelay,
   handleEdgeRoomWs,
+  listGlobalPublicRooms,
   verifyRoomClientToken,
 } from "./edge_rooms.js";
 import { handleEdgeMusicRoute } from "./edge_music.js";
@@ -34,6 +35,65 @@ const DEFAULT_TMDB_KEY = "4f042878f22ef63cb94f25e60cb4ec6e";
 const _memEphemeralStore = new Map();
 const _memPersistFallback = new Map();
 let _authDoQuotaUntil = 0;
+let _d1KvSchemaReady = false;
+let _d1KvSchemaPromise = null;
+
+async function ensureD1KvSchema(db) {
+  if (!db) return false;
+  if (_d1KvSchemaReady) return true;
+  if (!_d1KvSchemaPromise) {
+    _d1KvSchemaPromise = db
+      .prepare("CREATE TABLE IF NOT EXISTS edge_kv (k TEXT PRIMARY KEY, v TEXT, exp INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0)")
+      .run()
+      .then(() => { _d1KvSchemaReady = true; return true; })
+      .catch(() => false)
+      .finally(() => { _d1KvSchemaPromise = null; });
+  }
+  return await _d1KvSchemaPromise;
+}
+
+async function d1KvGet(db, k) {
+  if (!db || !(await ensureD1KvSchema(db))) return { found: false, deleted: false, value: null };
+  try {
+    const row = await db.prepare("SELECT v, exp, deleted FROM edge_kv WHERE k = ?").bind(k).first();
+    if (!row) return { found: false, deleted: false, value: null };
+    const nowS = Math.floor(Date.now() / 1000);
+    if (Number(row.exp || 0) > 0 && Number(row.exp) < nowS) {
+      await db.prepare("DELETE FROM edge_kv WHERE k = ?").bind(k).run().catch(() => {});
+      return { found: false, deleted: false, value: null };
+    }
+    return { found: true, deleted: Number(row.deleted || 0) === 1, value: Number(row.deleted || 0) === 1 ? null : row.v };
+  } catch {
+    return { found: false, deleted: false, value: null };
+  }
+}
+
+async function d1KvPut(db, k, strVal, ttlSec = 0) {
+  if (!db || !(await ensureD1KvSchema(db))) return false;
+  try {
+    const exp = ttlSec > 0 ? Math.floor(Date.now() / 1000) + Math.round(ttlSec) : 0;
+    await db
+      .prepare("INSERT INTO edge_kv (k, v, exp, deleted) VALUES (?, ?, ?, 0) ON CONFLICT(k) DO UPDATE SET v = excluded.v, exp = excluded.exp, deleted = 0")
+      .bind(k, strVal, exp)
+      .run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function d1KvDelete(db, k) {
+  if (!db || !(await ensureD1KvSchema(db))) return false;
+  try {
+    await db
+      .prepare("INSERT INTO edge_kv (k, v, exp, deleted) VALUES (?, NULL, 0, 1) ON CONFLICT(k) DO UPDATE SET v = NULL, exp = 0, deleted = 1")
+      .bind(k)
+      .run();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function isEphemeralStoreKey(key) {
   const k = String(key || "");
@@ -55,9 +115,6 @@ function isEphemeralStoreKey(key) {
     k.startsWith("music:") ||
     k.startsWith("ac_tmdb_v2:") ||
     k.startsWith("ac_ep:") ||
-    k.startsWith("room:") ||
-    k.startsWith("room_closed:") ||
-    k === "rooms:public_index" ||
     k.startsWith("analytics:")
   );
 }
@@ -92,12 +149,13 @@ function memStoreSet(map, key, val, ttlSec = 0, deleted = false, maxEntries = 15
 function createDurableKvAdapter(env) {
   const rawKv = env?.WATCHLIVO_KV || null;
   const roomDo = env?.ROOM_DO || null;
-  if (!roomDo) return rawKv;
+  const d1Db = env?.ROOMS_DB || null;
+  if (!roomDo && !d1Db) return rawKv;
 
   const getAuthStub = () => roomDo.get(roomDo.idFromName("__watchlivo_auth_store_v1__"));
 
   const callDoKv = async (payload) => {
-    if (Date.now() < _authDoQuotaUntil) throw new Error("do_quota_cooldown");
+    if (!roomDo || Date.now() < _authDoQuotaUntil) throw new Error("do_quota_cooldown");
     const stub = getAuthStub();
     const resp = await stub.fetch(new Request("https://do.local/__kv", {
       method: "POST",
@@ -124,11 +182,18 @@ function createDurableKvAdapter(env) {
   };
 
   const edgeCacheUrl = (key) => `https://cache.watchlivo.internal/ephemeral/${encodeURIComponent(String(key))}`;
+  const isDirectRoomStoreKey = (k) => k.startsWith("room:") || k.startsWith("room_closed:") || k === "rooms:public_index";
 
   return {
     async get(key, typeOrOpts) {
       const k = String(key);
       const wantJson = typeOrOpts === "json" || (typeOrOpts && typeof typeOrOpts === "object" && typeOrOpts.type === "json");
+      if (isDirectRoomStoreKey(k)) {
+        if (rawKv && typeof rawKv.get === "function") {
+          return await rawKv.get(k, typeOrOpts).catch(() => null);
+        }
+        return null;
+      }
       const eph = isEphemeralStoreKey(k);
       if (eph) {
         // Ephemeral keys NEVER touch Durable Objects (saves >95% of DO free-tier request quota!)
@@ -155,8 +220,8 @@ function createDurableKvAdapter(env) {
         return null;
       }
 
-      // Persistent Auth / Profile / Social keys: DO SQLite primary with quota-safe fallback
-      if (Date.now() >= _authDoQuotaUntil) {
+      // Persistent Auth / Profile / Social / VoiceRelay keys: DO SQLite primary -> Global D1 SQLite -> rawKv -> isolate cache
+      if (roomDo && Date.now() >= _authDoQuotaUntil) {
         try {
           const res = await callDoKv({ op: "get", key: k, ephemeral: false });
           if (res && res.found) {
@@ -166,6 +231,14 @@ function createDurableKvAdapter(env) {
           }
         } catch (err) {
           noteAuthDoErr(err);
+        }
+      }
+      if (d1Db) {
+        const d1Res = await d1KvGet(d1Db, k);
+        if (d1Res.found) {
+          if (d1Res.deleted || d1Res.value === null || d1Res.value === undefined) return null;
+          memStoreSet(_memPersistFallback, k, d1Res.value, 600, false, 600);
+          return parseOut(d1Res.value, wantJson);
         }
       }
       const pHit = memStoreGet(_memPersistFallback, k);
@@ -179,6 +252,12 @@ function createDurableKvAdapter(env) {
       const k = String(key);
       const strVal = typeof value === "string" ? value : JSON.stringify(value);
       const ttl = Number(opts?.expirationTtl || 0);
+      if (isDirectRoomStoreKey(k)) {
+        if (rawKv && typeof rawKv.put === "function") {
+          await rawKv.put(k, strVal, opts).catch(() => {});
+        }
+        return;
+      }
       const eph = isEphemeralStoreKey(k);
       if (eph) {
         const effTtl = ttl > 0 ? Math.min(ttl, 86400) : 300;
@@ -196,20 +275,30 @@ function createDurableKvAdapter(env) {
       }
 
       memStoreSet(_memPersistFallback, k, strVal, ttl > 0 ? Math.min(ttl, 3600) : 1800, false, 600);
-      if (Date.now() >= _authDoQuotaUntil) {
+      let persisted = false;
+      if (roomDo && Date.now() >= _authDoQuotaUntil) {
         try {
           await callDoKv({ op: "put", key: k, value: strVal, ttl, ephemeral: false });
-          return;
+          persisted = true;
         } catch (err) {
           noteAuthDoErr(err);
         }
       }
-      if (rawKv && typeof rawKv.put === "function") {
+      if (!persisted && d1Db) {
+        persisted = await d1KvPut(d1Db, k, strVal, ttl);
+      }
+      if (!persisted && rawKv && typeof rawKv.put === "function") {
         await rawKv.put(k, strVal, opts).catch(() => {});
       }
     },
     async delete(key) {
       const k = String(key);
+      if (isDirectRoomStoreKey(k)) {
+        if (rawKv && typeof rawKv.delete === "function") {
+          await rawKv.delete(k).catch(() => {});
+        }
+        return;
+      }
       const eph = isEphemeralStoreKey(k);
       if (eph) {
         memStoreSet(_memEphemeralStore, k, null, 60, true);
@@ -220,12 +309,15 @@ function createDurableKvAdapter(env) {
         return;
       }
       memStoreSet(_memPersistFallback, k, null, 300, true, 600);
-      if (Date.now() >= _authDoQuotaUntil) {
+      if (roomDo && Date.now() >= _authDoQuotaUntil) {
         try {
           await callDoKv({ op: "tombstone", key: k, ephemeral: false });
         } catch (err) {
           noteAuthDoErr(err);
         }
+      }
+      if (d1Db) {
+        await d1KvDelete(d1Db, k);
       }
       if (rawKv && typeof rawKv.delete === "function") {
         await rawKv.delete(k).catch(() => {});
@@ -3287,10 +3379,10 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     return await handleEdgePoster(url, env);
   }
 
-  // 6. Rooms (24/7 Durable Object + KV + 21 Live TV Curated Rooms)
+  // 6. Rooms (24/7 Durable Object + D1 Global SQLite + KV + 21 Live TV Curated Rooms)
   if (safePath === "/api/rooms" || safePath === "/api/rave/meshes") {
     if (request.method === "POST") return await handleEdgeRoomCreate(request, env, edgeJson);
-    const rawPub = env?.WATCHLIVO_KV ? (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [] : [];
+    const rawPub = await listGlobalPublicRooms(env);
     const nowS = Math.floor(Date.now() / 1000);
     const curatedBase = (boot.curatedRooms && boot.curatedRooms.length) ? boot.curatedRooms : DEFAULT_CURATED_LIVE_ROOMS;
     const curatedIdSet = new Set([...DEFAULT_CURATED_MAP.keys(), ...curatedBase.map((c) => c.id)]);
@@ -3340,7 +3432,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       defaultAction: actKind === "poll" ? "poll" : undefined,
     });
   }
-  const roomInfoMatch = safePath.match(/^\/api\/(?:rooms|rave\/meshes)\/([^/]+)$/);
+  const roomInfoMatch = safePath.match(/^\/api\/(?:rooms|rave\/meshes)\/([^/]+)(?:\/info)?$/);
   if (roomInfoMatch && (request.method === "GET" || request.method === "HEAD")) {
     return await handleEdgeRoomInfo(decodeURIComponent(roomInfoMatch[1]), request, env, edgeJson, _curatedMap);
   }

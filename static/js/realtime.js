@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261121_v234';
-import { api } from './api.js?v=20261121_v234';
-import { state } from './store.js?v=20261121_v234';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261121_v234';
+import { clock } from './sync.js?v=20261121_v236';
+import { api } from './api.js?v=20261121_v236';
+import { state } from './store.js?v=20261121_v236';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261121_v236';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -180,7 +180,7 @@ export class MeshConnection {
       };
       window.addEventListener('pagehide', this._pageHideHandler);
     }
-    const preferHttp = /(\.vercel\.app|watchlivo\.online)$/i.test(location.hostname) || localStorage.getItem('vortex_transport') === 'http';
+    const preferHttp = /\.vercel\.app$/i.test(location.hostname) || localStorage.getItem('vortex_transport') === 'http';
     if (preferHttp) this.startHttp(); else this.startWs();
   }
 
@@ -245,7 +245,9 @@ export class MeshConnection {
       this.retry = 0;
       this.emitStatus('online');
       this.ping();
-      this.pingTimer = setInterval(() => this.ping(), 2500);
+      setTimeout(() => !this.closed && this.ws?.readyState === 1 && this.ping(), 700);
+      setTimeout(() => !this.closed && this.ws?.readyState === 1 && this.ping(), 2000);
+      this.pingTimer = setInterval(() => this.ping(), 15000);
       while (this.outQueue.length && this.ws?.readyState === 1) {
         try { this.ws.send(JSON.stringify(this.outQueue.shift())); } catch (e) { break; }
       }
@@ -311,7 +313,7 @@ export class MeshConnection {
       const pCnt = Math.max(this.participantCount || 1, this.lastRoom?.largeRoomMode ? 25 : 1);
       const inFastBurst = Boolean(this._fastPollUntil && Date.now() < this._fastPollUntil);
       const inActiveCall = Boolean(state.voice?.inCall && pCnt >= 2 && pCnt < 25);
-      const rawBaseMs = inFastBurst ? 320 : (inActiveCall ? 600 : (pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt >= 25 ? 1550 : 1300));
+      const rawBaseMs = inFastBurst ? 380 : (inActiveCall ? 750 : (pCnt > 400 ? 2900 : pCnt > 100 ? 2200 : pCnt >= 25 ? 1850 : 1700));
       const baseMs = (typeof document !== 'undefined' && document.hidden) ? Math.round(rawBaseMs * 1.6) : rawBaseMs;
       const backoffMs = Math.min(4000, (this.httpFailCount || 0) * 650);
       const jitterMs = inFastBurst ? Math.floor(Math.random() * 60) : (pCnt >= 25 ? Math.floor(Math.random() * 550) : Math.floor(Math.random() * 140));

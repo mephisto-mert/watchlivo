@@ -1,11 +1,11 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261121_v234';
-import { api } from '../api.js?v=20261121_v234';
-import { expectedPosition } from '../sync.js?v=20261121_v234';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261121_v234';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261121_v234';
-import { ensureHlsJs } from './hls-loader.js?v=20261121_v234';
-import { AdaptiveQualityController, buildHlsAbrConfig, formatHeightTag, getNetworkSnapshot, isLowBandwidthMode, setLowBandwidthMode, withEdgeAbrParams } from './abr.js?v=20261121_v234';
+import { SubtitleDubController } from './subtitles.js?v=20261121_v236';
+import { api } from '../api.js?v=20261121_v236';
+import { expectedPosition } from '../sync.js?v=20261121_v236';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261121_v236';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261121_v236';
+import { ensureHlsJs } from './hls-loader.js?v=20261121_v236';
+import { AdaptiveQualityController, buildHlsAbrConfig, formatHeightTag, getNetworkSnapshot, isLowBandwidthMode, setLowBandwidthMode, withEdgeAbrParams } from './abr.js?v=20261121_v236';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;

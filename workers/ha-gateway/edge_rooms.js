@@ -1338,8 +1338,16 @@ export class WatchlivoRoomDO {
   async _load(roomId, seed = null, curatedSeed = null) {
     let healed = false;
     if (!this.room) {
-      this.room = (await this.state.storage.get("room")) || seed || makeRoomSkeleton(roomId, curatedSeed || {});
-      if (!seed && curatedSeed && !(await this.state.storage.get("room"))) {
+      let stored = await this.state.storage.get("room");
+      if (!stored && this.env?.ROOMS_DB) {
+        const d1Rec = await d1GetRoomRecord(this.env, roomId);
+        if (d1Rec?.rm && !d1Rec.closed) {
+          stored = d1Rec.rm;
+          healed = true;
+        }
+      }
+      this.room = stored || seed || makeRoomSkeleton(roomId, curatedSeed || {});
+      if (!seed && curatedSeed && !stored) {
         healed = true;
       }
     }
@@ -1608,6 +1616,10 @@ export class WatchlivoRoomDO {
       tokVerified = true;
       const roomPayload = await serializeEdgeRoom(rm, cid, this.env);
       server.send(JSON.stringify({ type: "init", clientId: cid, clientToken: initTok, serverTime: nowSec(), room: roomPayload }));
+      await this._broadcastRoomEvent(rm, { attachRoom: true, ev: { type: "user_joined", user: { id: cid, name: uname } } }, server);
+      for (const item of initAct.pushedEvents || []) {
+        await this._broadcastRoomEvent(rm, item, server);
+      }
 
       server.addEventListener("message", async (ev) => {
         if ((rm.kicked || []).includes(cid)) {
@@ -1669,6 +1681,7 @@ export class WatchlivoRoomDO {
         const res = applyRoomAction(rm, cid, { type: "leave" }, { tokenVerified: true });
         await this._save();
         await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, "", this.env), this.env);
+        await this._broadcastRoomEvent(rm, { attachRoom: true, ev: { type: "user_left", user: { id: cid, name: uname } } }, null);
         for (const item of res?.pushedEvents || []) {
           await this._broadcastRoomEvent(rm, item, null);
         }
@@ -1780,27 +1793,123 @@ export class WatchlivoRoomDO {
   }
 }
 
+let _d1RoomsSchemaReady = false;
+let _d1RoomsSchemaPromise = null;
+
+async function ensureD1RoomsSchema(env) {
+  const db = env?.ROOMS_DB;
+  if (!db) return false;
+  if (_d1RoomsSchemaReady) return true;
+  if (!_d1RoomsSchemaPromise) {
+    _d1RoomsSchemaPromise = db
+      .prepare("CREATE TABLE IF NOT EXISTS edge_rooms (id TEXT PRIMARY KEY, data TEXT NOT NULL, closed INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)")
+      .run()
+      .then(() => { _d1RoomsSchemaReady = true; return true; })
+      .catch(() => false)
+      .finally(() => { _d1RoomsSchemaPromise = null; });
+  }
+  return await _d1RoomsSchemaPromise;
+}
+
+async function d1GetRoomRecord(env, roomId) {
+  if (!env?.ROOMS_DB || !roomId) return null;
+  if (!(await ensureD1RoomsSchema(env))) return null;
+  try {
+    const row = await env.ROOMS_DB.prepare("SELECT data, closed, updated_at FROM edge_rooms WHERE id = ?").bind(roomId).first();
+    if (!row) return null;
+    if (Number(row.closed || 0) === 1) {
+      const closedAge = Math.floor(nowSec()) - Number(row.updated_at || 0);
+      if (closedAge < 3600) return { rm: null, closed: true };
+      return null;
+    }
+    const age = Math.floor(nowSec()) - Number(row.updated_at || 0);
+    if (age > 43200) return null;
+    const parsed = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+    if (parsed && typeof parsed === "object") return { rm: parsed, closed: false };
+  } catch {}
+  return null;
+}
+
+async function d1PutRoom(env, roomId, rm) {
+  if (!env?.ROOMS_DB || !roomId || !rm) return false;
+  if (!(await ensureD1RoomsSchema(env))) return false;
+  try {
+    const t = Math.floor(nowSec());
+    await env.ROOMS_DB
+      .prepare("INSERT INTO edge_rooms (id, data, closed, updated_at) VALUES (?, ?, 0, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, closed = 0, updated_at = excluded.updated_at")
+      .bind(roomId, JSON.stringify(rm), t)
+      .run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function d1MarkRoomClosed(env, roomId) {
+  if (!env?.ROOMS_DB || !roomId) return false;
+  if (!(await ensureD1RoomsSchema(env))) return false;
+  try {
+    const t = Math.floor(nowSec());
+    await env.ROOMS_DB
+      .prepare("INSERT INTO edge_rooms (id, data, closed, updated_at) VALUES (?, '{}', 1, ?) ON CONFLICT(id) DO UPDATE SET data = '{}', closed = 1, updated_at = excluded.updated_at")
+      .bind(roomId, t)
+      .run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function d1ClearRoomClosed(env, roomId) {
+  if (!env?.ROOMS_DB || !roomId) return;
+  if (!(await ensureD1RoomsSchema(env))) return;
+  try {
+    await env.ROOMS_DB.prepare("DELETE FROM edge_rooms WHERE id = ? AND closed = 1").bind(roomId).run();
+  } catch {}
+}
+
+export async function listGlobalPublicRooms(env) {
+  if (env?.ROOMS_DB) {
+    const rec = await d1GetRoomRecord(env, "__public_index__");
+    if (rec?.rm && Array.isArray(rec.rm)) return rec.rm;
+  }
+  if (env?.WATCHLIVO_KV) {
+    const kvIdx = await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null);
+    if (Array.isArray(kvIdx)) return kvIdx;
+  }
+  return [];
+}
+
+async function saveGlobalPublicRooms(env, list) {
+  if (env?.ROOMS_DB) {
+    await d1PutRoom(env, "__public_index__", list);
+  }
+  if (env?.WATCHLIVO_KV) {
+    await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(list), { expirationTtl: 21600 }).catch(() => {});
+  }
+}
+
 async function removePublicRoomIndex(roomId, env) {
-  if (!env?.WATCHLIVO_KV) return;
-  const idx = (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [];
+  if (!env?.ROOMS_DB && !env?.WATCHLIVO_KV) return;
+  const idx = await listGlobalPublicRooms(env);
   const next = idx.filter((x) => x && x.id !== roomId);
   if (next.length !== idx.length) {
-    await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(next), { expirationTtl: 21600 }).catch(() => {});
+    await saveGlobalPublicRooms(env, next);
   }
 }
 
 async function syncPublicRoomIndex(roomId, serializedRoom, env) {
-  if (!env?.WATCHLIVO_KV || !serializedRoom) return;
-  const idx = (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [];
+  if ((!env?.ROOMS_DB && !env?.WATCHLIVO_KV) || !serializedRoom) return;
+  const idx = await listGlobalPublicRooms(env);
   const hasViewers = Number(serializedRoom.participantCount || 0) > 0;
   if (serializedRoom.privacy === "public" && (hasViewers || serializedRoom.curated)) {
     const summary = serializePublicSummary(serializedRoom);
     const filtered = [summary, ...idx.filter((x) => x && x.id !== roomId)].slice(0, 40);
-    await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(filtered), { expirationTtl: 21600 }).catch(() => {});
+    await saveGlobalPublicRooms(env, filtered);
   } else {
     const next = idx.filter((x) => x && x.id !== roomId);
     if (next.length !== idx.length) {
-      await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(next), { expirationTtl: 21600 }).catch(() => {});
+      await saveGlobalPublicRooms(env, next);
     }
   }
 }
@@ -1867,6 +1976,8 @@ function memMarkClosed(roomId) {
 
 export function resetRoomDoQuotaGuardForTests() {
   _doQuotaExhaustedUntil = 0;
+  _d1RoomsSchemaReady = false;
+  _d1RoomsSchemaPromise = null;
   _memFallbackRooms.clear();
   _memClosedRooms.clear();
 }
@@ -1898,10 +2009,11 @@ export async function handleEdgeRoomCreate(request, env, jsonResp) {
     await setRoomPassword(rm, body.password || "");
     applyRoomAction(rm, cid, { type: "init", username: rm.creator, color: body.color || "#27DCC8" }, { initialDirty: true, tokenVerified: true });
     memSetRoom(roomId, rm);
+    await d1PutRoom(env, roomId, rm);
     if (env.WATCHLIVO_KV) await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
     out = { ok: true, clientId: cid, clientToken: await signRoomClientToken(roomId, cid, env), room: await serializeEdgeRoom(rm, cid, env) };
   }
-  if (env.WATCHLIVO_KV && out?.room?.privacy === "public") {
+  if ((env.ROOMS_DB || env.WATCHLIVO_KV) && out?.room?.privacy === "public") {
     await syncPublicRoomIndex(roomId, out.room, env);
   }
   return jsonResp(out);
@@ -1939,6 +2051,7 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
   const seed = getCuratedSeed(roomId, curatedMap);
   if (seed) {
     _memClosedRooms.delete(roomId);
+    await d1ClearRoomClosed(env, roomId);
     if (env.WATCHLIVO_KV) await env.WATCHLIVO_KV.delete(`room_closed:${roomId}`).catch(() => {});
   } else {
     if (memIsClosed(roomId)) return jsonResp({ ok: false, error: "Oda kapatıldı.", roomClosed: true }, 410);
@@ -1956,15 +2069,17 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
       }
       const r = await stub.fetch(`https://do.local/sync?roomId=${encodeURIComponent(roomId)}`, { method: "POST", body: JSON.stringify(body) });
       const data = await r.json();
-      if (body.type === "close_room" && r.ok && data?.roomClosed && !seed && env.WATCHLIVO_KV) {
+      if (body.type === "close_room" && r.ok && data?.roomClosed && !seed) {
         memMarkClosed(roomId);
-        await env.WATCHLIVO_KV.put(`room_closed:${roomId}`, "1", { expirationTtl: 3600 }).catch(() => {});
-        const idx = (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [];
-        await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(idx.filter((x) => x && x.id !== roomId)), { expirationTtl: 21600 }).catch(() => {});
+        await d1MarkRoomClosed(env, roomId);
+        if (env.WATCHLIVO_KV) {
+          await env.WATCHLIVO_KV.put(`room_closed:${roomId}`, "1", { expirationTtl: 3600 }).catch(() => {});
+        }
+        await removePublicRoomIndex(roomId, env);
       } else if (
         r.ok &&
         data?.room &&
-        env.WATCHLIVO_KV &&
+        (env.ROOMS_DB || env.WATCHLIVO_KV) &&
         (["init", "join", "leave", "hb", "heartbeat", "play", "pause", "seek", "media", "set_media", "change_media", "resolve_media", "host_action", "kick", "privacy"].includes(body.type) ||
           Boolean(body.activeMedia) ||
           Boolean(data.pruned) ||
@@ -1979,9 +2094,34 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
   }
 
   let cid = String(body.clientId || `h_${makeHexNonce(4)}`);
-  let rm = memGetRoom(roomId) || (env.WATCHLIVO_KV ? await env.WATCHLIVO_KV.get(`room:${roomId}`, "json").catch(() => null) : null);
-  let healed = false;
+  // Always read global shared store (D1 -> KV) BEFORE local isolate memory to prevent cross-POP/cross-isolate split-brain!
+  let rm = null;
+  let loadedFromGlobal = false;
+  if (env.ROOMS_DB) {
+    const d1Rec = await d1GetRoomRecord(env, roomId);
+    if (d1Rec?.closed && !seed) {
+      memMarkClosed(roomId);
+      return jsonResp({ ok: false, error: "Oda kapatıldı.", roomClosed: true }, 410);
+    }
+    if (d1Rec?.rm) {
+      rm = d1Rec.rm;
+      loadedFromGlobal = true;
+    }
+  }
+  if (!rm && env.WATCHLIVO_KV) {
+    const kvRm = await env.WATCHLIVO_KV.get(`room:${roomId}`, "json").catch(() => null);
+    if (kvRm && typeof kvRm === "object") {
+      rm = kvRm;
+      loadedFromGlobal = true;
+    }
+  }
   if (!rm) {
+    rm = memGetRoom(roomId);
+  }
+  let healed = false;
+  let isNewRoom = false;
+  if (!rm) {
+    isNewRoom = true;
     rm = (await tryRestoreSyncToken(roomId, body.syncToken, env)) || makeRoomSkeleton(roomId, seed || body);
     if (seed) {
       healed = reconcileCuratedRoom(rm, seed) || true;
@@ -2006,32 +2146,48 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
       return jsonResp({ ok: false, error: seed || rm.curated ? "Sabit 7/24 odalar kapatılamaz." : "Sadece oda kurucusu odayı kapatabilir." }, 403);
     }
     memMarkClosed(roomId);
+    await d1MarkRoomClosed(env, roomId);
     if (env.WATCHLIVO_KV) {
       await env.WATCHLIVO_KV.delete(`room:${roomId}`).catch(() => {});
       await env.WATCHLIVO_KV.put(`room_closed:${roomId}`, "1", { expirationTtl: 3600 }).catch(() => {});
-      const idx = (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [];
-      await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(idx.filter((x) => x && x.id !== roomId)), { expirationTtl: 21600 }).catch(() => {});
     }
+    await removePublicRoomIndex(roomId, env);
     return jsonResp({ ok: true, roomClosed: true });
   }
+  const prevSeen = Number(rm.participants?.[cid]?.lastSeen || 0);
+  const hadParticipant = Boolean(rm.participants?.[cid]);
   const pruned = pruneStaleParticipants(rm);
   const res = applyRoomAction(rm, cid, body, { tokenVerified });
   if (res.forbiddenError) return jsonResp({ ok: false, error: res.forbiddenError }, 403);
   if (res.pendingPassword !== undefined) {
     await setRoomPassword(rm, res.pendingPassword);
   }
-  const tKvNow = nowSec();
-  const kvIdxRefresh = Boolean(rm.privacy === "public" && (!rm._lastIdxSync || tKvNow - rm._lastIdxSync > 45));
-  if (kvIdxRefresh) rm._lastIdxSync = tKvNow;
+  const tStoreNow = nowSec();
+  const keepaliveDue = Boolean(!hadParticipant || (tStoreNow - prevSeen >= 12));
+  const idxRefresh = Boolean(rm.privacy === "public" && (!rm._lastIdxSync || tStoreNow - rm._lastIdxSync > 45));
+  if (idxRefresh) rm._lastIdxSync = tStoreNow;
   memSetRoom(roomId, rm);
   const serialized = await serializeEdgeRoom(rm, cid, env);
-  if ((res.dirty || pruned || healed || res.pendingPassword !== undefined || kvIdxRefresh) && env.WATCHLIVO_KV) {
-    await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
+  const mustPersist = Boolean(
+    isNewRoom ||
+    !loadedFromGlobal ||
+    res.dirty ||
+    pruned ||
+    healed ||
+    res.pendingPassword !== undefined ||
+    keepaliveDue ||
+    idxRefresh
+  );
+  if (mustPersist) {
+    await d1PutRoom(env, roomId, rm);
+    if (env.WATCHLIVO_KV && (isNewRoom || res.dirty || pruned || healed || res.pendingPassword !== undefined || idxRefresh)) {
+      await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
+    }
     if (
       ["init", "join", "leave", "media", "set_media", "change_media", "resolve_media", "host_action", "kick", "privacy"].includes(body.type) ||
       Boolean(body.activeMedia) ||
       pruned ||
-      kvIdxRefresh
+      idxRefresh
     ) {
       await syncPublicRoomIndex(roomId, serialized, env);
     }
@@ -2045,6 +2201,7 @@ export async function handleEdgeRoomInfo(roomId, request, env, jsonResp, curated
   const url = new URL(request.url);
   if (seed) {
     _memClosedRooms.delete(roomId);
+    await d1ClearRoomClosed(env, roomId);
     if (env.WATCHLIVO_KV) await env.WATCHLIVO_KV.delete(`room_closed:${roomId}`).catch(() => {});
   } else {
     if (memIsClosed(roomId)) return jsonResp({ ok: false, error: "Bu oda artık mevcut değil", roomClosed: true }, 410);
@@ -2071,14 +2228,29 @@ export async function handleEdgeRoomInfo(roomId, request, env, jsonResp, curated
       noteDoFailure(err);
     }
   }
-  const rm = memGetRoom(roomId) || (env.WATCHLIVO_KV ? await env.WATCHLIVO_KV.get(`room:${roomId}`, "json").catch(() => null) : null);
+  let rm = null;
+  if (env.ROOMS_DB) {
+    const d1Rec = await d1GetRoomRecord(env, roomId);
+    if (d1Rec?.closed && !seed) {
+      memMarkClosed(roomId);
+      return jsonResp({ ok: false, error: "Bu oda artık mevcut değil", roomClosed: true }, 410);
+    }
+    if (d1Rec?.rm) rm = d1Rec.rm;
+  }
+  if (!rm && env.WATCHLIVO_KV) {
+    rm = await env.WATCHLIVO_KV.get(`room:${roomId}`, "json").catch(() => null);
+  }
+  if (!rm) rm = memGetRoom(roomId);
   if (seed) {
     if (rm) {
       const healed = reconcileCuratedRoom(rm, seed);
       const pruned = pruneStaleParticipants(rm);
       memSetRoom(roomId, rm);
-      if ((healed || pruned) && env.WATCHLIVO_KV) {
-        await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
+      if (healed || pruned) {
+        await d1PutRoom(env, roomId, rm);
+        if (env.WATCHLIVO_KV) {
+          await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
+        }
       }
       return jsonResp({ ok: true, room: serializeRoomInfo(rm, true) }, 200);
     }
@@ -2089,8 +2261,11 @@ export async function handleEdgeRoomInfo(roomId, request, env, jsonResp, curated
   }
   const pruned = pruneStaleParticipants(rm);
   memSetRoom(roomId, rm);
-  if (pruned && env.WATCHLIVO_KV) {
-    await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
+  if (pruned) {
+    await d1PutRoom(env, roomId, rm);
+    if (env.WATCHLIVO_KV) {
+      await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
+    }
   }
   const cid = String(url.searchParams.get("clientId") || "");
   const ctok = String(url.searchParams.get("clientToken") || "").trim();

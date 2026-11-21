@@ -727,10 +727,12 @@ export default {
               headers: wsHeaders,
             });
             if (wsResp.status >= 502) {
+              const wsRenderRouting = (wsResp.headers.get("x-render-routing") || "").toLowerCase();
+              const wsExplicitDown = wsRenderRouting.includes("suspend") || wsResp.status === 503 || wsResp.status === 530;
               wsResp.body?.cancel?.();
               if (wi + 1 < wsCandidates.length) continue;
               if (hasAutonomousEdge(env)) {
-                tunnelOfflineUntil = Date.now() + 25_000;
+                tunnelOfflineUntil = Date.now() + (wsExplicitDown ? 300_000 : 25_000);
                 return await handleAutonomousEdge(request, url, safePath, env);
               }
               if (safePath.startsWith("/ws/") && env.FORCE_SECONDARY !== "1") {
@@ -883,7 +885,7 @@ export default {
             renderRouting.includes("suspend") || statefulResp.status === 503 || statefulResp.status === 530;
           statefulResp.body?.cancel?.();
           if (hasAutonomousEdge(env)) {
-            tunnelOfflineUntil = Date.now() + 25_000;
+            tunnelOfflineUntil = Date.now() + (isExplicitlyDown ? 300_000 : 25_000);
             return await runAutonomousFallback(request, url, safePath, bodyBuf, env, ctx);
           }
           if (env.FORCE_SECONDARY !== "1") {

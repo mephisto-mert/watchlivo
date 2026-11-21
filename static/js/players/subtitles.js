@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261121_v234';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261121_v236';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -843,7 +843,7 @@ export class SubtitleDubController {
         season: String(effSeason),
         episode: String(effEpisode),
         duration: String(Math.round(Number(this.adapter?.getDuration?.() || media.duration || 0)) || ''),
-        _v: '20261121v234',
+        _v: '20261121v236',
       };
       if (!rawTidExtracted && baseUrl) queryParams.url = baseUrl;
       const qs = new URLSearchParams(queryParams);
