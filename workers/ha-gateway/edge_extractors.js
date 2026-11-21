@@ -1755,6 +1755,24 @@ function getStreamAudioCoverage(streams) {
   return { hasTr, hasOrig };
 }
 
+export function inferStreamSubSource(st) {
+  const explicit = String(st?.source || "").trim().toLowerCase();
+  if (explicit) return explicit;
+  const tag = String(st?.tag || "").trim().toLowerCase();
+  const u = String(st?.url || "").toLowerCase();
+  const lbl = String(st?.label || "").toLowerCase();
+  if (tag === "hls_dl" || /makesomthingup|centralodsseyproud|dizi\d*\.life/.test(u) || lbl.includes("dizilife")) return "dl_embed";
+  if (tag === "hls_dynet" || /ksdpictures\.site|yabancidizim|diziyou\.net/.test(u) || lbl.includes("diziyounet")) return "diziyou_net";
+  if (tag === "hls_dylove" || /storage\.diziyou\.love|diziyou\.love/.test(u) || /diziyou\s*·/.test(lbl)) return "diziyou_love";
+  if (tag === "hls_sinemacc" || /filmizle\.in|sinemacc/.test(u) || lbl.includes("sinemacc")) return "sinemacc";
+  if (tag === "hls_fhd" || /fullhdfilmizlesene|rapidvid/.test(u) || lbl.includes("fullhd")) return "fhd_embed";
+  if (tag === "hls_hdfc" || /hdfilmcehennemi/.test(u) || lbl.includes("hdfc")) return "hfnl_embed";
+  if (tag === "hls_filmmodu" || /filmmodu/.test(u) || lbl.includes("filmmodu")) return "filmmodu";
+  if (tag === "hls_ddizimag" || /ddizimag/.test(u) || lbl.includes("dizimag")) return "ddizimag";
+  if (tag === "hls_wt_vm" || /webteizle|filemoon|byse/.test(u) || lbl.includes("webteizle") || lbl.includes("filemoon")) return "hls_filemoon";
+  return "";
+}
+
 function mergeResolvedResults(resultList) {
   const rawStreams = [];
   const subs = [];
@@ -1769,13 +1787,15 @@ function mergeResolvedResults(resultList) {
       const u = String(st?.url || "").trim();
       if (!u || seenUrls.has(u)) continue;
       seenUrls.add(u);
-      rawStreams.push({
+      const stObj = {
         url: u,
         referer: st.referer || res.referer || "",
         label: st.label || "",
         tag: st.tag || res.tag || "",
         audioLangs: Array.isArray(st.audioLangs) ? st.audioLangs : [],
-      });
+      };
+      stObj.source = inferStreamSubSource(stObj);
+      rawStreams.push(stObj);
     }
     for (const sb of res.subs || []) {
       const su = String(sb?.url || "").trim();
@@ -1808,9 +1828,23 @@ function mergeResolvedResults(resultList) {
   };
   filtered.sort((a, b) => rankStream(a) - rankStream(b));
 
+  // Align subtitle priority to the winning primary video stream's source so synced VTTs match the playing encode!
+  const sourceRank = new Map();
+  for (const st of filtered) {
+    if (st.source && !sourceRank.has(st.source)) sourceRank.set(st.source, sourceRank.size);
+  }
+  if (subs.length > 1 && sourceRank.size > 0) {
+    subs.sort((a, b) => {
+      const ra = sourceRank.has(a?.source) ? sourceRank.get(a.source) : 99;
+      const rb = sourceRank.has(b?.source) ? sourceRank.get(b.source) : 99;
+      return ra - rb;
+    });
+  }
+
   return {
     url: filtered[0].url,
     referer: filtered[0].referer,
+    source: filtered[0].source || "",
     subs,
     streams: filtered,
     tag: filtered[0].tag || resultList.find((r) => r?.tag)?.tag || "hls_edge",

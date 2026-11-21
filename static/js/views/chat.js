@@ -1,11 +1,11 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261121_v231';
-import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261121_v231';
-import { avatar } from '../profile.js?v=20261121_v231';
-import { api, qs, humanApiError } from '../api.js?v=20261121_v231';
-import { resolveMusicItem } from './selection-kinds.js?v=20261121_v231';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261121_v231';
-import { ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261121_v231';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261121_v232';
+import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261121_v232';
+import { avatar } from '../profile.js?v=20261121_v232';
+import { api, qs, humanApiError } from '../api.js?v=20261121_v232';
+import { resolveMusicItem } from './selection-kinds.js?v=20261121_v232';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261121_v232';
+import { ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261121_v232';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [

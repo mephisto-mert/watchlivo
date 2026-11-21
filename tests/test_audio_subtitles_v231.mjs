@@ -21,7 +21,7 @@ import {
 } from "../workers/ha-gateway/edge_extractors.js";
 
 import { handleAutonomousEdge } from "../workers/ha-gateway/edge_autonomous.js";
-import { SubtitleDubController } from "../static/js/players/subtitles.js";
+import { SubtitleDubController, parseVtt } from "../static/js/players/subtitles.js";
 
 const TEST_ENV = {
   PROXY_SECRET: "test-v231-signing-secret-key-987654",
@@ -475,6 +475,139 @@ test("v231: SubtitleDubController auto-falls back from dead stream-tr to working
     assert.equal(picked.id, "os-tr-1", "Must auto-fallback from dead stream-tr to working os-tr-1");
     assert.equal(ctrl.selectedSubId, "os-tr-1");
     assert.equal(ctrl.subCues.length, 65);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("v232 sync: source-matched stream sub ordering, overlapping cue fast-path accuracy, X-TIMESTAMP-MAP, PAL/wrong-episode filter & duration auto-selection", async () => {
+  // 1. formatStreamSubTracks puts primarySource (diziyou_net) ahead of dl_embed (House of the Dragon S1E1 fix!)
+  const orderedSubs = formatStreamSubTracks([
+    { lang: "tr", url: "https://cdn.dl.test/hotd_tr.vtt", source: "dl_embed" },
+    { lang: "tr", url: "https://ksdpictures.site/sub_tr_hotd.vtt", source: "diziyou_net" },
+    { lang: "en", url: "https://cdn.dl.test/hotd_en.vtt", source: "dl_embed" },
+    { lang: "en", url: "https://ksdpictures.site/sub_en_hotd.vtt", source: "diziyou_net" },
+  ], "diziyou_net");
+  assert.equal(orderedSubs[0].source, "diziyou_net");
+  assert.equal(orderedSubs[0].id, "stream-tr");
+  assert.equal(orderedSubs[2].source, "diziyou_net");
+  assert.equal(orderedSubs[2].id, "stream-en");
+
+  // 2. parseVtt handles X-TIMESTAMP-MAP non-zero LOCAL offset and strips betting/IPTV spam cues
+  const tsVtt = [
+    "WEBVTT",
+    "X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:10.000",
+    "",
+    "00:00:12.000 --> 00:00:15.000",
+    "1000 TL Para yatırma bonusu hemen kazan!",
+    "",
+    "00:00:20.000 --> 00:00:24.000",
+    "Birinci replik",
+    "",
+    "00:00:21.500 --> 00:00:25.000",
+    "İkinci replik",
+  ].join("\n");
+  const parsed = parseVtt(tsVtt);
+  assert.equal(parsed.length, 2, "Betting spam cue must be stripped");
+  assert.equal(parsed[0].start, 10.0, "LOCAL:10s must shift cue from 20s to 10s");
+  assert.equal(parsed[1].start, 11.5);
+
+  // 3. Overlapping-cue fast-path bug fix: Cue 2 at 11.5s MUST NOT be delayed until Cue 1 ends at 14.0s!
+  const emitted = [];
+  const adapter = {
+    currentUrl: "/api/rave/stream?sid=srv_dn&ext=.m3u8",
+    video: null,
+    hls: null,
+    events: {
+      onSubtitleCue(txt) { emitted.push(txt); },
+      onTracksChanged() {},
+    },
+    getTime() { return 0; },
+    getDuration() { return 8178; },
+    async switchStreamSource() {},
+  };
+  const ctrl = new SubtitleDubController(adapter);
+  ctrl.media = {
+    tmdbId: "603",
+    title: "The Matrix",
+    servers: [
+      { id: "srv-1", source: "diziyou_net", label: "DiziyouNet", url: "/api/rave/stream?sid=srv_dn&ext=.m3u8" },
+      { id: "srv-2", source: "dl_embed", label: "Dizilife", url: "/api/rave/stream?sid=srv_dl&ext=.m3u8" },
+    ],
+  };
+  ctrl.selectedSubId = "stream-tr";
+  ctrl.subCues = parsed;
+
+  ctrl.onTimeUpdate(10.5);
+  assert.equal(ctrl.activeCueText, "Birinci replik");
+  // Without our nextStart boundary fix, 11.6 would hit the [10, 14) fast-path and SKIP "İkinci replik"!
+  ctrl.onTimeUpdate(11.6);
+  assert.equal(ctrl.activeCueText, "Birinci replik\nİkinci replik");
+  // At 14.1, Cue 1 ended at 14.0 so ONLY Cue 2 should remain visible!
+  ctrl.onTimeUpdate(14.1);
+  assert.equal(ctrl.activeCueText, "İkinci replik");
+  // At 15.1, both ended!
+  ctrl.onTimeUpdate(15.1);
+  assert.equal(ctrl.activeCueText, "");
+
+  // 4. Per-track _syncStorageKey isolates offset prefs across tracks
+  assert.notEqual(
+    ctrl._syncStorageKey(ctrl.media, "stream-tr"),
+    ctrl._syncStorageKey(ctrl.media, "os-tr-1")
+  );
+
+  // 5. /api/rave/subtitles rejects wrong TV episode (S5E3 on S3E5) and demotes 25fps PAL + betting ad below clean 23.976fps
+  const makeEpisodeSrt = (n, durSec, firstText) => {
+    const step = durSec / n;
+    const fmt = (sec) => {
+      const h = String(Math.floor(sec / 3600)).padStart(2, "0");
+      const m = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
+      const s = String(Math.floor(sec % 60)).padStart(2, "0");
+      return `${h}:${m}:${s},000`;
+    };
+    return Array.from({ length: n }, (_, i) => {
+      const st = 100 + Math.floor(i * step);
+      const en = st + 2;
+      const line = i === 0 ? firstText : "Bu gerçekten çok önemli bir sahne değil mi ama herkes neden burada?";
+      return `${i + 1}\n${fmt(st)} --> ${fmt(en)}\n${line}`;
+    }).join("\n\n");
+  };
+  const wrongEpSrt = makeEpisodeSrt(60, 3300, "Game of Thrones, 5. Sezon, 3. Bolum");
+  const palSpamSrt = makeEpisodeSrt(60, 3050, "1000 TL Para yatırma bonusu hemen al!");
+  const good23976Srt = makeEpisodeSrt(60, 3330, "Game of Thrones, 3. Sezon, 5. Bölüm");
+
+  const origFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      const u = typeof input === "string" ? input : input.url;
+      if (u.includes("api.themoviedb.org/3/tv/1399/external_ids")) {
+        return new Response(JSON.stringify({ imdb_id: "tt0944947" }), { status: 200 });
+      }
+      if (u.includes("opensubtitles-v3.strem.io/subtitles/series/tt0944947:3:5.json")) {
+        return new Response(JSON.stringify({
+          subtitles: [
+            { id: "tr-wrong", lang: "tur", fpsMilli: 23976, subtitleFileName: "GoT.S03E05.BluRay.srt", url: "https://subs5.strem.io/sub/wrong_ep.srt" },
+            { id: "tr-pal", lang: "tur", fpsMilli: 25000, subtitleFileName: "GoT.S03E05.25fps.BluRay.srt", url: "https://subs5.strem.io/sub/pal_spam.srt" },
+            { id: "tr-good", lang: "tur", fpsMilli: 23976, subtitleFileName: "GoT.S03E05.WEB-DL.srt", url: "https://subs5.strem.io/sub/good_s3e5.srt" },
+            { id: "en-good", lang: "eng", fpsMilli: 23976, subtitleFileName: "GoT.S03E05.WEB-DL.en.srt", url: "https://subs5.strem.io/sub/good_en.srt" },
+          ],
+        }), { status: 200 });
+      }
+      if (u.includes("wrong_ep.srt")) return new Response(wrongEpSrt, { status: 200 });
+      if (u.includes("pal_spam.srt")) return new Response(palSpamSrt, { status: 200 });
+      if (u.includes("good_s3e5.srt")) return new Response(good23976Srt, { status: 200 });
+      if (u.includes("good_en.srt")) return new Response(makeEpisodeSrt(60, 3330, "The quick brown fox jumps over the lazy dog in Westeros."), { status: 200 });
+      return new Response("Not Found", { status: 404 });
+    };
+    const env = { ...TEST_ENV, WATCHLIVO_KV: createMockKv() };
+    const reqUrl = new URL("https://watchlivo.online/api/rave/subtitles?tmdbId=1399&mediaType=tv&season=3&episode=5&duration=3443");
+    const resp = await handleAutonomousEdge(new Request(reqUrl.toString()), reqUrl, "/api/rave/subtitles", env);
+    assert.equal(resp.status, 200);
+    const data = await resp.json();
+    const trList = data.subtitleTracks.filter((t) => t.lang === "tr");
+    assert.equal(trList.some((t) => decodeURIComponent(t.url).includes("wrong_ep.srt")), false, "S5E3 uploaded under S3E5 must be dropped");
+    assert.ok(decodeURIComponent(trList[0].url).includes("good_s3e5.srt"), "Clean 23.976fps S3E5 must outrank 25fps PAL + betting spam");
+    assert.ok(trList[0].spanSec > 3200, "Must expose spanSec metadata");
   } finally {
     globalThis.fetch = origFetch;
   }

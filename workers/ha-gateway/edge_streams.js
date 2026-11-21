@@ -372,6 +372,7 @@ export function buildEdgeAudioTracks(servers, primaryUrl = "", reqOrigLang = "")
         audioLang: "tr",
         label: "🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)",
         mode: "stream",
+        source: dualSrv.source || "",
         url: appendStreamAudParam(dualSrv.url, "tr"),
       },
       {
@@ -381,6 +382,7 @@ export function buildEdgeAudioTracks(servers, primaryUrl = "", reqOrigLang = "")
         audioLang: nonTrLang || "orig",
         label: origLabel,
         mode: "stream",
+        source: dualSrv.source || "",
         url: appendStreamAudParam(dualSrv.url, "orig"),
       },
     ];
@@ -397,6 +399,7 @@ export function buildEdgeAudioTracks(servers, primaryUrl = "", reqOrigLang = "")
         audioLang: "tr",
         label: "🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)",
         mode: "stream",
+        source: trOnlySrv.source || "",
         url: trOnlySrv.url,
       },
       {
@@ -406,6 +409,7 @@ export function buildEdgeAudioTracks(servers, primaryUrl = "", reqOrigLang = "")
         audioLang: nonTrLang || "orig",
         label: origLabel,
         mode: "stream",
+        source: origOnlySrv.source || "",
         url: origOnlySrv.url,
       },
     ];
@@ -421,6 +425,7 @@ export function buildEdgeAudioTracks(servers, primaryUrl = "", reqOrigLang = "")
         audioLang: "tr",
         label: isNativeTr ? "🇹🇷 Türkçe (Orijinal Ses · 1080p)" : "🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)",
         mode: "stream",
+        source: trOnlySrv.source || "",
         url: trOnlySrv.url,
       },
     ];
@@ -437,6 +442,7 @@ export function buildEdgeAudioTracks(servers, primaryUrl = "", reqOrigLang = "")
         audioLang: nonTrLang || "orig",
         label: origLabel,
         mode: "stream",
+        source: origOnlySrv.source || "",
         url: origOnlySrv.url,
       },
     ];
@@ -451,6 +457,7 @@ export function buildEdgeAudioTracks(servers, primaryUrl = "", reqOrigLang = "")
       audioLang: origCode,
       label: origCode === "en" ? "🇬🇧 İngilizce (Orijinal Ses · 1080p)" : "🎬 Orijinal Ses (1080p HD)",
       mode: "stream",
+      source: list[0]?.source || "",
       url: fallbackUrl,
     },
   ];
@@ -754,6 +761,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
             label: cItem.label || `📡 Sunucu ${trServers.length + 1} · Edge Direct (${cIsMp4 ? "MP4 HD" : "1080p HLS"})`,
             url: cProxied,
             streamType: cIsMp4 ? "mp4" : "hls",
+            source: cItem.source || "",
             audioLangs: Array.isArray(cItem.audioLangs) ? cItem.audioLangs : [],
           });
         }
@@ -773,9 +781,11 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
           const trTrack = trAudioTracks.find((t) => t.id === "tr-dub" && t.url);
           if (trTrack && trTrack.url.includes("&aud=tr")) chosenUrl = trTrack.url;
         }
-        const matchedChosenSrv = trServers.find((sv) => sv.url === chosenUrl);
+        const stripAudQ = (u) => String(u || "").replace(/([?&])aud=[^&]*/gi, "$1").replace(/\?&/, "?").replace(/[?&]$/, "");
+        const matchedChosenSrv = trServers.find((sv) => sv.url === chosenUrl || stripAudQ(sv.url) === stripAudQ(chosenUrl));
         if (matchedChosenSrv) chosenStreamType = matchedChosenSrv.streamType;
-        const trSubs = formatStreamSubTracks(trLive.subs || []);
+        const primarySubSource = matchedChosenSrv?.source || trServers[0]?.source || trLive.source || "";
+        const trSubs = formatStreamSubTracks(trLive.subs || [], primarySubSource);
         return jsonResp({
           id: tmdbId || id,
           provider: "netflix",
@@ -1614,7 +1624,7 @@ const STREAM_SOURCE_NAMES = {
   hls_filemoon: "FileMoon",
 };
 
-export function formatStreamSubTracks(rawList) {
+export function formatStreamSubTracks(rawList, primarySource = "") {
   const seen = new Set();
   const norm = [];
   for (const t of (Array.isArray(rawList) ? rawList : [])) {
@@ -1633,7 +1643,17 @@ export function formatStreamSubTracks(rawList) {
     });
   }
   const rankLang = (l) => (l === "tr" ? 0 : (l === "en" ? 1 : 2));
-  norm.sort((a, b) => rankLang(a.lang) - rankLang(b.lang));
+  const primSrc = String(primarySource || "").trim();
+  norm.sort((a, b) => {
+    const lDiff = rankLang(a.lang) - rankLang(b.lang);
+    if (lDiff !== 0) return lDiff;
+    if (primSrc) {
+      const pa = a.source === primSrc ? 0 : 1;
+      const pb = b.source === primSrc ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+    }
+    return 0;
+  });
   const countsByLang = {};
   for (const item of norm) countsByLang[item.lang] = (countsByLang[item.lang] || 0) + 1;
   const idxByLang = {};

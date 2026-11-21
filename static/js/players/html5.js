@@ -1,11 +1,11 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261121_v231';
-import { api } from '../api.js?v=20261121_v231';
-import { expectedPosition } from '../sync.js?v=20261121_v231';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261121_v231';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261121_v231';
-import { ensureHlsJs } from './hls-loader.js?v=20261121_v231';
-import { AdaptiveQualityController, buildHlsAbrConfig, formatHeightTag, getNetworkSnapshot, isLowBandwidthMode, setLowBandwidthMode, withEdgeAbrParams } from './abr.js?v=20261121_v231';
+import { SubtitleDubController } from './subtitles.js?v=20261121_v232';
+import { api } from '../api.js?v=20261121_v232';
+import { expectedPosition } from '../sync.js?v=20261121_v232';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261121_v232';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261121_v232';
+import { ensureHlsJs } from './hls-loader.js?v=20261121_v232';
+import { AdaptiveQualityController, buildHlsAbrConfig, formatHeightTag, getNetworkSnapshot, isLowBandwidthMode, setLowBandwidthMode, withEdgeAbrParams } from './abr.js?v=20261121_v232';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -470,6 +470,68 @@ export class Html5Adapter {
         this.subs?.clearActiveCue?.();
       }
     });
+    const notifySubDuration = () => {
+      if (this._destroyed || this.video !== v) return;
+      const d = Number(v.duration || 0);
+      if (Number.isFinite(d) && d > 60) {
+        this.subs?.onVideoDurationKnown?.(d);
+      }
+    };
+    v.addEventListener('loadedmetadata', notifySubDuration);
+    v.addEventListener('durationchange', notifySubDuration);
+
+    this._stopSubFrameLoop?.();
+    let subVfcHandle = 0;
+    let subRafHandle = 0;
+    let subLoopActive = false;
+    const stopSubFrameLoop = () => {
+      subLoopActive = false;
+      if (subVfcHandle && typeof v.cancelVideoFrameCallback === 'function') {
+        try { v.cancelVideoFrameCallback(subVfcHandle); } catch (_) {}
+      }
+      subVfcHandle = 0;
+      if (subRafHandle && typeof cancelAnimationFrame === 'function') {
+        try { cancelAnimationFrame(subRafHandle); } catch (_) {}
+      }
+      subRafHandle = 0;
+    };
+    this._stopSubFrameLoop = stopSubFrameLoop;
+    const tickSubFrame = (_now, meta) => {
+      subVfcHandle = 0;
+      subRafHandle = 0;
+      if (!subLoopActive || this._destroyed || this.video !== v || v.paused || v.seeking) {
+        subLoopActive = false;
+        return;
+      }
+      if (v.readyState >= 2 && (v.videoWidth > 0 || this.isMusic)) {
+        if (this.subs && this.subs.selectedSubId !== 'off' && this.subs.subCues?.length) {
+          const mediaT = Number.isFinite(meta?.mediaTime) ? meta.mediaTime : v.currentTime;
+          this.subs.onTimeUpdate(mediaT);
+        }
+      } else {
+        this.subs?.clearActiveCue?.();
+      }
+      scheduleSubFrame();
+    };
+    const scheduleSubFrame = () => {
+      if (!subLoopActive || this._destroyed || this.video !== v || v.paused || v.seeking) return;
+      if (typeof v.requestVideoFrameCallback === 'function') {
+        subVfcHandle = v.requestVideoFrameCallback(tickSubFrame);
+      } else if (typeof requestAnimationFrame === 'function') {
+        subRafHandle = requestAnimationFrame(tickSubFrame);
+      }
+    };
+    const startSubFrameLoop = () => {
+      if (subLoopActive || this._destroyed || this.video !== v || v.paused) return;
+      subLoopActive = true;
+      scheduleSubFrame();
+    };
+    v.addEventListener('playing', startSubFrameLoop);
+    v.addEventListener('play', startSubFrameLoop);
+    v.addEventListener('seeked', startSubFrameLoop);
+    v.addEventListener('pause', stopSubFrameLoop);
+    v.addEventListener('ended', stopSubFrameLoop);
+
     clearInterval(this.subTickTimer);
     this.subTickTimer = setInterval(() => {
       if (this._destroyed || !this.video || this.video.paused || this.video.seeking) return;
@@ -477,10 +539,13 @@ export class Html5Adapter {
         this.subs?.clearActiveCue?.();
         return;
       }
-      if (this.subs && this.subs.selectedSubId !== 'off' && this.subs.subCues?.length) {
-        this.subs.onTimeUpdate(this.video.currentTime);
+      // Keep gentle fallback tick for hidden tab / PiP / TTS when rAF/rVFC is throttled
+      if (!subLoopActive || (typeof document !== 'undefined' && document.hidden)) {
+        if (this.subs && this.subs.selectedSubId !== 'off' && this.subs.subCues?.length) {
+          this.subs.onTimeUpdate(this.video.currentTime);
+        }
       }
-    }, 200);
+    }, 350);
     this.hasEnded = false;
     const fireEndedOnce = () => {
       if (this.hasEnded) return;
@@ -2546,6 +2611,7 @@ export class Html5Adapter {
     this.wantPlaying = false;
     clearTimeout(this.loadReadyTimer);
     this._loadDoneResolve?.();
+    this._stopSubFrameLoop?.();
     clearInterval(this.subTickTimer);
     clearTimeout(this.waitTimer);
     clearTimeout(this.resumeTimer);

@@ -1,16 +1,16 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261121_v231';
-import { api, qs as buildQs } from '../api.js?v=20261121_v231';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261121_v231';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261121_v231';
-import { getProvider } from '../providers.js?v=20261121_v231';
-import { expectedPosition } from '../sync.js?v=20261121_v231';
-import { thumbFor } from './lobby.js?v=20261121_v231';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261121_v231';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261121_v231';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261121_v231';
-import { avatar } from '../profile.js?v=20261121_v231';
-import { unlockSfxAudio } from './chat.js?v=20261121_v231';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261121_v232';
+import { api, qs as buildQs } from '../api.js?v=20261121_v232';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261121_v232';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261121_v232';
+import { getProvider } from '../providers.js?v=20261121_v232';
+import { expectedPosition } from '../sync.js?v=20261121_v232';
+import { thumbFor } from './lobby.js?v=20261121_v232';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261121_v232';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261121_v232';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261121_v232';
+import { avatar } from '../profile.js?v=20261121_v232';
+import { unlockSfxAudio } from './chat.js?v=20261121_v232';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -3006,7 +3006,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261121_v231',
+            v: '20261121_v232',
           });
           api(`/api/rave/seasons?${q.toString()}`, { timeout: 8000 })
             .then((inf) => {

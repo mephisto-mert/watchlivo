@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261121_v231';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261121_v232';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -33,6 +33,19 @@ function parseTimeSec(h, m, s, ms) {
 export function parseVtt(vttText) {
   if (!vttText || typeof vttText !== 'string') return [];
   const lines = vttText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  let tsMap = null;
+  for (let hi = 0; hi < Math.min(lines.length, 8); hi += 1) {
+    const hm = lines[hi].match(/^X-TIMESTAMP-MAP\s*=\s*(.+)$/i);
+    if (hm) {
+      const mpegM = hm[1].match(/MPEGTS\s*:\s*(\d+)/i);
+      const localM = hm[1].match(/LOCAL\s*:\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{1,3})/i);
+      if (mpegM || localM) {
+        const localSec = localM ? parseTimeSec(localM[1], localM[2], localM[3], String(localM[4] || '0').padEnd(3, '0')) : 0;
+        tsMap = { mpegts: mpegM ? Number(mpegM[1]) : 0, localSec };
+      }
+      break;
+    }
+  }
   const rawCues = [];
   if (vttText.includes('[Events]') || /^Dialogue:\s*\d+,/m.test(vttText)) {
     const assRe = /^Dialogue:\s*[^,]*,(\d+:\d{2}:\d{2}[.,]\d{2,3}),(\d+:\d{2}:\d{2}[.,]\d{2,3}),([^,]*),(?:[^,]*,){5}(.+)$/;
@@ -114,13 +127,19 @@ export function parseVtt(vttText) {
         dedupLines.push(rl);
       }
       const clean = dedupLines.join('\n').trim();
-      if (clean && end > start && !/(?:opensubtitles|osdb\.link|advertise your product|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|subscene\.com|turkcealtyazi\.org|altyazi\.org|yutukluklar|çeviri\s*:|senkron\s*:|iyi seyirler dileriz)/i.test(clean)) {
+      if (clean && end > start && !/(?:opensubtitles|osdb\.link|advertise your product|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|subscene\.com|turkcealtyazi\.org|altyazi\.org|yutukluklar|çeviri\s*:|senkron\s*:|iyi seyirler dileriz|para\s+yat[ıi]rma\s+bonusu|forumiptv\.org|\b1xbet\b|ho[şs]geldin\s+bonusu|canl[ıi]\s+bahis)/i.test(clean)) {
         rawCues.push({ start, end, text: clean, norm: normSubLine(clean) || clean });
       }
     } else {
       i += 1;
     }
   }
+  }
+  if (tsMap && tsMap.localSec > 0.2 && rawCues.length && rawCues[0].start >= tsMap.localSec - 0.5) {
+    for (const rc of rawCues) {
+      rc.start = Math.max(0, rc.start - tsMap.localSec);
+      rc.end = Math.max(rc.start + 0.1, rc.end - tsMap.localSec);
+    }
   }
   rawCues.sort((a, b) => (a.start - b.start) || (a.end - b.end));
   const cues = [];
@@ -142,6 +161,7 @@ export function parseVtt(vttText) {
     runningMaxEnd = Math.max(runningMaxEnd, c.end);
     cues.push({ idx: cues.length, start: c.start, end: c.end, maxEnd: runningMaxEnd, text: c.text, norm: c.norm });
   }
+  if (tsMap) cues._tsMap = tsMap;
   return cues;
 }
 
@@ -330,17 +350,18 @@ export class SubtitleDubController {
     }
   }
 
-  _syncStorageKey(media = this.media) {
+  _syncStorageKey(media = this.media, trackId = this.selectedSubId) {
     if (!media) return 'vortex_sub_sync:default';
     const idPart = media.tmdbId || media.imdbId || (media.title || 'media').slice(0, 32);
-    return `vortex_sub_sync:${idPart}:${media.season || 1}:${media.episode || 1}`;
+    const trkPart = String(trackId || 'default').replace(/[^a-z0-9_-]/gi, '').slice(0, 28) || 'default';
+    return `vortex_sub_sync:${idPart}:${media.season || 1}:${media.episode || 1}:${trkPart}`;
   }
 
-  _loadMediaSyncPrefs(media) {
+  _loadMediaSyncPrefs(media, trackId = this.selectedSubId) {
     this.offsetSec = 0;
     this.fpsScale = 1.0;
     try {
-      const raw = localStorage.getItem(this._syncStorageKey(media));
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(this._syncStorageKey(media, trackId)) : null;
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Number.isFinite(Number(parsed.offsetSec))) {
@@ -349,7 +370,7 @@ export class SubtitleDubController {
             this.offsetSec = off;
           } else {
             this.offsetSec = 0;
-            this._saveMediaSyncPrefs();
+            this._saveMediaSyncPrefs(trackId);
           }
         }
         if (Number.isFinite(Number(parsed.fpsScale)) && parsed.fpsScale > 0.85 && parsed.fpsScale < 1.15) {
@@ -359,12 +380,14 @@ export class SubtitleDubController {
     } catch (e) { /* ignore */ }
   }
 
-  _saveMediaSyncPrefs() {
+  _saveMediaSyncPrefs(trackId = this.selectedSubId) {
     try {
-      localStorage.setItem(this._syncStorageKey(), JSON.stringify({
-        offsetSec: this.offsetSec,
-        fpsScale: this.fpsScale,
-      }));
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(this._syncStorageKey(this.media, trackId), JSON.stringify({
+          offsetSec: this.offsetSec,
+          fpsScale: this.fpsScale,
+        }));
+      }
     } catch (e) { /* ignore */ }
   }
 
@@ -419,6 +442,8 @@ export class SubtitleDubController {
   setSubtitleOffset(deltaOrVal, absolute = false) {
     const next = absolute ? Number(deltaOrVal || 0) : (this.offsetSec + Number(deltaOrVal || 0));
     this.offsetSec = Math.round(Math.max(-120, Math.min(120, next)) * 10) / 10;
+    this._lastFastCueStart = 0;
+    this._lastFastCueEnd = 0;
     this._saveMediaSyncPrefs();
     this._rebuildNativeTrackCues();
     this.onTimeUpdate(this.adapter.getTime(), true);
@@ -428,10 +453,63 @@ export class SubtitleDubController {
   setSubtitleFpsScale(scale = 1.0) {
     const val = Number(scale) || 1.0;
     this.fpsScale = (val > 0.85 && val < 1.15) ? Math.round(val * 1000000) / 1000000 : 1.0;
+    this._lastFastCueStart = 0;
+    this._lastFastCueEnd = 0;
     this._saveMediaSyncPrefs();
     this._rebuildNativeTrackCues();
     this.onTimeUpdate(this.adapter.getTime(), true);
     return this.fpsScale;
+  }
+
+  _getActiveStreamSource(urlOverride = '') {
+    const targetUrl = String(urlOverride || this.adapter?.currentUrl || this.media?.url || '').trim();
+    const normCmp = (s) => {
+      const str = String(s || '').trim();
+      if (!str) return '';
+      try {
+        const uo = new URL(str, typeof location !== 'undefined' ? location.origin : 'https://watchlivo.online');
+        uo.searchParams.delete('aud');
+        uo.searchParams.delete('proxy_segs');
+        uo.searchParams.delete('max_h');
+        uo.searchParams.delete('abr_low');
+        return `${uo.pathname}${uo.search}`;
+      } catch (_) {
+        return str.replace(/([?&])(aud|proxy_segs|max_h|abr_low)=[^&]*/g, '$1').replace(/[?&]+$/, '').replace(/\?&/, '?');
+      }
+    };
+    const inferFromMeta = (obj, fallbackUrl = '') => {
+      const explicit = String(obj?.source || '').trim().toLowerCase();
+      if (explicit) return explicit;
+      const txt = `${obj?.label || ''} ${fallbackUrl || obj?.url || ''}`.toLowerCase();
+      if (txt.includes('dizilife') || txt.includes('makesomthingup') || txt.includes('centralodsseyproud')) return 'dl_embed';
+      if (txt.includes('diziyounet') || txt.includes('ksdpictures') || txt.includes('yabancidizim')) return 'diziyou_net';
+      if (/diziyou\s*·/.test(txt) || txt.includes('diziyou.love')) return 'diziyou_love';
+      if (txt.includes('sinemacc') || txt.includes('filmizle.in')) return 'sinemacc';
+      if (txt.includes('fullhd') || txt.includes('rapidvid')) return 'fhd_embed';
+      if (txt.includes('hdfc') || txt.includes('hdfilmcehennemi')) return 'hfnl_embed';
+      if (txt.includes('filmmodu')) return 'filmmodu';
+      if (txt.includes('dizimag') || txt.includes('ddizimag')) return 'ddizimag';
+      if (txt.includes('webteizle') || txt.includes('filemoon')) return 'hls_filemoon';
+      return '';
+    };
+    const targetNorm = normCmp(targetUrl);
+    const srvs = Array.isArray(this.media?.servers) ? this.media.servers : [];
+    if (targetNorm) {
+      const matchedSrv = srvs.find((s) => s?.url && normCmp(s.url) === targetNorm);
+      if (matchedSrv) {
+        const src = inferFromMeta(matchedSrv, targetUrl);
+        if (src) return src;
+      }
+      const matchedAud = (Array.isArray(this.audioTracks) ? this.audioTracks : []).find((a) => a?.url && normCmp(a.url) === targetNorm);
+      if (matchedAud) {
+        const src = inferFromMeta(matchedAud, targetUrl);
+        if (src) return src;
+      }
+    }
+    const direct = inferFromMeta(null, targetUrl);
+    if (direct) return direct;
+    if (srvs.length) return inferFromMeta(srvs[0], srvs[0].url);
+    return '';
   }
 
   resolveInitialAudioTrack(media) {
@@ -485,7 +563,23 @@ export class SubtitleDubController {
 
   onStreamFallbackUrl(nextUrl) {
     const u = String(nextUrl || '');
-    if (!u || !Array.isArray(this.audioTracks) || !this.audioTracks.length) return;
+    if (!u) return;
+    const prevSource = this._activeStreamSource || '';
+    const nextSource = this._getActiveStreamSource(u);
+    this._activeStreamSource = nextSource;
+    if (nextSource && nextSource !== prevSource && Array.isArray(this.subtitleTracks) && this.subtitleTracks.length) {
+      const curSub = this.subtitleTracks.find((t) => t.id === this.selectedSubId) || null;
+      const curLang = curSub ? normalizeClientSubLang(curSub.lang, curSub.label) : '';
+      this.subtitleTracks = this._dedupeSubtitleTrackIds(this.subtitleTracks);
+      if (this.media) this.media.subtitleTracks = this.subtitleTracks;
+      if (curSub && curSub.source !== 'local' && curSub.source !== 'youtube-native' && this.selectedSubId !== 'off' && curSub.source !== nextSource) {
+        const matchedNextSub = this.subtitleTracks.find((t) => t.source === nextSource && normalizeClientSubLang(t.lang, t.label) === curLang);
+        if (matchedNextSub && matchedNextSub.id !== this.selectedSubId) {
+          this.setSubtitleTrack(matchedNextSub.id, true).catch(() => {});
+        }
+      }
+    }
+    if (!Array.isArray(this.audioTracks) || !this.audioTracks.length) return;
     const norm = (s) => {
       const str = String(s || '').trim();
       if (!str) return '';
@@ -578,12 +672,13 @@ export class SubtitleDubController {
       const lang = raw.source === 'local' ? (raw.lang || 'tr') : normalizeClientSubLang(raw.lang, raw.label);
       normalized.push({ ...raw, lang });
     }
+    const activeSrc = this._getActiveStreamSource?.() || '';
     const rankTrack = (t) => {
       if (t.source === 'local') return 0;
-      const synced = isStreamSyncedSub(t) ? 0 : 1;
-      if (t.lang === 'tr') return 10 + synced;
-      if (t.lang === 'en') return 20 + synced;
-      return 30 + synced;
+      const syncedRank = (activeSrc && t.source === activeSrc) ? 0 : (isStreamSyncedSub(t) ? 1 : 2);
+      if (t.lang === 'tr') return 10 + syncedRank;
+      if (t.lang === 'en') return 20 + syncedRank;
+      return 30 + syncedRank;
     };
     normalized.sort((a, b) => rankTrack(a) - rankTrack(b));
 
@@ -709,6 +804,9 @@ export class SubtitleDubController {
     this._autoHealedLang = '';
     this._healingInFlight = false;
     this._emptyReloadCount = 0;
+    this._userPickedSubForMedia = false;
+    this._durationValidatedForMedia = false;
+    this._activeStreamSource = this._getActiveStreamSource(media?.url || '');
     this._loadMediaSyncPrefs(media);
     const rawSubs = Array.isArray(media.subtitleTracks) ? [...preservedLocals, ...media.subtitleTracks] : [...preservedLocals];
     this.subtitleTracks = this._dedupeSubtitleTrackIds(rawSubs);
@@ -742,7 +840,8 @@ export class SubtitleDubController {
         title: String(media.seriesTitle || media.title || '').split(' — ')[0].trim(),
         season: String(effSeason),
         episode: String(effEpisode),
-        _v: '20261121v231',
+        duration: String(Math.round(Number(this.adapter?.getDuration?.() || media.duration || 0)) || ''),
+        _v: '20261121v232',
       };
       if (!rawTidExtracted && baseUrl) queryParams.url = baseUrl;
       const qs = new URLSearchParams(queryParams);
@@ -1282,6 +1381,9 @@ export class SubtitleDubController {
   async setSubtitleTrack(id, isInit = false) {
     const cleanId = id || 'off';
     const myTrackSeq = (this._subTrackSeq = (this._subTrackSeq || 0) + 1);
+    if (!isInit) this._userPickedSubForMedia = true;
+    this._lastFastCueStart = 0;
+    this._lastFastCueEnd = 0;
     this.selectedSubId = cleanId;
     if (!isInit && cleanId === 'off') {
       const curAudObj = this.audioTracks.find((t) => t.id === this.selectedAudioId);
@@ -1352,16 +1454,40 @@ export class SubtitleDubController {
         return track;
       }
       const isStreamEmbeddedFansub = isStreamSyncedSub(track);
+      const activeSrcNow = this._getActiveStreamSource?.() || '';
+      const matchesActiveServer = Boolean(activeSrcNow && track.source === activeSrcNow);
       const wrongAutoLang = Boolean(isInit && targetLangForFallback && track._detectedLang && track._detectedLang !== targetLangForFallback);
+      const curSpanInit = getSpan(cues);
+      const hasDurationMismatch = Boolean(
+        isInit
+        && track.source !== 'local'
+        && !matchesActiveServer
+        && dur > 900
+        && curSpanInit > 60
+        && (
+          curSpanInit > dur * 1.025
+          || curSpanInit < dur * 0.86
+          || (dur > 2400 && curSpanInit < dur * 0.945)
+        )
+      );
       const isForcedOrTruncated = track.source === 'local'
         ? false
         : (isInit
           ? (isStreamEmbeddedFansub
             ? (cues.length < 20)
-            : (cues.length < 35 || (cues.length < 45 && getSpan(cues) < minEnd)))
+            : (cues.length < 35 || (cues.length < 45 && curSpanInit < minEnd)))
           : false);
-      if (wrongAutoLang || isForcedOrTruncated || cues.length === 0) {
+      if (wrongAutoLang || isForcedOrTruncated || hasDurationMismatch || cues.length === 0) {
         const alts = this.subtitleTracks.filter((t) => t.id !== track.id && normalizeClientSubLang(t.lang, t.label) === targetLangForFallback);
+        const durFitScore = (arr) => {
+          const sp = getSpan(arr);
+          if (!arr?.length || dur <= 900) return arr?.length || 0;
+          const r = sp / dur;
+          if (r > 1.025) return -50 - (r - 1.025) * 100;
+          if (r < 0.85) return -40 - (0.85 - r) * 100;
+          return 100 - Math.abs(r - 0.97) * 120;
+        };
+        let bestFit = durFitScore(cues);
         for (const alt of alts) {
           const altCues = await this._loadCuesForTrack(alt, !isInit);
           if (this._destroyed || this._mediaSeq !== seq || this._subTrackSeq !== myTrackSeq) return null;
@@ -1372,6 +1498,16 @@ export class SubtitleDubController {
             track = alt;
             cues = altCues;
             break;
+          }
+          if (hasDurationMismatch && dur > 900 && altCues.length >= 40) {
+            const altFit = durFitScore(altCues);
+            if (altFit > bestFit + 6) {
+              track = alt;
+              cues = altCues;
+              bestFit = altFit;
+              if (bestFit >= 94) break;
+            }
+            continue;
           }
           if ((altCues.length >= 60 && altSpan >= minEnd) || (altCues.length > cues.length && altSpan > curSpan) || (cues.length === 0 && altCues.length > 0)) {
             track = alt;
@@ -1386,7 +1522,10 @@ export class SubtitleDubController {
       }
       if (this._destroyed || this._mediaSeq !== seq || this._subTrackSeq !== myTrackSeq) return null;
       this.selectedSubId = track.id;
+      this._loadMediaSyncPrefs(this.media, track.id);
       this.subCues = cues;
+      this._lastFastCueStart = 0;
+      this._lastFastCueEnd = 0;
       if (!this.intro) this.intro = this._detectIntroFromCues(cues);
       this.secondaryCues = [];
       this._attachNativeTrack(track);
@@ -1396,6 +1535,30 @@ export class SubtitleDubController {
       return track;
     } finally {
       if (this._subTrackSeq === myTrackSeq) this._loadingSubTrack = false;
+    }
+  }
+
+  onVideoDurationKnown(durSec) {
+    const dur = Number(durSec || 0);
+    if (!Number.isFinite(dur) || dur <= 900 || this._destroyed || this._loadingSubTrack) return;
+    if (this._userPickedSubForMedia || this._durationValidatedForMedia) return;
+    if (!this.selectedSubId || this.selectedSubId === 'off' || !this.subCues.length) return;
+    const curTrack = this.subtitleTracks.find((t) => t.id === this.selectedSubId);
+    if (!curTrack || curTrack.source === 'local' || curTrack.source === 'youtube-native') return;
+    const activeSrc = this._getActiveStreamSource?.() || '';
+    if (activeSrc && curTrack.source === activeSrc) {
+      this._durationValidatedForMedia = true;
+      return;
+    }
+    const lastEnd = this.subCues[this.subCues.length - 1]?.end || 0;
+    const ratio = lastEnd / dur;
+    const suspicious = ratio > 1.025 || ratio < 0.86 || (dur > 2400 && ratio < 0.945);
+    this._durationValidatedForMedia = true;
+    if (!suspicious) return;
+    const curLang = normalizeClientSubLang(curTrack.lang, curTrack.label);
+    const hasAlts = this.subtitleTracks.some((t) => t.id !== curTrack.id && normalizeClientSubLang(t.lang, t.label) === curLang);
+    if (hasAlts) {
+      this.setSubtitleTrack(curTrack.id, true).catch(() => {});
     }
   }
 
@@ -1568,8 +1731,10 @@ export class SubtitleDubController {
     return track;
   }
 
-  findCueAt(cues, t) {
-    if (!cues || !cues.length || !Number.isFinite(t)) return null;
+  findCueStateAt(cues, t) {
+    if (!cues || !cues.length || !Number.isFinite(t)) {
+      return { cue: null, validFrom: -Infinity, validUntil: Infinity };
+    }
     let lo = 0;
     let hi = cues.length - 1;
     let idx = -1;
@@ -1582,21 +1747,36 @@ export class SubtitleDubController {
         hi = mid - 1;
       }
     }
-    if (idx < 0) return null;
+    const nextStart = (idx + 1 < cues.length) ? cues[idx + 1].start : Infinity;
+    if (idx < 0) {
+      return { cue: null, validFrom: -Infinity, validUntil: cues[0].start };
+    }
     const active = [];
+    let latestPriorEnd = -Infinity;
     for (let i = idx; i >= 0; i -= 1) {
       const c = cues[i];
-      if ((c.maxEnd ?? c.end) < t) break;
+      if ((c.maxEnd ?? c.end) < t) {
+        if ((c.maxEnd ?? c.end) > latestPriorEnd) latestPriorEnd = c.maxEnd ?? c.end;
+        break;
+      }
       if (t >= c.start && t <= c.end) {
         active.push(c);
         if (active.length >= 2) break;
+      } else if (c.end <= t && c.end > latestPriorEnd) {
+        latestPriorEnd = c.end;
       }
     }
-    if (!active.length) return null;
+    if (!active.length) {
+      return { cue: null, validFrom: Math.max(latestPriorEnd, cues[idx].start), validUntil: nextStart };
+    }
     active.reverse();
     const uniqueLines = [];
     const seenNorm = new Set();
+    let maxActiveStart = -Infinity;
+    let minActiveEnd = Infinity;
     for (const item of active) {
+      if (item.start > maxActiveStart) maxActiveStart = item.start;
+      if (item.end < minActiveEnd) minActiveEnd = item.end;
       const parts = String(item.text || '').split('\n').map((l) => l.trim()).filter(Boolean);
       for (const ln of parts) {
         const normKey = ln.toLocaleLowerCase('tr').replace(/\u0307/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim() || ln.trim();
@@ -1605,7 +1785,17 @@ export class SubtitleDubController {
         uniqueLines.push(ln);
       }
     }
-    return { start: active[0].start, end: active[active.length - 1].end, text: uniqueLines.join('\n') };
+    const validFrom = Math.max(maxActiveStart, latestPriorEnd);
+    const validUntil = Math.min(minActiveEnd, nextStart);
+    return {
+      cue: { start: active[0].start, end: active[active.length - 1].end, nextBoundary: validUntil, text: uniqueLines.join('\n') },
+      validFrom,
+      validUntil,
+    };
+  }
+
+  findCueAt(cues, t) {
+    return this.findCueStateAt(cues, t).cue;
   }
 
   clearActiveCue() {
@@ -1694,16 +1884,12 @@ export class SubtitleDubController {
       if (adjT > 420 && lastEnd > 0 && adjT > lastEnd + 45) {
         this._tryHealTruncatedTrack(adjT);
       }
-      const cue = this.findCueAt(this.subCues, adjT);
+      const state = this.findCueStateAt(this.subCues, adjT);
+      const cue = state.cue;
       const txt = cue ? cue.text : '';
       this._lastFastTrackId = this.selectedSubId;
-      if (cue) {
-        this._lastFastCueStart = Number(cue.start) || 0;
-        this._lastFastCueEnd = Number(cue.end) || 0;
-      } else {
-        this._lastFastCueStart = 0;
-        this._lastFastCueEnd = 0;
-      }
+      this._lastFastCueStart = Number.isFinite(state.validFrom) ? state.validFrom : -1;
+      this._lastFastCueEnd = Number.isFinite(state.validUntil) ? state.validUntil : Infinity;
       const secCue = (this.dualSubEnabled && this.secondaryCues.length) ? this.findCueAt(this.secondaryCues, adjT) : null;
       const secTxt = secCue ? secCue.text : '';
       if (forceEmit || txt !== this.activeCueText || secTxt !== this.activeSecondaryCueText) {

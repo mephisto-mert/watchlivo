@@ -2800,8 +2800,9 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const s = Math.max(1, Number(url.searchParams.get("season") || url.searchParams.get("s") || 1) || 1);
     const e = Math.max(1, Number(url.searchParams.get("episode") || url.searchParams.get("e") || 1) || 1);
     const reqTitleSub = (url.searchParams.get("title") || "").trim().slice(0, 120);
+    const reqDurSec = Number(url.searchParams.get("duration") || url.searchParams.get("dur") || 0) || 0;
     const bypassSubCache = url.searchParams.get("refresh") === "1" || url.searchParams.get("nocache") === "1";
-    const subKey = `subs:v3:${mtype}:${tid || imdbId || normalizeSearchText(reqTitleSub).slice(0, 32)}:${s}:${e}`;
+    const subKey = `subs:v4:${mtype}:${tid || imdbId || normalizeSearchText(reqTitleSub).slice(0, 32)}:${s}:${e}`;
     if (!bypassSubCache && (tid || imdbId) && env?.WATCHLIVO_KV) {
       const cachedSubs = await env.WATCHLIVO_KV.get(subKey, "json").catch(() => null);
       if (cachedSubs && Array.isArray(cachedSubs.subtitleTracks) && cachedSubs.subtitleTracks.length) {
@@ -2813,12 +2814,17 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       let sc = 0;
       const fn = String(it.subtitleFileName || it.movieReleaseName || it.SubFileName || it.MovieReleaseName || "").toLowerCase();
       const fmt = String(it.releaseFormat || "").toLowerCase();
-      const fps = Number(it.fpsMilli || 0);
+      const rawFpsMilli = Number(it.fpsMilli || 0);
+      const rawSubFps = Number(it.SubFPS || 0);
+      const effFps = rawFpsMilli > 0 ? (rawFpsMilli / 1000) : rawSubFps;
       if (/\b(?:forced|foreign[\s._-]*only|signs[\s._&-]*songs?|trailer|teaser|fragman|promo|sample|cd1|cd2|korsub|hc)\b/i.test(fn)) sc -= 80;
       if (/(?:bluray|bdrip|brrip|web[-.]?dl|webrip|\bweb\b|amzn|nf\b|dsnp|hmax)/i.test(`${fmt} ${fn}`)) sc += 30;
-      else if (/(?:hdtv|dvdrip|\bdvd\b)/i.test(`${fmt} ${fn}`)) sc += 15;
+      else if (/(?:hdtv|dvdrip|\bdvd\b)/i.test(`${fmt} ${fn}`)) sc += 12;
       if (/(?:telesync|\bts\b|\bcam\b|hdcam|\btc\b|hdts)/i.test(`${fmt} ${fn}`)) sc -= 28;
-      if (fps === 23976 || fps === 23980 || fps === 24000) sc += 10;
+      if (effFps >= 23.9 && effFps <= 24.05) sc += 14;
+      else if (effFps >= 24.9 && effFps <= 25.1) sc -= 26; // PAL 25fps speedup causes 4.27% drift (3-7 min off)
+      else if (effFps >= 29.5 && effFps <= 30.1) sc -= 10;
+      if (/(?:\b25\s*fps\b|\bpal\b)/i.test(fn)) sc -= 24;
       if (/utf-?8/i.test(String(it.SubEncoding || ""))) sc += 4;
       const dlCnt = Number(it.SubDownloadsCnt || 0);
       if (dlCnt >= 1000) sc += 12;
@@ -2990,12 +2996,14 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       }
     }
 
-    // Parallel probe on top 3 TR + top 3 EN tracks to reject dead/corrupt/Tamil-mojibake/trailer uploads & reclassify mislabeled files
+    // Parallel probe on top 4 TR + top 3 EN tracks to reject dead/corrupt/Tamil-mojibake/wrong-episode/trailer uploads, penalize 25fps PAL & betting spam, & reclassify mislabeled files
     const probeTargets = [
-      ...trList.slice(0, 3),
+      ...trList.slice(0, 4),
       ...enList.slice(0, 3),
     ];
     const minFullCues = mtype === "tv" ? 20 : 45;
+    const parseTsSec = (h, m, sec) => (Number(h || 0) * 3600) + (Number(m || 0) * 60) + Number(sec || 0);
+    const tsPairRe = /(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,]\d{1,3}\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,]\d{1,3}/g;
     if (probeTargets.length) {
       await Promise.allSettled(probeTargets.map(async (cand) => {
         try {
@@ -3023,8 +3031,39 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
             cand.dead = true;
             return;
           }
-          const cueCount = (txt.match(/-->/g) || []).length;
+          // Reject wrong TV season/episode explicitly declared inside subtitle header cues (e.g. S5E3 uploaded under S3E5)
+          const headChunk = txt.slice(0, 2600);
+          if (mtype === "tv" && s > 0 && e > 0) {
+            const trEpM = headChunk.match(/\b(\d{1,2})\.\s*sezon[\s,.\-–—]*(\d{1,2})\.\s*b[oö]l[uü]m\b/i);
+            const enEpM = headChunk.match(/\bS0?(\d{1,2})\s*[Ex]0?(\d{1,2})\b/i);
+            const epM = trEpM || enEpM;
+            if (epM) {
+              const detS = Number(epM[1]);
+              const detE = Number(epM[2]);
+              if (detS > 0 && detE > 0 && (detS !== s || detE !== e)) {
+                cand.dead = true;
+                return;
+              }
+            }
+          }
+          if (/(?:para\s+yat[ıi]rma\s+bonusu|forumiptv\.org|\b1xbet\b|ho[şs]geldin\s+bonusu|canl[ıi]\s+bahis)/i.test(headChunk)) {
+            cand.score -= 40;
+          }
+          let cueCount = 0;
+          let firstCueSec = -1;
+          let lastEndSec = 0;
+          tsPairRe.lastIndex = 0;
+          let tm;
+          while ((tm = tsPairRe.exec(txt)) !== null) {
+            cueCount += 1;
+            const stSec = parseTsSec(tm[1], tm[2], tm[3]);
+            const enSec = parseTsSec(tm[4], tm[5], tm[6]);
+            if (firstCueSec < 0 && stSec >= 0) firstCueSec = stSec;
+            if (enSec > lastEndSec && enSec < 28800) lastEndSec = enSec;
+          }
           cand.cueCount = cueCount;
+          if (firstCueSec >= 0) cand.firstCueSec = firstCueSec;
+          if (lastEndSec > 0) cand.lastEndSec = lastEndSec;
           if (cueCount >= 3 && cueCount < minFullCues) {
             cand.isTrailerStub = true;
             cand.score -= 70;
@@ -3036,6 +3075,43 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
           }
         } catch {}
       }));
+    }
+
+    // Cross-track duration & PAL 25fps / wrong-cut / TV-recap alignment scoring
+    const fullSpans = selected
+      .filter((c) => !c.dead && !c.isTrailerStub && Number(c.cueCount || 0) >= minFullCues && Number(c.lastEndSec || 0) >= 600)
+      .map((c) => c.lastEndSec)
+      .sort((a, b) => a - b);
+    const refSpanSec = reqDurSec >= 600
+      ? reqDurSec
+      : (fullSpans.length >= 2 ? fullSpans[Math.floor(fullSpans.length * 0.65)] : (fullSpans[0] || 0));
+    if (refSpanSec >= 600) {
+      for (const c of selected) {
+        if (c.dead || c.isTrailerStub || !c.lastEndSec || c.lastEndSec < 300) continue;
+        const ratio = c.lastEndSec / refSpanSec;
+        if (ratio < 0.85 || ratio > 1.15) {
+          c.score -= 48; // Wrong cut / wrong episode / wrong movie duration
+        } else if (reqDurSec >= 600 && ratio > 1.025) {
+          c.score -= 32; // Longer than actual video (e.g. includes unplayed TV recap)
+        } else if (refSpanSec >= 2400 && ratio < 0.962 && ratio >= 0.915) {
+          c.score -= 22; // Likely 25fps PAL speedup (~0.959x) relative to 23.976fps reference
+        } else if (ratio >= 0.965 && ratio <= 1.015) {
+          c.score += 10; // Strong match to reference runtime
+        }
+      }
+      if (mtype === "tv") {
+        for (const langKey of ["tr", "en"]) {
+          const langFull = selected.filter((c) => !c.dead && !c.isTrailerStub && c.lang === langKey && c.lastEndSec >= 600);
+          const hasNoRecapStart = langFull.some((c) => Number(c.firstCueSec || 0) >= 45 && c.lastEndSec <= refSpanSec * 1.015);
+          if (hasNoRecapStart) {
+            for (const c of langFull) {
+              if (Number(c.firstCueSec || 0) < 8 && c.lastEndSec > refSpanSec + 45) {
+                c.score -= 28; // Likely includes "Previously on..." recap absent in stream
+              }
+            }
+          }
+        }
+      }
     }
 
     // Drop trailer stubs ONLY when at least one full-length subtitle exists in the same language
@@ -3077,6 +3153,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
         label: formatSubLabel(c.lang, suffix),
         url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(c.rawUrl)}`,
         source: c.source,
+        ...(c.lastEndSec ? { spanSec: Math.round(c.lastEndSec) } : {}),
+        ...(typeof c.firstCueSec === "number" && c.firstCueSec >= 0 ? { firstCueSec: Math.round(c.firstCueSec) } : {}),
       };
     });
 
