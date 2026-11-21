@@ -325,6 +325,137 @@ function buildEmbedServers() {
   return [];
 }
 
+function appendStreamAudParam(streamUrl, audCode) {
+  const u = String(streamUrl || "").trim();
+  const aud = String(audCode || "").trim().toLowerCase();
+  if (!u || !aud || !u.includes("/api/rave/stream")) return u;
+  const cleaned = u.replace(/([?&])aud=[^&]*/gi, (_, sep) => (sep === "?" ? "?" : "")).replace(/\?&/, "?").replace(/[?&]$/, "");
+  if (cleaned.includes("&ext=.m3u8")) {
+    return cleaned.replace("&ext=.m3u8", `&aud=${encodeURIComponent(aud)}&ext=.m3u8`);
+  }
+  return `${cleaned}${cleaned.includes("?") ? "&" : "?"}aud=${encodeURIComponent(aud)}`;
+}
+
+export function buildEdgeAudioTracks(servers, primaryUrl = "", reqOrigLang = "") {
+  const list = Array.isArray(servers) ? servers.filter((s) => s && s.url) : [];
+  if (!list.length) return [];
+  const origCode = (String(reqOrigLang || "").trim().toLowerCase() || "orig");
+  const isDualSrv = (s) => {
+    const langs = Array.isArray(s.audioLangs) ? s.audioLangs : [];
+    if (langs.includes("tr") && langs.some((l) => l && l !== "tr")) return true;
+    return /dublaj\s*\+\s*orijinal|çoklu\s*ses/i.test(String(s.label || ""));
+  };
+  const isTrOnlySrv = (s) => {
+    const langs = Array.isArray(s.audioLangs) ? s.audioLangs : [];
+    if (langs.length) return langs.includes("tr") && !langs.some((l) => l !== "tr");
+    return /türkçe\s*dublaj|tr\s*dublaj/i.test(String(s.label || "")) && !/orijinal|altyaz/i.test(String(s.label || ""));
+  };
+  const isOrigOnlySrv = (s) => {
+    const langs = Array.isArray(s.audioLangs) ? s.audioLangs : [];
+    if (langs.length) return !langs.includes("tr") && langs.some((l) => Boolean(l));
+    return /altyaz|orijinal/i.test(String(s.label || "")) && !/dublaj/i.test(String(s.label || ""));
+  };
+
+  const dualSrv = list.find(isDualSrv);
+  const trOnlySrv = list.find(isTrOnlySrv);
+  const origOnlySrv = list.find(isOrigOnlySrv);
+
+  if (dualSrv) {
+    const dualLangs = Array.isArray(dualSrv.audioLangs) ? dualSrv.audioLangs : [];
+    const nonTrLang = dualLangs.find((l) => l && l !== "tr") || origCode;
+    const origLabel = nonTrLang === "en" ? "🇬🇧 İngilizce (Orijinal Ses · 1080p)" : "🎬 Orijinal Ses (1080p HD)";
+    return [
+      {
+        id: "tr-dub",
+        lang: "tr",
+        targetLang: "tr",
+        audioLang: "tr",
+        label: "🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)",
+        mode: "stream",
+        url: appendStreamAudParam(dualSrv.url, "tr"),
+      },
+      {
+        id: "orig",
+        lang: "orig",
+        targetLang: "orig",
+        audioLang: nonTrLang || "orig",
+        label: origLabel,
+        mode: "stream",
+        url: appendStreamAudParam(dualSrv.url, "orig"),
+      },
+    ];
+  }
+
+  if (trOnlySrv && origOnlySrv) {
+    const nonTrLang = (Array.isArray(origOnlySrv.audioLangs) ? origOnlySrv.audioLangs.find((l) => l && l !== "tr") : "") || origCode;
+    const origLabel = nonTrLang === "en" ? "🇬🇧 İngilizce (Orijinal Ses · 1080p)" : "🎬 Orijinal Ses (1080p HD)";
+    return [
+      {
+        id: "tr-dub",
+        lang: "tr",
+        targetLang: "tr",
+        audioLang: "tr",
+        label: "🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)",
+        mode: "stream",
+        url: trOnlySrv.url,
+      },
+      {
+        id: "orig",
+        lang: "orig",
+        targetLang: "orig",
+        audioLang: nonTrLang || "orig",
+        label: origLabel,
+        mode: "stream",
+        url: origOnlySrv.url,
+      },
+    ];
+  }
+
+  if (trOnlySrv && !origOnlySrv) {
+    const isNativeTr = origCode === "tr";
+    return [
+      {
+        id: isNativeTr ? "tr-orig" : "tr-dub",
+        lang: "tr",
+        targetLang: "tr",
+        audioLang: "tr",
+        label: isNativeTr ? "🇹🇷 Türkçe (Orijinal Ses · 1080p)" : "🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)",
+        mode: "stream",
+        url: trOnlySrv.url,
+      },
+    ];
+  }
+
+  if (origOnlySrv) {
+    const nonTrLang = (Array.isArray(origOnlySrv.audioLangs) ? origOnlySrv.audioLangs.find((l) => l && l !== "tr") : "") || origCode;
+    const origLabel = nonTrLang === "en" ? "🇬🇧 İngilizce (Orijinal Ses · 1080p)" : "🎬 Orijinal Ses (1080p HD)";
+    return [
+      {
+        id: "orig",
+        lang: "orig",
+        targetLang: "orig",
+        audioLang: nonTrLang || "orig",
+        label: origLabel,
+        mode: "stream",
+        url: origOnlySrv.url,
+      },
+    ];
+  }
+
+  const fallbackUrl = primaryUrl || list[0].url;
+  return [
+    {
+      id: "orig",
+      lang: "orig",
+      targetLang: "orig",
+      audioLang: origCode,
+      label: origCode === "en" ? "🇬🇧 İngilizce (Orijinal Ses · 1080p)" : "🎬 Orijinal Ses (1080p HD)",
+      mode: "stream",
+      url: fallbackUrl,
+    },
+  ];
+}
+
 export async function handleEdgeResolveCatalog(url, env, jsonResp) {
   const id = (url.searchParams.get("id") || "").trim();
   const rawIdM = id.match(/^tmdb-(?:tv|movie)-(\d+)$/i);
@@ -542,6 +673,8 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
       provider: "netflix",
       catalogProvider: "anime",
       tmdbId,
+      imdbId: (url.searchParams.get("imdbId") || url.searchParams.get("imdb_id") || "").trim(),
+      origLang: (url.searchParams.get("origLang") || "ja").trim(),
       mediaType: mtype,
       season: mtype === "tv" ? s : 0,
       episode: mtype === "tv" ? e : 0,
@@ -557,6 +690,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
       embedUrl: "",
       altUrls: [],
       servers: [{ id: "srv-1", label: "📡 Sunucu 1 · Cloudflare 7/24 (MP4 HD)", url: liveAc.url, streamType: liveAc.streamType }],
+      audioTracks: [{ id: "orig", lang: "orig", targetLang: "orig", audioLang: "ja", label: "🎬 Orijinal Ses (Japonca · HD)", mode: "stream", url: liveAc.url }],
       subtitleTracks: [],
     });
     const reqProv = (url.searchParams.get("provider") || "").trim().toLowerCase();
@@ -620,10 +754,27 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
             label: cItem.label || `📡 Sunucu ${trServers.length + 1} · Edge Direct (${cIsMp4 ? "MP4 HD" : "1080p HLS"})`,
             url: cProxied,
             streamType: cIsMp4 ? "mp4" : "hls",
+            audioLangs: Array.isArray(cItem.audioLangs) ? cItem.audioLangs : [],
           });
         }
       }
       if (trUrls.length) {
+        const reqAud = (url.searchParams.get("aud") || "").trim().toLowerCase();
+        const trAudioTracks = buildEdgeAudioTracks(trServers, trUrls[0], reqOrigLang);
+        let chosenUrl = trUrls[0];
+        let chosenStreamType = trServers[0].streamType;
+        if (reqAud === "tr" || reqAud === "tr-dub" || reqAud === "dub") {
+          const trTrack = trAudioTracks.find((t) => t.id === "tr-dub" && t.url);
+          if (trTrack) chosenUrl = trTrack.url;
+        } else if (reqAud === "orig" || reqAud === "en" || reqAud === "eng") {
+          const origTrack = trAudioTracks.find((t) => t.id === "orig" && t.url);
+          if (origTrack) chosenUrl = origTrack.url;
+        } else {
+          const trTrack = trAudioTracks.find((t) => t.id === "tr-dub" && t.url);
+          if (trTrack && trTrack.url.includes("&aud=tr")) chosenUrl = trTrack.url;
+        }
+        const matchedChosenSrv = trServers.find((sv) => sv.url === chosenUrl);
+        if (matchedChosenSrv) chosenStreamType = matchedChosenSrv.streamType;
         const trSubs = formatStreamSubTracks(trLive.subs || []);
         return jsonResp({
           id: tmdbId || id,
@@ -631,6 +782,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
           catalogProvider: "cinema",
           tmdbId,
           imdbId: (url.searchParams.get("imdbId") || url.searchParams.get("imdb_id") || "").trim(),
+          origLang: reqOrigLang || "",
           mediaType: mtype,
           season: mtype === "tv" ? s : 0,
           episode: mtype === "tv" ? e : 0,
@@ -641,11 +793,12 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
           poster: reqPoster,
           thumbnail: reqPoster,
           backdrop: reqPoster,
-          streamType: trServers[0].streamType,
-          url: trUrls[0],
+          streamType: chosenStreamType,
+          url: chosenUrl,
           embedUrl: "",
-          altUrls: trUrls.slice(1),
+          altUrls: trUrls.filter((u) => u !== chosenUrl),
           servers: trServers,
+          audioTracks: trAudioTracks,
           subtitleTracks: trSubs,
         });
       }
@@ -709,12 +862,15 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
   const primary = urls[0];
   const resolvedTitle = reqDisplayTitle || reqTitle || hit.title || "";
   const backupAltUrls = urls.slice(1).filter((x) => x.url && x.streamType !== "embed").map((x) => x.url);
+  const vaultServers = servers.slice(0, 8);
+  const vaultAudioTracks = buildEdgeAudioTracks(vaultServers, primary.url, (url.searchParams.get("origLang") || hit.origLang || "").trim());
   return jsonResp({
     id: tmdbId || id,
     provider: primary.streamType === "embed" ? "embed" : "netflix",
     catalogProvider: "netflix",
     tmdbId: tmdbId || hit.tmdbId || "",
     imdbId: (url.searchParams.get("imdbId") || url.searchParams.get("imdb_id") || hit.imdbId || "").trim(),
+    origLang: (url.searchParams.get("origLang") || hit.origLang || "").trim(),
     mediaType: hit.mediaType || mtype,
     season: mtype === "tv" ? s : 0,
     episode: mtype === "tv" ? e : 0,
@@ -729,7 +885,8 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     url: primary.url,
     embedUrl: primary.streamType === "embed" ? primary.url : "",
     altUrls: backupAltUrls,
-    servers: servers.slice(0, 4),
+    servers: vaultServers,
+    audioTracks: vaultAudioTracks,
     subtitleTracks: subs,
   });
 }
@@ -809,8 +966,9 @@ export async function handleEdgeHlsManifest(url, env) {
   const isMaster = cleanText.includes("#EXT-X-STREAM-INF");
   const maxHeightParam = Math.max(0, Math.min(2160, Number(url.searchParams.get("max_h") || 0) || 0));
   const abrLowStart = url.searchParams.get("abr_low") === "1";
+  const audParam = (url.searchParams.get("aud") || "").trim().toLowerCase();
   const lines = cleanText.split(/\r?\n/);
-  const out = await Promise.all(lines.map(async (line) => {
+  const outRaw = await Promise.all(lines.map(async (line) => {
     const trimmed = line.trim();
     if (!trimmed) return line;
     if (trimmed.startsWith("#")) {
@@ -826,13 +984,26 @@ export async function handleEdgeHlsManifest(url, env) {
     if (isMaster || /\.m3u8(\?|$)/i.test(abs)) {
       return `/api/rave/stream?sid=${b64UrlEncode(abs)}${ref ? `&ref=${b64UrlEncode(ref)}` : ""}&proxy_segs=1&ext=.m3u8`;
     }
-    const ext = /\.m4s(\?|$)/i.test(abs) ? ".m4s" : /\.mp4(\?|$)/i.test(abs) ? ".mp4" : /\.vtt(\?|$)/i.test(abs) ? ".vtt" : ".ts";
+    const ext = /\.m4s(\?|$)/i.test(abs)
+      ? ".m4s"
+      : /\.mp4(\?|$)/i.test(abs)
+      ? ".mp4"
+      : /\.aac(\?|$)/i.test(abs)
+      ? ".aac"
+      : /\.m4a(\?|$)/i.test(abs)
+      ? ".m4a"
+      : /\.mp3(\?|$)/i.test(abs)
+      ? ".mp3"
+      : /\.vtt(\?|$)/i.test(abs)
+      ? ".vtt"
+      : ".ts";
     return await buildSignedProxyPath(abs, ref, ext, env);
   }));
+  const out = outRaw.filter((ln) => ln !== null);
   let finalBody = out.join("\n");
   let variantHeader = "";
   if (isMaster) {
-    const adapted = adaptMasterM3u8Variants(out, { maxHeight: maxHeightParam, lowStart: abrLowStart });
+    const adapted = adaptMasterM3u8Variants(out, { maxHeight: maxHeightParam, lowStart: abrLowStart, aud: audParam });
     finalBody = adapted.body;
     variantHeader = adapted.heights.join(",");
   }
@@ -852,7 +1023,64 @@ export async function handleEdgeHlsManifest(url, env) {
   });
 }
 
-export function adaptMasterM3u8Variants(rewrittenLines, { maxHeight = 0, lowStart = false } = {}) {
+function setHlsMediaAttr(line, attr, value) {
+  const re = new RegExp(`\\b${attr}=(?:YES|NO)`, "i");
+  if (re.test(line)) return line.replace(re, `${attr}=${value}`);
+  return `${line},${attr}=${value}`;
+}
+
+function isTrAudioMediaLine(line) {
+  const langM = line.match(/LANGUAGE=["']([^"']+)["']/i);
+  const nameM = line.match(/NAME=["']([^"']+)["']/i);
+  const info = `${langM?.[1] || ""} ${nameM?.[1] || ""}`.replace(/İ/g, "i").replace(/I/g, "i").toLowerCase();
+  return /(?:^|[^a-zçğıöşü])(?:tr|tur|turk|türk|turkish|türkçe|turkce|dublaj)(?:$|[^a-zçğıöşü])/i.test(info);
+}
+
+function isEnAudioMediaLine(line) {
+  const langM = line.match(/LANGUAGE=["']([^"']+)["']/i);
+  const nameM = line.match(/NAME=["']([^"']+)["']/i);
+  const info = `${langM?.[1] || ""} ${nameM?.[1] || ""}`.replace(/İ/g, "i").replace(/I/g, "i").toLowerCase();
+  return /(?:^|[^a-zçğıöşü])(?:en|eng|english|ingilizce)(?:$|[^a-zçğıöşü])/i.test(info);
+}
+
+export function applyMasterAudioPreference(lines, audParam = "") {
+  const aud = String(audParam || "").trim().toLowerCase();
+  const wantTr = aud === "tr" || aud === "tr-dub" || aud === "dub" || aud === "tur";
+  const wantOrig = aud === "orig" || aud === "en" || aud === "eng" || aud === "original";
+  const groups = new Map();
+  lines.forEach((ln, idx) => {
+    const t = String(ln || "").trim();
+    if (!t.startsWith("#EXT-X-MEDIA") || !/TYPE=AUDIO/i.test(t)) return;
+    const gm = t.match(/GROUP-ID=["']([^"']+)["']/i);
+    const gid = gm?.[1] || "__default__";
+    if (!groups.has(gid)) groups.set(gid, []);
+    groups.get(gid).push({ idx, line: ln, isTr: isTrAudioMediaLine(t), isEn: isEnAudioMediaLine(t), isDefault: /\bDEFAULT=YES\b/i.test(t) });
+  });
+  if (!groups.size) return lines;
+  const out = [...lines];
+  for (const entries of groups.values()) {
+    if (entries.length <= 1) continue;
+    let targetEntry = null;
+    if (wantTr) {
+      targetEntry = entries.find((e) => e.isTr) || null;
+    } else if (wantOrig) {
+      targetEntry = entries.find((e) => !e.isTr && e.isEn) || entries.find((e) => !e.isTr) || null;
+    } else if (!entries.some((e) => e.isDefault)) {
+      // Upstream left every audio rendition DEFAULT=NO — set a deterministic default (prefer TR, else EN)
+      targetEntry = entries.find((e) => e.isTr) || entries.find((e) => e.isEn) || entries[0];
+    }
+    if (!targetEntry) continue;
+    for (const e of entries) {
+      const isWinner = e.idx === targetEntry.idx;
+      let nextLn = setHlsMediaAttr(e.line, "DEFAULT", isWinner ? "YES" : "NO");
+      nextLn = setHlsMediaAttr(nextLn, "AUTOSELECT", isWinner ? "YES" : "NO");
+      out[e.idx] = nextLn;
+    }
+  }
+  return out;
+}
+
+export function adaptMasterM3u8Variants(rewrittenLines, { maxHeight = 0, lowStart = false, aud = "" } = {}) {
   const lines = Array.isArray(rewrittenLines) ? rewrittenLines : String(rewrittenLines || "").split(/\r?\n/);
   const prefix = [];
   const variants = [];
@@ -862,12 +1090,21 @@ export function adaptMasterM3u8Variants(rewrittenLines, { maxHeight = 0, lowStar
   for (let i = 0; i < lines.length; i += 1) {
     const ln = lines[i];
     const trimmed = String(ln || "").trim();
+    if (trimmed.startsWith("#EXT-X-MEDIA") || trimmed.startsWith("#EXT-X-SESSION-KEY")) {
+      prefix.push(ln);
+      continue;
+    }
     if (trimmed.startsWith("#EXT-X-STREAM-INF")) {
       seenFirstVariant = true;
       const block = [ln];
       let j = i + 1;
       while (j < lines.length) {
         const nxt = String(lines[j] || "").trim();
+        if (nxt.startsWith("#EXT-X-MEDIA") || nxt.startsWith("#EXT-X-SESSION-KEY")) {
+          prefix.push(lines[j]);
+          j += 1;
+          continue;
+        }
         block.push(lines[j]);
         if (nxt && !nxt.startsWith("#")) {
           break;
@@ -887,9 +1124,6 @@ export function adaptMasterM3u8Variants(rewrittenLines, { maxHeight = 0, lowStar
   }
 
   const heights = [...new Set(variants.map((v) => v.height).filter((h) => h > 0))].sort((a, b) => a - b);
-  if (variants.length <= 1 || (!maxHeight && !lowStart)) {
-    return { body: lines.join("\n"), heights };
-  }
 
   const sortAsc = (arr) => [...arr].sort((a, b) => {
     const ha = a.height || Math.round(a.bandwidth / 4500);
@@ -898,7 +1132,7 @@ export function adaptMasterM3u8Variants(rewrittenLines, { maxHeight = 0, lowStar
   });
 
   let selected = variants;
-  if (maxHeight > 0) {
+  if (variants.length > 1 && maxHeight > 0) {
     const maxBwFallback = maxHeight <= 360 ? 1_100_000 : maxHeight <= 480 ? 1_900_000 : maxHeight <= 720 ? 3_800_000 : 7_500_000;
     const filtered = variants.filter((v) => (v.height > 0 ? v.height <= maxHeight + 40 : (v.bandwidth > 0 && v.bandwidth <= maxBwFallback)));
     if (filtered.length > 0) {
@@ -915,9 +1149,43 @@ export function adaptMasterM3u8Variants(rewrittenLines, { maxHeight = 0, lowStar
     selected = sortAsc(selected);
   }
 
+  // Prune orphaned #EXT-X-MEDIA:TYPE=AUDIO groups when variant filtering removed all variants referencing them
+  const usedAudioGroups = new Set();
+  for (const v of selected) {
+    const inf = String(v.lines?.[0] || "");
+    const am = inf.match(/\bAUDIO=["']([^"']+)["']/i);
+    if (am?.[1]) usedAudioGroups.add(am[1]);
+  }
+  const survivingAudioGroups = new Set();
+  const filteredPrefix = prefix.filter((ln) => {
+    const t = String(ln || "").trim();
+    if (t.startsWith("#EXT-X-MEDIA") && /TYPE=AUDIO/i.test(t)) {
+      const gm = t.match(/GROUP-ID=["']([^"']+)["']/i);
+      const gid = gm?.[1] || "";
+      if (usedAudioGroups.size && gid && !usedAudioGroups.has(gid)) {
+        return false;
+      }
+      if (gid) survivingAudioGroups.add(gid);
+    }
+    return true;
+  });
+
+  // Strip dangling AUDIO="<group>" attribute on variants if all renditions in that group were dropped
+  const cleanedSelected = selected.map((v) => {
+    if (!v.lines?.length) return v;
+    let inf = String(v.lines[0] || "");
+    const am = inf.match(/,?\s*AUDIO=["']([^"']+)["']/i);
+    if (am && !survivingAudioGroups.has(am[1])) {
+      inf = inf.replace(/,?\s*AUDIO=["'][^"']+["']/i, "");
+      return { ...v, lines: [inf, ...v.lines.slice(1)] };
+    }
+    return v;
+  });
+
+  const styledPrefix = applyMasterAudioPreference(filteredPrefix, aud);
   const rebuilt = [
-    ...prefix,
-    ...selected.flatMap((v) => v.lines),
+    ...styledPrefix,
+    ...cleanedSelected.flatMap((v) => v.lines),
     ...tail,
   ];
   return { body: rebuilt.join("\n"), heights };
@@ -926,12 +1194,19 @@ export function adaptMasterM3u8Variants(rewrittenLines, { maxHeight = 0, lowStar
 async function replaceAsyncUri(line, base, ref, env, isMediaPlaylist) {
   const m = line.match(/URI="([^"]+)"/);
   if (!m) return line;
+  const isMediaTag = line.trim().startsWith("#EXT-X-MEDIA");
   let abs = "";
-  try { abs = new URL(m[1], base).toString(); } catch { return line.replace(m[0], 'URI="#blocked"'); }
-  if (!isPublicHttpUrl(abs)) return line.replace(m[0], 'URI="#blocked"');
-  const rew = isMediaPlaylist || /\.m3u8(\?|$)/i.test(abs)
+  try { abs = new URL(m[1], base).toString(); } catch { return isMediaTag ? null : line.replace(m[0], 'URI="#blocked"'); }
+  if (!isPublicHttpUrl(abs)) return isMediaTag ? null : line.replace(m[0], 'URI="#blocked"');
+  const isDirectSubFile = /\.(?:vtt|srt|ttml|dfxp)(\?|$)/i.test(abs);
+  if (isMediaTag && /TYPE=SUBTITLES/i.test(line) && isDirectSubFile) {
+    const subRew = `/api/rave/subtitle.vtt?url=${encodeURIComponent(abs)}${ref ? `&ref=${b64UrlEncode(ref)}` : ""}`;
+    return line.replace(m[0], `URI="${subRew}"`);
+  }
+  const isKeyLine = line.includes("#EXT-X-KEY") || line.includes("#EXT-X-SESSION-KEY");
+  const rew = (!isKeyLine && (isMediaPlaylist || /\.m3u8(\?|$)/i.test(abs)))
     ? `/api/rave/stream?sid=${b64UrlEncode(abs)}${ref ? `&ref=${b64UrlEncode(ref)}` : ""}&proxy_segs=1&ext=.m3u8`
-    : await buildSignedProxyPath(abs, ref, line.includes("#EXT-X-KEY") ? ".key" : ".mp4", env);
+    : await buildSignedProxyPath(abs, ref, isKeyLine ? ".key" : ".mp4", env);
   return line.replace(m[0], `URI="${rew}"`);
 }
 
@@ -976,13 +1251,15 @@ function detectCloakedMediaMime(buf, extHint = "", hasRange = false) {
   for (let i = 1; i <= scanMax; i++) {
     if (buf[i] === 0x47 && buf[i + 188] === 0x47) return "video/mp2t";
   }
-  // Allow encrypted AES-128 HLS segments or mid-file Range MP4 chunks if clearly binary and NOT HTML/JS/SVG
+  // Allow encrypted AES-128 HLS segments/keys or audio/mid-file Range MP4 chunks if clearly binary and NOT HTML/JS/SVG
   const lowExt = String(extHint || "").toLowerCase();
-  if ((lowExt === ".ts" || lowExt === ".m4s" || lowExt === ".mp4") && (binCount >= 6 || (hasRange && hasBin))) {
-    const headTxt = new TextDecoder("utf-8", { fatal: false }).decode(buf.subarray(0, Math.min(buf.length, 96))).trimStart();
-    if (!/^(?:<!doctype|<html|<script|<svg|function\s|\(function|var\s|const\s|let\s|\{")/i.test(headTxt)) {
-      return lowExt === ".m4s" ? "video/iso.segment" : lowExt === ".mp4" ? "video/mp4" : "video/mp2t";
-    }
+  const headTxt = new TextDecoder("utf-8", { fatal: false }).decode(buf.subarray(0, Math.min(buf.length, 96))).trimStart();
+  const isMarkupOrJs = /^(?:<!doctype|<html|<script|<svg|function\s|\(function|var\s|const\s|let\s|\{")/i.test(headTxt);
+  if (lowExt === ".key" && buf.length >= 8 && buf.length <= 256 && !isMarkupOrJs) {
+    return "application/octet-stream";
+  }
+  if ((lowExt === ".ts" || lowExt === ".m4s" || lowExt === ".mp4" || lowExt === ".aac" || lowExt === ".m4a" || lowExt === ".mp3") && (binCount >= 6 || (hasRange && hasBin)) && !isMarkupOrJs) {
+    return resolveFallbackContentType(lowExt, "");
   }
   return "";
 }
@@ -1034,7 +1311,13 @@ export async function handleEdgeStreamProxy(request, url, env) {
     const reqMethod = request?.method === "HEAD" ? "HEAD" : "GET";
     const { resp: up } = await fetchPublicWithRedirects(target, hdrs, 4, 20000, undefined, true, reqMethod);
     const upCt = (up.headers.get("Content-Type") || "").toLowerCase();
-    const extHint = (url.searchParams.get("ext") || "").toLowerCase();
+    let extHint = (url.searchParams.get("ext") || "").toLowerCase();
+    if (!extHint) {
+      try {
+        const pm = new URL(target).pathname.match(/\.(ts|m4s|mp4|aac|m4a|mp3|key|vtt|srt|m3u8)$/i);
+        if (pm) extHint = `.${pm[1].toLowerCase()}`;
+      } catch {}
+    }
     if (!up.ok && (upCt.includes("html") || upCt.includes("javascript") || upCt.includes("ecmascript") || upCt.includes("xml") || upCt.includes("text/plain"))) {
       up.body?.cancel?.();
       return new Response(`Upstream ${up.status}`, { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
@@ -1273,6 +1556,24 @@ export function detectSubtitleTextLang(vttOrSrt) {
   return "";
 }
 
+export function isCorruptOrForeignSubtitleText(vttOrSrt) {
+  let body = String(vttOrSrt || "").replace(/^WEBVTT[^\n]*\n/i, "");
+  body = body.replace(/(?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{1,3}\s*-->\s*(?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{1,3}[^\n]*/g, " ");
+  body = body.replace(/<[^>]+>/g, " ").replace(/\{\\[^}]*\}/g, " ").slice(0, 7000);
+  const nonLatin = (body.match(/[\u0370-\u03FF\u0400-\u05FF\u0600-\u06FF\u0900-\u0E7F\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/g) || []).length;
+  if (nonLatin > 20) return true;
+  // Detect UTF-8 multi-byte Tamil/Indic/Arabic/Cyrillic double-decoded as Latin-1 (e.g. "à®¨à¯€à®™à¯")
+  const mojiPairs = (body.match(/(?:à[®¯¤¥¦§¨©ª«¬­]|Ã[\x80-\xBF]|Ð[\x80-\xBF]|Ñ[\x80-\xBF]|Ø[\x80-\xBF]|Ù[\x80-\xBF])/g) || []).length;
+  if (mojiPairs >= 14) return true;
+  // Detect legacy font-encoded Indic/TSCII/mojibake garbage in Latin-1 high bytes (e.g. Joker Tamil "¾¢È¿ÎÉÁ")
+  const corruptSym = (body.match(/[¡¢£¤¥¦§¨©ª«¬®¯±²³´µ¶·¸¹º»¼½¾¿×÷ÐÞðþ\uFFFD]/g) || []).length;
+  if (corruptSym >= 6) return true;
+  const nonTrHigh = (body.match(/[¡-ÿ\uFFFD]/g) || []).filter((ch) => !/[çğıöşüÇĞİÖŞÜ]/.test(ch)).length;
+  const textChars = body.replace(/[\s\d.,!?'"():;\/\\\-–—\[\]]+/g, "").length;
+  if (nonTrHigh >= 10 && textChars > 0 && (nonTrHigh / textChars) > 0.25) return true;
+  return false;
+}
+
 export function decodeSubtitleBytes(buf) {
   const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   if (u8.length >= 2 && u8[0] === 0xff && u8[1] === 0xfe) {
@@ -1306,6 +1607,7 @@ const STREAM_SOURCE_NAMES = {
   fhd_embed: "FullHD",
   hfnl_embed: "HDFC",
   diziyou_net: "DiziyouNet",
+  diziyou_love: "Diziyou",
   dylove: "Diziyou",
   filmmodu: "FilmModu",
   ddizimag: "DiziMag",
@@ -1318,6 +1620,8 @@ export function formatStreamSubTracks(rawList) {
   for (const t of (Array.isArray(rawList) ? rawList : [])) {
     const rawU = String(t?.url || "").trim();
     if (!rawU || !isPublicHttpUrl(rawU) || seen.has(rawU)) continue;
+    // Strip known dead legacy vault subtitle CDN shards (verified HTTP 502)
+    if (/(?:^https?:\/\/)?subs\.rapidvid\.[a-z]+\//i.test(rawU)) continue;
     seen.add(rawU);
     const lang = normalizeSubLang(t.lang, t.label, rawU);
     const src = String(t.source || "stream").trim();
@@ -1407,19 +1711,26 @@ export async function handleEdgeSubtitle(url, env) {
     } catch {}
   }
   if (!ref) ref = inferStreamReferer(target);
-  const hdrs = { "User-Agent": UA_CHROME, Accept: "text/vtt,text/plain,*/*" };
+  const subUa = /opensubtitles\.org/i.test(target) ? "TemporaryUserAgent" : UA_CHROME;
+  const hdrs = { "User-Agent": subUa, Accept: "text/vtt,text/plain,*/*" };
   if (ref) hdrs.Referer = ref;
   try {
     let { resp: r } = await fetchPublicWithRedirects(target, hdrs, 4, 10000);
     if (!r.ok && ref) {
       r.body?.cancel?.();
-      ({ resp: r } = await fetchPublicWithRedirects(target, { "User-Agent": UA_CHROME, Accept: "*/*" }, 4, 8000));
+      ({ resp: r } = await fetchPublicWithRedirects(target, { "User-Agent": subUa, Accept: "*/*" }, 4, 8000));
     }
     if (!r.ok) {
       r.body?.cancel?.();
       return new Response("Upstream subtitle error", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
     }
-    const buf = await r.arrayBuffer();
+    let buf = await r.arrayBuffer();
+    const u8Head = new Uint8Array(buf);
+    if (u8Head.length >= 2 && u8Head[0] === 0x1f && u8Head[1] === 0x8b && typeof DecompressionStream !== "undefined") {
+      try {
+        buf = await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+      } catch {}
+    }
     const raw = decodeSubtitleBytes(buf);
     const vtt = normalizeSubtitleToVtt(raw);
     if (!vtt) {

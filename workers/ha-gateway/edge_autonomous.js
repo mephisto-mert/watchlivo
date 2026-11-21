@@ -9,6 +9,7 @@ import {
   normalizeSubLang,
   formatSubLabel,
   detectSubtitleTextLang,
+  isCorruptOrForeignSubtitleText,
   decodeSubtitleBytes,
 } from "./edge_streams.js";
 import {
@@ -37,7 +38,9 @@ function isEphemeralStoreKey(key) {
     k.startsWith("soc:pres:") ||
     k.startsWith("soc:typ:") ||
     k.startsWith("tmdb_q:") ||
+    k.startsWith("tmdb2imdb:") ||
     k.startsWith("sub:") ||
+    k.startsWith("subs:") ||
     k.startsWith("edge_sub:") ||
     k.startsWith("edge_cat:") ||
     k.startsWith("vizyon_cache:") ||
@@ -2786,36 +2789,45 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     return await handleEdgeSubtitle(url, env);
   }
   if (safePath === "/api/rave/subtitles") {
-    const tid = (url.searchParams.get("tmdbId") || url.searchParams.get("tmdb_id") || url.searchParams.get("tid") || "").trim().slice(0, 30);
+    const rawTidParam = (url.searchParams.get("tmdbId") || url.searchParams.get("tmdb_id") || url.searchParams.get("tid") || url.searchParams.get("id") || "").trim().slice(0, 48);
+    const tidPrefixM = rawTidParam.match(/^(?:tmdb-(tv|movie)-)?(\d+)$/i);
+    let tid = tidPrefixM ? tidPrefixM[2] : "";
     let imdbId = (url.searchParams.get("imdbId") || url.searchParams.get("imdb_id") || "").trim().slice(0, 30);
-    const mtypeRaw = (url.searchParams.get("mediaType") || url.searchParams.get("type") || url.searchParams.get("mtype") || "movie").trim().toLowerCase();
-    const mtype = mtypeRaw === "tv" || mtypeRaw === "series" ? "tv" : "movie";
+    if (!/^tt\d{5,10}$/i.test(imdbId)) imdbId = "";
+    const mtypeParam = (url.searchParams.get("mediaType") || url.searchParams.get("type") || url.searchParams.get("mtype") || "").trim().toLowerCase();
+    const hasExplicitSe = Boolean(url.searchParams.get("season") || url.searchParams.get("s") || url.searchParams.get("episode") || url.searchParams.get("e"));
+    let mtype = (mtypeParam === "tv" || mtypeParam === "series" || mtypeParam === "show" || (!mtypeParam && (tidPrefixM?.[1]?.toLowerCase() === "tv" || hasExplicitSe))) ? "tv" : "movie";
     const s = Math.max(1, Number(url.searchParams.get("season") || url.searchParams.get("s") || 1) || 1);
     const e = Math.max(1, Number(url.searchParams.get("episode") || url.searchParams.get("e") || 1) || 1);
+    const reqTitleSub = (url.searchParams.get("title") || "").trim().slice(0, 120);
     const bypassSubCache = url.searchParams.get("refresh") === "1" || url.searchParams.get("nocache") === "1";
-    const subKey = `subs:v2:${mtype}:${tid || imdbId}:${s}:${e}`;
-    if (!bypassSubCache && (/^\d+$/.test(tid) || imdbId) && env?.WATCHLIVO_KV) {
+    const subKey = `subs:v3:${mtype}:${tid || imdbId || normalizeSearchText(reqTitleSub).slice(0, 32)}:${s}:${e}`;
+    if (!bypassSubCache && (tid || imdbId) && env?.WATCHLIVO_KV) {
       const cachedSubs = await env.WATCHLIVO_KV.get(subKey, "json").catch(() => null);
-      if (cachedSubs && Array.isArray(cachedSubs.subtitleTracks)) {
+      if (cachedSubs && Array.isArray(cachedSubs.subtitleTracks) && cachedSubs.subtitleTracks.length) {
         return edgeJson(cachedSubs);
       }
     }
     const SECONDARY_LANGS = ["de", "fr", "es", "it", "ru", "ar", "pt", "nl", "ja", "ko", "az"];
     const scoreSubItem = (it) => {
       let sc = 0;
-      const fn = String(it.subtitleFileName || it.movieReleaseName || "").toLowerCase();
+      const fn = String(it.subtitleFileName || it.movieReleaseName || it.SubFileName || it.MovieReleaseName || "").toLowerCase();
       const fmt = String(it.releaseFormat || "").toLowerCase();
       const fps = Number(it.fpsMilli || 0);
-      if (/\b(?:forced|foreign[\s._-]*only|signs[\s._&-]*songs?)\b/i.test(fn)) sc -= 60;
+      if (/\b(?:forced|foreign[\s._-]*only|signs[\s._&-]*songs?|trailer|teaser|fragman|promo|sample|cd1|cd2|korsub|hc)\b/i.test(fn)) sc -= 80;
       if (/(?:bluray|bdrip|brrip|web[-.]?dl|webrip|\bweb\b|amzn|nf\b|dsnp|hmax)/i.test(`${fmt} ${fn}`)) sc += 30;
       else if (/(?:hdtv|dvdrip|\bdvd\b)/i.test(`${fmt} ${fn}`)) sc += 15;
       if (/(?:telesync|\bts\b|\bcam\b|hdcam|\btc\b|hdts)/i.test(`${fmt} ${fn}`)) sc -= 28;
       if (fps === 23976 || fps === 23980 || fps === 24000) sc += 10;
       if (/utf-?8/i.test(String(it.SubEncoding || ""))) sc += 4;
+      const dlCnt = Number(it.SubDownloadsCnt || 0);
+      if (dlCnt >= 1000) sc += 12;
+      else if (dlCnt >= 100) sc += 6;
+      if (String(it.SubAutoTranslation || "") === "1") sc -= 25;
       return sc;
     };
     const extractFormatTag = (it) => {
-      const sTxt = `${it.releaseFormat || ""} ${it.subtitleFileName || it.movieReleaseName || ""}`;
+      const sTxt = `${it.releaseFormat || ""} ${it.subtitleFileName || it.movieReleaseName || it.SubFileName || it.MovieReleaseName || ""}`;
       if (/bluray|bdrip|brrip/i.test(sTxt)) return "BluRay";
       if (/web[-.]?dl|webrip|\bweb\b|netflix|amzn|disney/i.test(sTxt)) return "WEB";
       if (/hdtv/i.test(sTxt)) return "HDTV";
@@ -2825,43 +2837,131 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
 
     const byLang = new Map();
     const seenSubU = new Set();
+    const pushSubCand = (lang, rawUrl, score, fmtTag, source) => {
+      if (!lang || !rawUrl || !isPublicHttpUrl(rawUrl) || seenSubU.has(rawUrl)) return;
+      seenSubU.add(rawUrl);
+      if (!byLang.has(lang)) byLang.set(lang, []);
+      byLang.get(lang).push({ lang, rawUrl, score, fmtTag, source });
+    };
+
     try {
       const apiKey = String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim();
+      // Title-only fallback when neither tmdbId nor imdbId was provided
+      if (!tid && !imdbId && reqTitleSub) {
+        const hits = await searchTmdbEdge(reqTitleSub, env).catch(() => []);
+        const pick = hits.find((h) => h.mediaType === mtype) || hits[0];
+        if (pick?.tmdbId && /^\d+$/.test(String(pick.tmdbId))) {
+          tid = String(pick.tmdbId);
+          if (!mtypeParam && pick.mediaType) mtype = pick.mediaType;
+        }
+      }
       if (/^\d+$/.test(tid) && !imdbId) {
-        const extR = await fetch(`https://api.themoviedb.org/3/${mtype}/${tid}/external_ids?api_key=${encodeURIComponent(apiKey)}`, {
-          signal: AbortSignal.timeout(2200),
-        }).catch(() => null);
-        if (extR?.ok) {
-          const extJ = await extR.json().catch(() => null);
-          if (extJ?.imdb_id) imdbId = String(extJ.imdb_id).trim();
+        const mapKey = `tmdb2imdb:${mtype}:${tid}`;
+        if (env?.WATCHLIVO_KV) {
+          const cachedImdb = await env.WATCHLIVO_KV.get(mapKey).catch(() => null);
+          if (cachedImdb && /^tt\d{5,10}$/i.test(String(cachedImdb).trim())) {
+            imdbId = String(cachedImdb).trim();
+          }
+        }
+        if (!imdbId) {
+          const extR = await fetch(`https://api.themoviedb.org/3/${mtype}/${tid}/external_ids?api_key=${encodeURIComponent(apiKey)}`, {
+            signal: AbortSignal.timeout(3500),
+          }).catch(() => null);
+          if (extR?.ok) {
+            const extJ = await extR.json().catch(() => null);
+            if (extJ?.imdb_id) {
+              imdbId = String(extJ.imdb_id).trim();
+              if (env?.WATCHLIVO_KV && /^tt\d{5,10}$/i.test(imdbId)) {
+                await env.WATCHLIVO_KV.put(mapKey, imdbId, { expirationTtl: 604800 }).catch(() => {});
+              }
+            }
+          }
         }
       }
       if (imdbId) {
+        // 1. Primary: OpenSubtitles v3 Stremio addon
         const stremioUrl = mtype === "tv"
           ? `https://opensubtitles-v3.strem.io/subtitles/series/${encodeURIComponent(imdbId)}:${s}:${e}.json`
           : `https://opensubtitles-v3.strem.io/subtitles/movie/${encodeURIComponent(imdbId)}.json`;
         const stJ = await fetch(stremioUrl, {
           headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-          signal: AbortSignal.timeout(3200),
+          signal: AbortSignal.timeout(4200),
         }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         if (Array.isArray(stJ?.subtitles)) {
           for (const it of stJ.subtitles) {
             const rawU = String(it?.url || "").trim();
-            if (!rawU || !isPublicHttpUrl(rawU) || seenSubU.has(rawU)) continue;
-            seenSubU.add(rawU);
+            if (!rawU || !isPublicHttpUrl(rawU)) continue;
             const fn = String(it.subtitleFileName || it.movieReleaseName || "");
             const normLang = normalizeSubLang(it.lang || "", fn, rawU);
             if (!normLang) continue;
-            const score = scoreSubItem(it);
-            if (!byLang.has(normLang)) byLang.set(normLang, []);
-            byLang.get(normLang).push({
-              lang: normLang,
-              rawUrl: rawU,
-              score,
-              fmtTag: extractFormatTag(it),
-              source: "opensubtitles",
-            });
+            pushSubCand(normLang, rawU, scoreSubItem(it), extractFormatTag(it), "opensubtitles");
           }
+        }
+
+        // 2. Secondary (when TR < 2 or EN < 2): OpenSubtitles REST API -> subs5.strem.io UTF-8 ID bridge
+        const curTrCnt = (byLang.get("tr") || []).length;
+        const curEnCnt = (byLang.get("en") || []).length;
+        const imdbDigits = imdbId.replace(/^tt/i, "").replace(/^0+/, "") || imdbId.replace(/^tt/i, "");
+        if ((curTrCnt < 2 || curEnCnt < 2) && /^\d+$/.test(imdbDigits)) {
+          const fetchOsRestLang = async (osLang3, normCode) => {
+            const restUrl = mtype === "tv"
+              ? `https://rest.opensubtitles.org/search/episode-${e}/imdbid-${imdbDigits}/season-${s}/sublanguageid-${osLang3}`
+              : `https://rest.opensubtitles.org/search/imdbid-${imdbDigits}/sublanguageid-${osLang3}`;
+            const arr = await fetch(restUrl, {
+              headers: { "User-Agent": "TemporaryUserAgent", Accept: "application/json" },
+              signal: AbortSignal.timeout(4200),
+            }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+            if (!Array.isArray(arr)) return;
+            for (const it of arr) {
+              if (!it || typeof it !== "object") continue;
+              const fmtLow = String(it.SubFormat || "").toLowerCase();
+              if (fmtLow && fmtLow !== "srt" && fmtLow !== "vtt") continue;
+              if (String(it.SubBad || "0") === "1") continue;
+              if (Number(it.SubSumCD || 1) > 1) continue;
+              if (mtype === "tv") {
+                const rs = Number(it.SeriesSeason || 0);
+                const re = Number(it.SeriesEpisode || 0);
+                if (rs > 0 && rs !== s) continue;
+                if (re > 0 && re !== e) continue;
+              }
+              const fileId = String(it.IDSubtitleFile || "").trim();
+              if (!/^\d+$/.test(fileId)) continue;
+              const bridgeUrl = `https://subs5.strem.io/en/download/subencoding-stremio-utf8/src-api/file/${fileId}`;
+              pushSubCand(normCode, bridgeUrl, scoreSubItem(it) + 4, extractFormatTag(it), "opensubtitles");
+            }
+          };
+          const restJobs = [];
+          if (curTrCnt < 2) restJobs.push(fetchOsRestLang("tur", "tr"));
+          if (curEnCnt < 2) restJobs.push(fetchOsRestLang("eng", "en"));
+          if (restJobs.length) await Promise.allSettled(restJobs);
+        }
+
+        // 3. Tertiary TV fallback (Gestdown / Addic7ed mirror) when TR === 0 or EN === 0
+        if (mtype === "tv" && ((byLang.get("tr") || []).length === 0 || (byLang.get("en") || []).length === 0)) {
+          try {
+            const gdShow = await fetch(`https://api.gestdown.info/shows/external/imdb/${encodeURIComponent(imdbId)}`, {
+              headers: { "User-Agent": EDGE_UA, Accept: "application/json" },
+              signal: AbortSignal.timeout(2500),
+            }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+            const showId = gdShow?.shows?.[0]?.id || "";
+            if (showId) {
+              const gdLangs = [];
+              if ((byLang.get("tr") || []).length === 0) gdLangs.push(["turkish", "tr"]);
+              if ((byLang.get("en") || []).length === 0) gdLangs.push(["english", "en"]);
+              await Promise.allSettled(gdLangs.map(async ([gdLangName, normCode]) => {
+                const gdRes = await fetch(`https://api.gestdown.info/subtitles/get/${encodeURIComponent(showId)}/${s}/${e}/${gdLangName}`, {
+                  headers: { "User-Agent": EDGE_UA, Accept: "application/json" },
+                  signal: AbortSignal.timeout(2800),
+                }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+                for (const sub of (gdRes?.matchingSubtitles || []).slice(0, 2)) {
+                  const dlUri = String(sub?.downloadUri || "").trim();
+                  if (!dlUri) continue;
+                  const fullU = dlUri.startsWith("http") ? dlUri : `https://api.gestdown.info${dlUri.startsWith("/") ? "" : "/"}${dlUri}`;
+                  pushSubCand(normCode, fullU, 18, "WEB", "gestdown");
+                }
+              }));
+            }
+          } catch {}
         }
       }
     } catch {}
@@ -2870,8 +2970,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     for (const arr of byLang.values()) arr.sort((a, b) => b.score - a.score);
 
     const selected = [];
-    const trList = (byLang.get("tr") || []).slice(0, 4);
-    const enList = (byLang.get("en") || []).slice(0, 3);
+    const trList = (byLang.get("tr") || []).slice(0, 5);
+    const enList = (byLang.get("en") || []).slice(0, 4);
     selected.push(...trList, ...enList);
     let secAdded = 0;
     for (const sl of SECONDARY_LANGS) {
@@ -2890,18 +2990,19 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       }
     }
 
-    // Fast parallel language verification probe on top 2 TR + top 2 EN tracks to catch dead/mislabeled OpenSubtitles uploads
+    // Parallel probe on top 3 TR + top 3 EN tracks to reject dead/corrupt/Tamil-mojibake/trailer uploads & reclassify mislabeled files
     const probeTargets = [
-      ...trList.slice(0, 2),
-      ...enList.slice(0, 2),
+      ...trList.slice(0, 3),
+      ...enList.slice(0, 3),
     ];
+    const minFullCues = mtype === "tv" ? 20 : 45;
     if (probeTargets.length) {
       await Promise.allSettled(probeTargets.map(async (cand) => {
         try {
           const r = await fetch(cand.rawUrl, {
-            headers: { "User-Agent": "Mozilla/5.0", Range: "bytes=0-12287" },
+            headers: { "User-Agent": "Mozilla/5.0", Accept: "text/plain,text/vtt,*/*" },
             redirect: "follow",
-            signal: AbortSignal.timeout(1500),
+            signal: AbortSignal.timeout(2400),
           });
           if (r.status === 404 || r.status === 410 || r.status >= 500) {
             r.body?.cancel?.();
@@ -2918,6 +3019,16 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
             cand.dead = true;
             return;
           }
+          if ((cand.lang === "tr" || cand.lang === "en") && isCorruptOrForeignSubtitleText(txt)) {
+            cand.dead = true;
+            return;
+          }
+          const cueCount = (txt.match(/-->/g) || []).length;
+          cand.cueCount = cueCount;
+          if (cueCount >= 3 && cueCount < minFullCues) {
+            cand.isTrailerStub = true;
+            cand.score -= 70;
+          }
           const detected = detectSubtitleTextLang(txt);
           if (detected && (detected === "tr" || detected === "en") && detected !== cand.lang) {
             cand.lang = detected;
@@ -2927,7 +3038,14 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       }));
     }
 
-    const liveSelected = selected.filter((c) => !c.dead);
+    // Drop trailer stubs ONLY when at least one full-length subtitle exists in the same language
+    const hasFullByLang = {};
+    for (const c of selected) {
+      if (!c.dead && !c.isTrailerStub && Number(c.cueCount || 0) >= minFullCues) {
+        hasFullByLang[c.lang] = true;
+      }
+    }
+    const liveSelected = selected.filter((c) => !c.dead && !(c.isTrailerStub && hasFullByLang[c.lang]));
     const rankLang = (l) => (l === "tr" ? 0 : (l === "en" ? 1 : 2));
     liveSelected.sort((a, b) => (rankLang(a.lang) - rankLang(b.lang)) || (b.score - a.score));
 
@@ -2951,7 +3069,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       if (total > 1) {
         suffix = c.fmtTag ? `Seçenek ${n} · ${c.fmtTag}` : `Seçenek ${n}`;
       } else if (c.lang === "tr" || c.lang === "en") {
-        suffix = c.fmtTag || "OpenSubtitles";
+        suffix = c.fmtTag || (c.source === "gestdown" ? "Addic7ed" : "OpenSubtitles");
       }
       return {
         id: total > 1 ? `os-${c.lang}-${n}` : `os-${c.lang}`,

@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261120_v228';
-import { api, qs, isEdgeUnavailable, humanApiError } from '../api.js?v=20261120_v228';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261120_v228';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261120_v228';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261120_v228';
-import { profileSetup } from '../profile.js?v=20261120_v228';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261120_v228';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261121_v231';
+import { api, qs, isEdgeUnavailable, humanApiError } from '../api.js?v=20261121_v231';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261121_v231';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261121_v231';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261121_v231';
+import { profileSetup } from '../profile.js?v=20261121_v231';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261121_v231';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261120_v228';
+} from '../store.js?v=20261121_v231';
 
 const _resolveMemCache = new Map();
 
@@ -20,8 +20,15 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
   const s = Math.max(1, Number(season) || 1);
   const e = Math.max(1, Number(episode) || 1);
-  const rawTid = /^\d+$/.test(String(it.tmdbId || '').trim()) ? String(it.tmdbId).trim() : (/^\d+$/.test(String(it.id || '').trim()) ? String(it.id).trim() : '');
-  const cacheKey = `${provId}:${mediaType}:${rawTid || it.title || ''}:${s}:${e}`;
+  const extractNumId = (v) => String(v || '').trim().match(/^(?:tmdb-(?:tv|movie)-)?(\d+)$/i)?.[1] || '';
+  const rawTid = extractNumId(it.tmdbId) || extractNumId(it.id);
+  let audPrefParam = '';
+  try {
+    const rawAudPref = String(localStorage.getItem('vortex_audio_lang') || localStorage.getItem('vortex_audio_proxy_pref') || '').trim().toLowerCase();
+    if (rawAudPref === 'orig' || rawAudPref.startsWith('orig-')) audPrefParam = 'orig';
+    else if (rawAudPref === 'tr' || rawAudPref === 'tr-dub' || rawAudPref.startsWith('tr-dub-')) audPrefParam = 'tr';
+  } catch (_) {}
+  const cacheKey = `${provId}:${mediaType}:${rawTid || it.title || ''}:${s}:${e}:${audPrefParam}`;
   if (!opts?.forceRefresh && _resolveMemCache.has(cacheKey)) {
     const cachedHit = _resolveMemCache.get(cacheKey);
     if (cachedHit && (Date.now() - cachedHit.ts < 90000) && cachedHit.data) {
@@ -37,6 +44,8 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
     year: it.year || '',
     tmdbId: rawTid,
     imdbId: it.imdbId || '',
+    origLang: it.origLang || '',
+    aud: audPrefParam,
     mediaType,
     poster: it.backdrop || it.poster || '',
     sourceUrl: it.officialUrl || it.sourceUrl || '',
@@ -71,6 +80,15 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
         res.thumbnail = res.thumbnail || it.poster || it.backdrop || '';
         res.backdrop = res.backdrop || it.backdrop || it.poster || '';
         res.originalTitle = res.originalTitle || it.originalTitle || '';
+        res.tmdbId = res.tmdbId || rawTid || '';
+        res.imdbId = res.imdbId || it.imdbId || '';
+        res.origLang = res.origLang || it.origLang || '';
+        res.year = res.year || it.year || '';
+        res.mediaType = res.mediaType || mediaType;
+        if (mediaType === 'tv') {
+          res.season = res.season || s;
+          res.episode = res.episode || e;
+        }
         res.catalogProvider = prov?.id || it.catalogProvider || it.provider || 'cinema';
         if (it.streamUrl && !res.streamUrl) res.streamUrl = it.streamUrl;
         _resolveMemCache.set(cacheKey, { ts: Date.now(), data: { ...res } });
@@ -120,7 +138,12 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
       title: mediaType === 'tv'
         ? (epName ? `${disp} — S${s}:B${e} · ${epName}` : `${disp} — ${s}. Sezon ${e}. Bölüm`)
         : disp,
+      seriesTitle: mediaType === 'tv' ? (it.seriesTitle || String(disp || '').split(' — ')[0].trim()) : '',
       originalTitle: it.originalTitle || '',
+      tmdbId: rawTid,
+      imdbId: it.imdbId || '',
+      origLang: it.origLang || '',
+      year: it.year || '',
       poster: it.poster || it.backdrop || '/static/watchlivo-poster.svg',
       backdrop: it.backdrop || it.poster || '/static/watchlivo-poster.svg',
       mediaType,

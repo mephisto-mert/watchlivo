@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261120_v228';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261121_v231';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -178,7 +178,7 @@ const CLIENT_SUB_LABELS = {
   hi: '🇮🇳 Hintçe', he: '🇮🇱 İbranice', id: '🇮🇩 Endonezce', vi: '🇻🇳 Vietnamca',
 };
 
-const STREAM_SUB_SOURCES = new Set(['stream', 'fansub', 'dl_embed', 'sinemacc', 'fhd_embed', 'hfnl_embed', 'diziyou_net', 'dylove', 'filmmodu', 'ddizimag', 'hls_filemoon']);
+const STREAM_SUB_SOURCES = new Set(['stream', 'fansub', 'dl_embed', 'sinemacc', 'fhd_embed', 'hfnl_embed', 'diziyou_net', 'diziyou_love', 'dylove', 'filmmodu', 'ddizimag', 'hls_filemoon']);
 
 export function normalizeClientSubLang(rawLang, rawLabel = '') {
   const clean = (v) => String(v || '').replace(/İ/g, 'i').replace(/I/g, 'i').trim().toLowerCase();
@@ -285,8 +285,15 @@ export class SubtitleDubController {
     this.intro = null;
     this.subtitleTracks = [];
     this.audioTracks = [];
-    this.selectedSubId = localStorage.getItem('vortex_sub_lang') || 'tr';
-    const savedAud = localStorage.getItem('vortex_audio_lang') || localStorage.getItem('vortex_audio_proxy_pref') || '';
+    let savedSub = '';
+    let savedAud = '';
+    try {
+      if (typeof localStorage !== 'undefined') {
+        savedSub = localStorage.getItem('vortex_sub_lang') || '';
+        savedAud = localStorage.getItem('vortex_audio_lang') || localStorage.getItem('vortex_audio_proxy_pref') || '';
+      }
+    } catch (e) {}
+    this.selectedSubId = savedSub || 'tr';
     this.userAudioPref = /^src-\d+$/.test(savedAud) ? '' : savedAud;
     this.selectedAudioId = this.userAudioPref || 'tr-dub';
     this.offsetSec = 0;
@@ -428,7 +435,10 @@ export class SubtitleDubController {
   }
 
   resolveInitialAudioTrack(media) {
-    const rawAudio = Array.isArray(media?.audioTracks) ? media.audioTracks.filter(Boolean) : [];
+    const rawFromMedia = Array.isArray(media?.audioTracks) ? media.audioTracks.filter(Boolean) : [];
+    const rawAudio = rawFromMedia.length
+      ? rawFromMedia
+      : (typeof this._deriveAudioTracksFromServers === 'function' ? this._deriveAudioTracksFromServers(media, media?.url || '') : []);
     if (!rawAudio.length) return null;
     let pref = '';
     try {
@@ -476,13 +486,33 @@ export class SubtitleDubController {
   onStreamFallbackUrl(nextUrl) {
     const u = String(nextUrl || '');
     if (!u || !Array.isArray(this.audioTracks) || !this.audioTracks.length) return;
-    const norm = (s) => String(s || '').replace(/&proxy_segs=1/g, '');
+    const norm = (s) => {
+      const str = String(s || '').trim();
+      if (!str) return '';
+      try {
+        const uo = new URL(str, typeof location !== 'undefined' ? location.origin : 'https://watchlivo.online');
+        uo.searchParams.delete('proxy_segs');
+        uo.searchParams.delete('max_h');
+        uo.searchParams.delete('abr_low');
+        return `${uo.pathname}${uo.search}`;
+      } catch (_) {
+        return str.replace(/([?&])(proxy_segs|max_h|abr_low)=[^&]*/g, '$1').replace(/[?&]+$/, '').replace(/\?&/, '?');
+      }
+    };
     const uClean = norm(u);
+    const nextAudParam = (uClean.match(/[?&]aud=([^&]+)/i)?.[1] || '').toLowerCase();
     const curTrack = this.audioTracks.find((t) => t.id === this.selectedAudioId);
     const wasTrStudio = Boolean(curTrack && curTrack.mode !== 'tts' && (curTrack.id === 'tr-dub' || String(curTrack.id || '').startsWith('tr-dub-') || curTrack.audioLang === 'tr' || curTrack.lang === 'tr'));
-    const cleanAud = (s) => norm(s).replace(/[?&]aud=[^&]*/g, '');
+    const cleanAud = (s) => norm(s).replace(/([?&])aud=[^&]*/g, '$1').replace(/[?&]+$/, '').replace(/\?&/, '?');
     const matchedTrack = this.audioTracks.find((t) => t.mode === 'stream' && t.url && norm(t.url) === uClean)
-      || this.audioTracks.find((t) => t.mode === 'stream' && t.url && cleanAud(t.url) === cleanAud(uClean));
+      || this.audioTracks.find((t) => {
+        if (t.mode !== 'stream' || !t.url || cleanAud(t.url) !== cleanAud(uClean)) return false;
+        const tAud = (norm(t.url).match(/[?&]aud=([^&]+)/i)?.[1] || '').toLowerCase();
+        if (nextAudParam && tAud && tAud !== nextAudParam) return false;
+        if (nextAudParam === 'tr') return t.id === 'tr-dub' || String(t.id || '').startsWith('tr-dub-') || t.audioLang === 'tr' || t.lang === 'tr';
+        if (nextAudParam === 'orig') return t.id === 'orig' || String(t.id || '').startsWith('orig-') || (t.audioLang && t.audioLang !== 'tr');
+        return true;
+      });
     if (matchedTrack && matchedTrack.id !== this.selectedAudioId && this.selectedAudioId !== 'tr-ai-dub') {
       if (wasTrStudio && (matchedTrack.id === 'orig' || String(matchedTrack.id || '').startsWith('orig-'))) {
         const studioTr = this.audioTracks.find((t) => (t.id === 'tr-dub' || String(t.id || '').startsWith('tr-dub-') || t.audioLang === 'tr') && (typeof t.hlsIndex === 'number' || typeof t.nativeIndex === 'number'));
@@ -587,8 +617,7 @@ export class SubtitleDubController {
     for (const t of capped) {
       const idxInLang = t.source === 'local' ? 1 : ((idxByLang[t.lang] = (idxByLang[t.lang] || 0) + 1));
       const totalInLang = totalByLang[t.lang] || 1;
-      let baseId = String(t.id || t.lang || 'sub').trim() || 'sub';
-      if (baseId.startsWith('sub-') && t.lang) baseId = `stream-${t.lang}`;
+      const baseId = String(t.id || t.lang || 'sub').trim() || 'sub';
       let nextId = baseId;
       let suffixN = 2;
       while (seenIds.has(nextId)) {
@@ -605,9 +634,66 @@ export class SubtitleDubController {
     return out;
   }
 
+  _deriveAudioTracksFromServers(media, baseUrl) {
+    const srvs = Array.isArray(media?.servers) ? media.servers.filter((s) => s && s.url) : [];
+    const origCode = String(media?.origLang || 'orig').trim().toLowerCase() || 'orig';
+    const isDual = (s) => {
+      const langs = Array.isArray(s.audioLangs) ? s.audioLangs : [];
+      return (langs.includes('tr') && langs.some((l) => l && l !== 'tr')) || /dublaj\s*\+\s*orijinal|çoklu\s*ses/i.test(String(s.label || ''));
+    };
+    const isTrOnly = (s) => {
+      const langs = Array.isArray(s.audioLangs) ? s.audioLangs : [];
+      if (langs.length) return langs.includes('tr') && !langs.some((l) => l !== 'tr');
+      return /türkçe\s*dublaj|tr\s*dublaj/i.test(String(s.label || '')) && !/orijinal|altyaz/i.test(String(s.label || ''));
+    };
+    const isOrigOnly = (s) => {
+      const langs = Array.isArray(s.audioLangs) ? s.audioLangs : [];
+      if (langs.length) return !langs.includes('tr') && langs.some(Boolean);
+      return /altyaz|orijinal/i.test(String(s.label || '')) && !/dublaj/i.test(String(s.label || ''));
+    };
+    const withAud = (u, aud) => {
+      const str = String(u || '');
+      if (!str.includes('/api/rave/stream')) return str;
+      const cleaned = str.replace(/([?&])aud=[^&]*/gi, (_, sep) => (sep === '?' ? '?' : '')).replace(/\?&/, '?').replace(/[?&]$/, '');
+      return cleaned.includes('&ext=.m3u8') ? cleaned.replace('&ext=.m3u8', `&aud=${aud}&ext=.m3u8`) : `${cleaned}${cleaned.includes('?') ? '&' : '?'}aud=${aud}`;
+    };
+    const dual = srvs.find(isDual);
+    if (dual) {
+      return [
+        { id: 'tr-dub', lang: 'tr', targetLang: 'tr', audioLang: 'tr', label: '🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)', mode: 'stream', url: withAud(dual.url, 'tr') },
+        { id: 'orig', lang: 'orig', targetLang: 'orig', audioLang: origCode, label: origCode === 'en' ? '🇬🇧 İngilizce (Orijinal Ses · 1080p)' : '🎬 Orijinal Ses (1080p HD)', mode: 'stream', url: withAud(dual.url, 'orig') },
+      ];
+    }
+    const trSrv = srvs.find(isTrOnly);
+    const origSrv = srvs.find(isOrigOnly);
+    if (trSrv && origSrv) {
+      return [
+        { id: 'tr-dub', lang: 'tr', targetLang: 'tr', audioLang: 'tr', label: '🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)', mode: 'stream', url: trSrv.url },
+        { id: 'orig', lang: 'orig', targetLang: 'orig', audioLang: origCode, label: origCode === 'en' ? '🇬🇧 İngilizce (Orijinal Ses · 1080p)' : '🎬 Orijinal Ses (1080p HD)', mode: 'stream', url: origSrv.url },
+      ];
+    }
+    if (trSrv && !origSrv) {
+      return [{ id: 'tr-dub', lang: 'tr', targetLang: 'tr', audioLang: 'tr', label: '🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)', mode: 'stream', url: trSrv.url }];
+    }
+    return [{ id: 'orig', lang: 'orig', targetLang: 'orig', audioLang: origCode, label: origCode === 'en' ? '🇬🇧 İngilizce (Orijinal Ses · 1080p)' : '🎬 Orijinal Ses (1080p HD)', mode: 'stream', url: baseUrl || origSrv?.url || '' }];
+  }
+
+  resetStreamAudioBindings() {
+    if (!Array.isArray(this.audioTracks)) return;
+    this.audioTracks = this.audioTracks
+      .filter((t) => t && t.mode !== 'hls' && t.mode !== 'native')
+      .map((t) => {
+        const copy = { ...t };
+        delete copy.hlsIndex;
+        delete copy.nativeIndex;
+        return copy;
+      });
+  }
+
   async initForMedia(media, opts = {}) {
     const seq = (this._mediaSeq = (this._mediaSeq || 0) + 1);
     this._skipInitStreamSwitch = Boolean(opts?.skipInitialStreamSwitch);
+    this._userPickedAudioForMedia = false;
     const prevKey = this.media ? `${this.media.tmdbId || ''}|${this.media.imdbId || ''}|${this.media.videoId || ''}|${this.media.season || 0}|${this.media.episode || 0}` : '';
     const nextKey = media ? `${media.tmdbId || ''}|${media.imdbId || ''}|${media.videoId || ''}|${media.season || 0}|${media.episode || 0}` : '';
     const preservedLocals = (prevKey && prevKey === nextKey && Array.isArray(this.subtitleTracks))
@@ -631,56 +717,71 @@ export class SubtitleDubController {
     const rawAudio = Array.isArray(media.audioTracks) ? media.audioTracks.filter(Boolean) : [];
     this.audioTracks = rawAudio.length
       ? [...rawAudio]
-      : [
-          { id: 'orig', lang: 'orig', targetLang: 'orig', audioLang: 'orig', label: '🎬 Orijinal Ses (1080p HD)', mode: 'stream', url: baseUrl },
-        ];
-    const hasTrSub = this.subtitleTracks.some((t) => t.lang === 'tr');
-    const hasInitialAudio = rawAudio.length > 1;
-    const needsSubFetch = !(this.subtitleTracks.length > 0 && hasTrSub && hasInitialAudio) && Boolean(media.tmdbId || media.imdbId || media.videoId || media.provider === 'youtube' || !this.subtitleTracks.length || !hasTrSub);
+      : this._deriveAudioTracksFromServers(media, baseUrl);
+    if (this.media && !rawAudio.length && this.audioTracks.length) {
+      this.media.audioTracks = this.audioTracks;
+    }
+    const trSubCount = this.subtitleTracks.filter((t) => t.lang === 'tr').length;
+    const hasEnSub = this.subtitleTracks.some((t) => t.lang === 'en');
+    const hasInitialAudio = this.audioTracks.length > 1;
+    const rawTidExtracted = /^\d+$/.test(String(media.tmdbId || '').trim())
+      ? String(media.tmdbId).trim()
+      : (String(media.id || '').match(/^(?:tmdb-(?:tv|movie)-)?(\d+)$/i)?.[1] || '');
+    const titleEpM = String(media.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm/i);
+    const effSeason = Number(media.season || titleEpM?.[1] || titleEpM?.[3] || 1) || 1;
+    const effEpisode = Number(media.episode || titleEpM?.[2] || titleEpM?.[4] || 1) || 1;
+    const effMediaType = (media.mediaType === 'tv' || titleEpM || /^tmdb-tv-/i.test(String(media.id || ''))) ? 'tv' : (media.mediaType || 'movie');
+    const needsSubFetch = (trSubCount < 2 || !hasEnSub || !hasInitialAudio) && Boolean(rawTidExtracted || media.imdbId || media.videoId || media.provider === 'youtube' || media.title);
     if (needsSubFetch) {
-      try {
-        const queryParams = {
-          tmdbId: media.tmdbId || '',
-          imdbId: media.imdbId || '',
-          videoId: media.videoId || '',
-          mediaType: media.mediaType || 'movie',
-          provider: media.catalogProvider || media.provider || 'netflix',
-          title: (media.title || '').split(' — ')[0],
-          season: String(media.season || 1),
-          episode: String(media.episode || 1),
-          _v: '20261119v227',
-        };
-        if (!media.tmdbId && baseUrl) queryParams.url = baseUrl;
-        const qs = new URLSearchParams(queryParams);
-        const r = await fetch(`/api/rave/subtitles?${qs}`);
-        if (this._destroyed || this._mediaSeq !== seq) return;
-        if (r.ok) {
-          const data = await r.json();
+      const queryParams = {
+        tmdbId: rawTidExtracted,
+        imdbId: media.imdbId || '',
+        videoId: media.videoId || '',
+        mediaType: effMediaType,
+        provider: media.catalogProvider || media.provider || 'netflix',
+        title: String(media.seriesTitle || media.title || '').split(' — ')[0].trim(),
+        season: String(effSeason),
+        episode: String(effEpisode),
+        _v: '20261121v231',
+      };
+      if (!rawTidExtracted && baseUrl) queryParams.url = baseUrl;
+      const qs = new URLSearchParams(queryParams);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const ctrl = new AbortController();
+          const tId = setTimeout(() => ctrl.abort(), attempt === 0 ? 6500 : 5500);
+          const r = await fetch(`/api/rave/subtitles?${qs}${attempt === 1 ? '&refresh=1' : ''}`, { signal: ctrl.signal });
+          clearTimeout(tId);
           if (this._destroyed || this._mediaSeq !== seq) return;
-          if (Array.isArray(data.subtitleTracks) && data.subtitleTracks.length) {
-            const existing = Array.isArray(this.subtitleTracks) ? this.subtitleTracks : [];
-            this.subtitleTracks = this._dedupeSubtitleTrackIds([...existing, ...data.subtitleTracks]);
-            if (this.media) this.media.subtitleTracks = this.subtitleTracks;
-          }
-          if (Array.isArray(data.audioTracks) && data.audioTracks.length && !hasInitialAudio) {
-            const seenAudIds = new Set();
-            this.audioTracks = data.audioTracks.filter((at) => {
-              if (!at || !at.id || seenAudIds.has(at.id)) return false;
-              seenAudIds.add(at.id);
-              return true;
-            });
-            if (this.media) this.media.audioTracks = this.audioTracks;
-            if (this.adapter?.hls?.audioTracks?.length > 1) {
-              this.mergeHlsAudioTracks(this.adapter.hls.audioTracks);
-            } else if (this.adapter?.video?.audioTracks?.length > 1) {
-              this.mergeNativeAudioTracks(this.adapter.video.audioTracks);
+          if (r.ok) {
+            const data = await r.json();
+            if (this._destroyed || this._mediaSeq !== seq) return;
+            if (Array.isArray(data.subtitleTracks) && data.subtitleTracks.length) {
+              const existing = Array.isArray(this.subtitleTracks) ? this.subtitleTracks : [];
+              this.subtitleTracks = this._dedupeSubtitleTrackIds([...existing, ...data.subtitleTracks]);
+              if (this.media) this.media.subtitleTracks = this.subtitleTracks;
             }
+            if (Array.isArray(data.audioTracks) && data.audioTracks.length && !hasInitialAudio) {
+              const seenAudIds = new Set();
+              this.audioTracks = data.audioTracks.filter((at) => {
+                if (!at || !at.id || seenAudIds.has(at.id)) return false;
+                seenAudIds.add(at.id);
+                return true;
+              });
+              if (this.media) this.media.audioTracks = this.audioTracks;
+              if (this.adapter?.hls?.audioTracks?.length > 1) {
+                this.mergeHlsAudioTracks(this.adapter.hls.audioTracks);
+              } else if (this.adapter?.video?.audioTracks?.length > 1) {
+                this.mergeNativeAudioTracks(this.adapter.video.audioTracks);
+              }
+            }
+            if (data.intro && !this.intro) {
+              this.intro = data.intro;
+            }
+            if (this.subtitleTracks.length > 0) break;
           }
-          if (data.intro && !this.intro) {
-            this.intro = data.intro;
-          }
-        }
-      } catch (e) { /* ignore */ }
+        } catch (e) { /* retry once on timeout/network hiccup */ }
+      }
     }
     if (!this.subtitleTracks.length) {
       this.selectedSubId = 'off';
@@ -689,11 +790,13 @@ export class SubtitleDubController {
     const initAudTrack = this.audioTracks.find((t) => t.id === this.selectedAudioId)
       || this.audioTracks.find((t) => (t.targetLang || t.lang) === this.selectedAudioId)
       || this.audioTracks[0];
+    const cleanU = (u) => String(u || '').replace(/&proxy_segs=1/g, '').replace(/[?&](?:max_h|abr_low)=[^&]*/g, '');
+    const initUrlMatchesActive = !initAudTrack?.url || !this.adapter?.currentUrl || cleanU(initAudTrack.url) === cleanU(this.adapter.currentUrl);
     const hasVerifiedTrStream = Boolean(
       initAudTrack && (
         initAudTrack.id === 'tr-orig'
         || ((initAudTrack.id === 'tr-dub' || initAudTrack.audioLang === 'tr' || initAudTrack.lang === 'tr')
-            && (initAudTrack.url || typeof initAudTrack.hlsIndex === 'number' || typeof initAudTrack.nativeIndex === 'number'))
+            && (typeof initAudTrack.hlsIndex === 'number' || typeof initAudTrack.nativeIndex === 'number' || (initAudTrack.url && (!this._skipInitStreamSwitch || initUrlMatchesActive))))
         || (media?.origLang === 'tr' && (!this.selectedAudioId || this.selectedAudioId === 'orig'))
         || (Array.isArray(media?.platformAudioLangs) && media.platformAudioLangs.length === 1 && media.platformAudioLangs[0] === 'tr')
       )
@@ -703,7 +806,7 @@ export class SubtitleDubController {
     if (hasVerifiedTrStream && !savedExplicitSub && String(this.selectedSubId || '').startsWith('tr')) {
       this._prevSubBeforeDub = this.selectedSubId;
       this.selectedSubId = 'off';
-    } else if (!hasVerifiedTrStream && !savedExplicitSub && media?.origLang !== 'tr' && (!this.selectedSubId || this.selectedSubId === 'off')) {
+    } else if (!hasVerifiedTrStream && savedExplicitSub !== 'off' && media?.origLang !== 'tr' && (!this.selectedSubId || this.selectedSubId === 'off')) {
       const autoTrSub = this.subtitleTracks.find((t) => String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
       if (autoTrSub) this.selectedSubId = autoTrSub.id;
     }
@@ -716,105 +819,180 @@ export class SubtitleDubController {
 
   mergeHlsAudioTracks(hlsTracks) {
     if (!Array.isArray(hlsTracks) || hlsTracks.length <= 1) return;
+    const hls = this.adapter?.hls;
+    const curLevelObj = (hls && Array.isArray(hls.levels) && hls.currentLevel >= 0) ? hls.levels[hls.currentLevel] : null;
+    const activeGroupId = curLevelObj?.audioGroupId || hlsTracks[0]?.groupId || '';
+    const normAudKey = (rawLang, rawName) => {
+      const info = `${rawLang || ''} ${rawName || ''}`.replace(/İ/g, 'i').replace(/I/g, 'i').trim().toLowerCase();
+      if (/(?:^|[^\p{L}\p{N}])(tr|tur|türk|turkish|türkçe|dublaj)(?=$|[^\p{L}\p{N}])/iu.test(info)) return 'tr';
+      if (/(?:^|[^\p{L}\p{N}])(en|eng|english|ingilizce)(?=$|[^\p{L}\p{N}])/iu.test(info)) return 'en';
+      if (/(?:^|[^\p{L}\p{N}])(de|deu|ger|german|almanca)(?=$|[^\p{L}\p{N}])/iu.test(info)) return 'de';
+      if (/(?:^|[^\p{L}\p{N}])(fr|fra|fre|french|fransızca)(?=$|[^\p{L}\p{N}])/iu.test(info)) return 'fr';
+      if (/(?:^|[^\p{L}\p{N}])(es|spa|spanish|ispanyolca)(?=$|[^\p{L}\p{N}])/iu.test(info)) return 'es';
+      if (/(?:^|[^\p{L}\p{N}])(it|ita|italian|italyanca)(?=$|[^\p{L}\p{N}])/iu.test(info)) return 'it';
+      if (/(?:^|[^\p{L}\p{N}])(ja|jpn|japanese|japonca)(?=$|[^\p{L}\p{N}])/iu.test(info)) return 'ja';
+      if (/(?:^|[^\p{L}\p{N}])(ko|kor|korean|korece)(?=$|[^\p{L}\p{N}])/iu.test(info)) return 'ko';
+      const base = String(rawLang || '').replace(/İ/g, 'i').replace(/I/g, 'i').trim().toLowerCase().split(/[-_]/)[0];
+      return (base && base !== 'und') ? base : 'orig';
+    };
+    const AUD_LABELS = {
+      en: '🇬🇧 İngilizce (Orijinal Ses · 1080p)',
+      de: '🇩🇪 Almanca (Orijinal Ses)',
+      fr: '🇫🇷 Fransızca (Orijinal Ses)',
+      es: '🇪🇸 İspanyolca (Orijinal Ses)',
+      it: '🇮🇹 İtalyanca',
+      ja: '🇯🇵 Japonca (Orijinal Ses)',
+      ko: '🇰🇷 Korece (Orijinal Ses)',
+      ru: '🇷🇺 Rusça',
+    };
+
+    // Deduplicate across multi-group HLS manifests (e.g. Game of Thrones 'audio' + 'audio-lo')
+    const pickedByLang = new Map();
     hlsTracks.forEach((ht, idx) => {
-      const rawLang = String(ht.lang || '').trim().toLowerCase();
-      const rawName = String(ht.name || '').trim();
-      const rawInfo = `${rawLang} ${rawName}`.toLowerCase();
-      const isTr = /(?:^|[^\p{L}\p{N}])(tr|tur|türk|turkish|türkçe)(?=$|[^\p{L}\p{N}])/iu.test(rawInfo);
-      if (isTr) {
-        const exTr = this.audioTracks.find((t) => t.id === 'tr-dub' || (t.audioLang || t.targetLang || t.lang) === 'tr');
-        if (exTr) {
-          exTr.hlsIndex = idx;
+      const code = normAudKey(ht?.lang, ht?.name);
+      const inActiveGroup = Boolean(activeGroupId && ht?.groupId === activeGroupId);
+      const existing = pickedByLang.get(code);
+      if (!existing || (inActiveGroup && !existing.inActiveGroup)) {
+        pickedByLang.set(code, { ht, idx, code, inActiveGroup });
+      }
+    });
+
+    const preferredOrigCode = String(this.media?.origLang || '').trim().toLowerCase();
+    const nonTrEntries = [...pickedByLang.values()].filter((e) => e.code !== 'tr');
+    nonTrEntries.sort((a, b) => {
+      const aPref = (preferredOrigCode && a.code === preferredOrigCode) ? 0 : (a.code === 'en' ? 1 : (a.code === 'orig' ? 2 : 3));
+      const bPref = (preferredOrigCode && b.code === preferredOrigCode) ? 0 : (b.code === 'en' ? 1 : (b.code === 'orig' ? 2 : 3));
+      return aPref - bPref;
+    });
+
+    const trEntry = pickedByLang.get('tr');
+    let addedNewTr = false;
+    if (trEntry) {
+      const exTr = this.audioTracks.find((t) => t.id === 'tr-dub' || (t.audioLang || t.targetLang || t.lang) === 'tr');
+      if (exTr) {
+        exTr.hlsIndex = trEntry.idx;
+      } else {
+        addedNewTr = true;
+        this.audioTracks.unshift({
+          id: 'tr-dub',
+          hlsIndex: trEntry.idx,
+          lang: 'tr',
+          targetLang: 'tr',
+          audioLang: 'tr',
+          label: '🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)',
+          mode: 'hls',
+        });
+      }
+    }
+
+    nonTrEntries.forEach((entry, nIdx) => {
+      const { ht, idx, code } = entry;
+      const rawName = String(ht?.name || '').trim();
+      const niceLabel = AUD_LABELS[code] || (rawName ? `🎬 ${rawName} (Orijinal Ses)` : '🎬 Orijinal Ses (1080p HD)');
+      if (nIdx === 0) {
+        const exOrig = this.audioTracks.find((t) => t.id === 'orig');
+        if (exOrig) {
+          exOrig.hlsIndex = idx;
+          exOrig.audioLang = code;
+          if (AUD_LABELS[code]) exOrig.label = niceLabel;
         } else {
           this.audioTracks.push({
-            id: 'tr-dub',
+            id: 'orig',
             hlsIndex: idx,
-            lang: 'tr',
-            targetLang: 'tr',
-            audioLang: 'tr',
-            label: '🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)',
+            lang: 'orig',
+            targetLang: 'orig',
+            audioLang: code,
+            label: niceLabel,
             mode: 'hls',
           });
         }
-        return;
-      }
-      if (this.audioTracks.some((t) => t.hlsIndex === idx)) return;
-      const lang = rawLang || 'orig';
-      const name = rawName || rawLang || 'Orijinal Ses';
-      const exOrig = this.audioTracks.find((t) => t.id === 'orig' || (t.audioLang && t.audioLang !== 'tr' && typeof t.hlsIndex !== 'number'));
-      if (exOrig && typeof exOrig.hlsIndex !== 'number') {
-        exOrig.hlsIndex = idx;
-        if (rawLang && (!exOrig.audioLang || exOrig.audioLang === 'orig')) exOrig.audioLang = rawLang;
-      } else if (!this.audioTracks.some((t) => t.id === 'orig')) {
-        this.audioTracks.push({
-          id: 'orig',
-          hlsIndex: idx,
-          lang: 'orig',
-          targetLang: 'orig',
-          audioLang: lang,
-          label: `🎬 ${name} (Orijinal Stüdyo Ses)`,
-          mode: 'hls',
-        });
       } else {
-        const extraId = `orig-${idx}`;
-        if (!this.audioTracks.some((t) => t.id === extraId)) {
+        const extraId = `orig-${code}`;
+        const exExtra = this.audioTracks.find((t) => t.id === extraId || t.audioLang === code);
+        if (exExtra) {
+          exExtra.hlsIndex = idx;
+        } else {
           this.audioTracks.push({
             id: extraId,
             hlsIndex: idx,
-            lang,
-            targetLang: lang,
-            audioLang: lang,
-            label: `🌐 ${rawName || rawLang.toUpperCase() || 'Orijinal Ses'}`,
+            lang: code,
+            targetLang: code,
+            audioLang: code,
+            label: AUD_LABELS[code] || `🌐 ${rawName || code.toUpperCase()}`,
             mode: 'hls',
           });
         }
       }
     });
+
+    if (!this._userPickedAudioForMedia && (addedNewTr || trEntry)) {
+      const prevAud = this.selectedAudioId;
+      this.resolveInitialAudioTrack({ ...(this.media || {}), audioTracks: this.audioTracks });
+      if (prevAud !== this.selectedAudioId && this.selectedAudioId === 'tr-dub') {
+        let savedSub = '';
+        try { savedSub = localStorage.getItem('vortex_sub_lang') || ''; } catch (_) {}
+        if (!savedSub && String(this.selectedSubId || '').startsWith('tr')) {
+          this._prevSubBeforeDub = this.selectedSubId;
+          this.setSubtitleTrack('off', true).catch(() => {});
+        }
+      }
+    }
     this._applyHlsAudioSelection();
     this.adapter.events.onTracksChanged?.();
   }
 
   mergeNativeAudioTracks(nativeTracks) {
     if (!nativeTracks || nativeTracks.length <= 1) return;
+    const normAudKey = (rawLang, rawName) => {
+      const info = `${rawLang || ''} ${rawName || ''}`.replace(/İ/g, 'i').replace(/I/g, 'i').trim().toLowerCase();
+      if (/(?:^|[^\p{L}\p{N}])(tr|tur|türk|turkish|türkçe|dublaj)(?=$|[^\p{L}\p{N}])/iu.test(info)) return 'tr';
+      if (/(?:^|[^\p{L}\p{N}])(en|eng|english|ingilizce)(?=$|[^\p{L}\p{N}])/iu.test(info)) return 'en';
+      const base = String(rawLang || '').replace(/İ/g, 'i').replace(/I/g, 'i').trim().toLowerCase().split(/[-_]/)[0];
+      return (base && base !== 'und') ? base : 'orig';
+    };
+    const seenCodes = new Set();
+    let addedNewTr = false;
     for (let idx = 0; idx < nativeTracks.length; idx += 1) {
       const nt = nativeTracks[idx];
-      const rawLang = String(nt?.language || '').trim().toLowerCase();
+      const rawLang = String(nt?.language || '').trim();
       const rawName = String(nt?.label || '').trim();
-      const rawInfo = `${rawLang} ${rawName}`.toLowerCase();
-      const isTr = /(?:^|[^\p{L}\p{N}])(tr|tur|türk|turkish|türkçe)(?=$|[^\p{L}\p{N}])/iu.test(rawInfo);
-      if (isTr) {
+      const code = normAudKey(rawLang, rawName);
+      if (seenCodes.has(code)) continue;
+      seenCodes.add(code);
+      if (code === 'tr') {
         const exTr = this.audioTracks.find((t) => t.id === 'tr-dub' || (t.audioLang || t.targetLang || t.lang) === 'tr');
         if (exTr) exTr.nativeIndex = idx;
         else {
-          this.audioTracks.push({
+          addedNewTr = true;
+          this.audioTracks.unshift({
             id: 'tr-dub', nativeIndex: idx, lang: 'tr', targetLang: 'tr', audioLang: 'tr',
             label: '🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)', mode: 'native',
           });
         }
       } else {
-        if (this.audioTracks.some((t) => t.nativeIndex === idx)) continue;
-        const lang = rawLang || 'orig';
-        const exOrig = this.audioTracks.find((t) => t.id === 'orig' || (t.audioLang && t.audioLang !== 'tr' && typeof t.nativeIndex !== 'number'));
-        if (exOrig && typeof exOrig.nativeIndex !== 'number') {
+        const exOrig = this.audioTracks.find((t) => t.id === 'orig' && typeof t.nativeIndex !== 'number');
+        const label = code === 'en' ? '🇬🇧 İngilizce (Orijinal Ses · 1080p)' : `🎬 ${rawName || rawLang || 'Orijinal Ses'} (Orijinal Ses)`;
+        if (exOrig) {
           exOrig.nativeIndex = idx;
-          if (rawLang && (!exOrig.audioLang || exOrig.audioLang === 'orig')) exOrig.audioLang = rawLang;
+          exOrig.audioLang = code;
+          if (code === 'en') exOrig.label = label;
         } else if (!this.audioTracks.some((t) => t.id === 'orig')) {
           this.audioTracks.push({
-            id: 'orig', nativeIndex: idx, lang: 'orig', targetLang: 'orig',
-            audioLang: lang,
-            label: `🎬 ${rawName || rawLang || 'Orijinal Ses'} (Orijinal Stüdyo Ses)`, mode: 'native',
+            id: 'orig', nativeIndex: idx, lang: 'orig', targetLang: 'orig', audioLang: code, label, mode: 'native',
           });
         } else {
-          const extraId = `orig-${idx}`;
-          if (!this.audioTracks.some((t) => t.id === extraId)) {
+          const extraId = `orig-${code}`;
+          if (!this.audioTracks.some((t) => t.id === extraId || t.audioLang === code)) {
             this.audioTracks.push({
-              id: extraId, nativeIndex: idx, lang, targetLang: lang,
-              audioLang: lang,
-              label: `🌐 ${rawName || rawLang.toUpperCase() || 'Orijinal Ses'}`, mode: 'native',
+              id: extraId, nativeIndex: idx, lang: code, targetLang: code, audioLang: code,
+              label: `🌐 ${rawName || code.toUpperCase()}`, mode: 'native',
             });
           }
         }
       }
+    }
+    if (!this._userPickedAudioForMedia && addedNewTr) {
+      this.resolveInitialAudioTrack({ ...(this.media || {}), audioTracks: this.audioTracks });
     }
     this._applyNativeAudioSelection();
     this.adapter.events.onTracksChanged?.();
@@ -846,7 +1024,14 @@ export class SubtitleDubController {
     const track = this.audioTracks.find((t) => t.id === this.selectedAudioId) || this.audioTracks[0];
     if (!track) return;
     if (typeof track.hlsIndex === 'number' && track.hlsIndex >= 0 && track.hlsIndex < hlsTracks.length) {
-      if (hls.audioTrack !== track.hlsIndex) hls.audioTrack = track.hlsIndex;
+      if (hls.audioTrack !== track.hlsIndex) {
+        hls.audioTrack = track.hlsIndex;
+        if (hls.bufferController) {
+          try {
+            hls.trigger(window.Hls.Events.BUFFER_FLUSHING, { startOffset: this.adapter.getTime(), endOffset: Number.POSITIVE_INFINITY, type: 'audio' });
+          } catch (_) {}
+        }
+      }
       return;
     }
     const want = (track.targetLang || track.lang || 'orig').toLowerCase();
@@ -860,7 +1045,7 @@ export class SubtitleDubController {
       nl: ['nl', 'nld', 'dut', 'nederlands', 'dutch'],
     };
     const matchesCode = (ht, code) => {
-      const words = `${ht.lang || ''} ${ht.name || ''}`.toLowerCase().split(/[^a-zçğıöşüñ]+/i);
+      const words = `${ht.lang || ''} ${ht.name || ''}`.replace(/İ/g, 'i').replace(/I/g, 'i').toLowerCase().split(/[^a-zçğıöşüñ]+/i);
       return (LANG_ALIASES[code] || [code]).some((a) => words.includes(a));
     };
     let targetIdx = -1;
@@ -884,18 +1069,16 @@ export class SubtitleDubController {
     }
   }
 
-  async _loadCuesForTrack(track) {
+  async _loadCuesForTrack(track, forceRetry = false) {
     if (!track?.url && !track?.rawUrl) return [];
     const cacheKey = track.url || track.rawUrl;
     if (this.cuesCache.has(cacheKey)) {
       const hit = this.cuesCache.get(cacheKey);
-      if (!hit.failedAt || Date.now() - hit.failedAt < 30000) return hit.cues;
+      if (!hit.failedAt || (!forceRetry && Date.now() - hit.failedAt < 30000)) return hit.cues;
       this.cuesCache.delete(cacheKey);
     }
 
-    // Direct residential browser fetch: Upstream sources like hdfilmcehennemi.mobi and subs5.strem.io
-    // support CORS (Access-Control-Allow-Origin: *) but block datacenter IPs. The browser fetches them
-    // directly without 403 blocks!
+    // Direct residential browser fetch ONLY for CORS-friendly subtitle hosts (skip referer-locked CDNs to avoid 500/CORS spam)
     const url = String(track.url || '');
     let directUrl = track.rawUrl || '';
     if (!directUrl && url && url.includes('/api/rave/subtitle.vtt')) {
@@ -905,7 +1088,13 @@ export class SubtitleDubController {
       } catch (_) {}
     }
 
-    if (directUrl && /^https?:\/\//i.test(directUrl) && !/[?&]translate=/i.test(url)) {
+    const isDirectCorsAllowed = Boolean(
+      directUrl
+      && /^https?:\/\//i.test(directUrl)
+      && !/[?&]translate=/i.test(url)
+      && /(?:subs5\.strem\.io|hdfilmcehennemi\.mobi|opensubtitles\.org)/i.test(directUrl)
+    );
+    if (isDirectCorsAllowed) {
       try {
         const ctrl = new AbortController();
         const tid = setTimeout(() => ctrl.abort(), 3500);
@@ -1095,7 +1284,16 @@ export class SubtitleDubController {
     const myTrackSeq = (this._subTrackSeq = (this._subTrackSeq || 0) + 1);
     this.selectedSubId = cleanId;
     if (!isInit && cleanId === 'off') {
-      try { localStorage.setItem('vortex_sub_lang', 'off'); } catch (e) { /* ignore */ }
+      const curAudObj = this.audioTracks.find((t) => t.id === this.selectedAudioId);
+      const isActiveTrDub = Boolean(
+        this.selectedAudioId === 'tr-dub'
+        || String(this.selectedAudioId || '').startsWith('tr-dub-')
+        || this.selectedAudioId === 'tr-orig'
+        || (curAudObj && curAudObj.mode !== 'tts' && (curAudObj.audioLang === 'tr' || curAudObj.lang === 'tr'))
+      );
+      if (!isActiveTrDub) {
+        try { localStorage.setItem('vortex_sub_lang', 'off'); } catch (e) { /* ignore */ }
+      }
     }
     if (cleanId === 'off' || !this.subtitleTracks.length) {
       this.subCues = [];
@@ -1111,7 +1309,9 @@ export class SubtitleDubController {
     }
     const exactIdTrack = this.subtitleTracks.find((t) => t.id === cleanId);
     const streamTrack = this.subtitleTracks.find((t) => (t.id === cleanId || t.lang === cleanId || (cleanId === 'tr' && String(t.lang || '').startsWith('tr'))) && isStreamSyncedSub(t));
-    const desiredLang = isInit ? normalizeClientSubLang(cleanId) : '';
+    const desiredLang = isInit
+      ? normalizeClientSubLang(exactIdTrack ? exactIdTrack.lang : cleanId, exactIdTrack?.label || '')
+      : '';
     let track = (!isInit && exactIdTrack)
       || (cleanId !== 'off' && streamTrack)
       || exactIdTrack
@@ -1132,11 +1332,12 @@ export class SubtitleDubController {
       this.adapter.events.onTracksChanged?.();
       return null;
     }
-    const targetLangForFallback = desiredLang || track.lang;
+    const requestedLangBeforeLoad = normalizeClientSubLang(desiredLang || track.lang || '', track.label || '');
+    const targetLangForFallback = requestedLangBeforeLoad;
     const seq = this._mediaSeq;
     this._loadingSubTrack = true;
     try {
-      let cues = await this._loadCuesForTrack(track);
+      let cues = await this._loadCuesForTrack(track, !isInit);
       if (this._destroyed || this._mediaSeq !== seq || this._subTrackSeq !== myTrackSeq) return null;
       const dur = Number(this.adapter?.getDuration?.() || this.media?.duration || 0);
       const minEnd = dur > 600 ? (dur * 0.5) : 900;
@@ -1160,9 +1361,9 @@ export class SubtitleDubController {
             : (cues.length < 35 || (cues.length < 45 && getSpan(cues) < minEnd)))
           : false);
       if (wrongAutoLang || isForcedOrTruncated || cues.length === 0) {
-        const alts = this.subtitleTracks.filter((t) => t.id !== track.id && t.lang === targetLangForFallback);
+        const alts = this.subtitleTracks.filter((t) => t.id !== track.id && normalizeClientSubLang(t.lang, t.label) === targetLangForFallback);
         for (const alt of alts) {
-          const altCues = await this._loadCuesForTrack(alt);
+          const altCues = await this._loadCuesForTrack(alt, !isInit);
           if (this._destroyed || this._mediaSeq !== seq || this._subTrackSeq !== myTrackSeq) return null;
           if (isInit && alt._detectedLang && targetLangForFallback && alt._detectedLang !== targetLangForFallback) continue;
           const curSpan = getSpan(cues);
@@ -1180,7 +1381,7 @@ export class SubtitleDubController {
         }
       }
       if (!isInit) {
-        const persistLang = String(track.lang || '').toLowerCase().trim() || (cleanId.startsWith('sub-') ? 'tr' : cleanId);
+        const persistLang = requestedLangBeforeLoad || normalizeClientSubLang(track.lang, track.label) || 'tr';
         try { localStorage.setItem('vortex_sub_lang', persistLang); } catch (e) { /* ignore */ }
       }
       if (this._destroyed || this._mediaSeq !== seq || this._subTrackSeq !== myTrackSeq) return null;
@@ -1252,6 +1453,7 @@ export class SubtitleDubController {
     const normId = (id === 'tr' || id === 'tur' || id === 'turkish') ? 'tr-dub' : (id || 'orig');
     const cleanId = normId;
     this.selectedAudioId = cleanId;
+    if (!isInit) this._userPickedAudioForMedia = true;
     if (!isInit && !/^src-\d+$/.test(cleanId)) {
       const hasStudioTrDub = this.audioTracks.some((t) => t && t.mode !== 'tts' && t.id !== 'tr-ai-dub' && (
         t.id === 'tr-dub' || String(t.id || '').startsWith('tr-dub-') || t.id === 'tr-orig'
@@ -1327,15 +1529,36 @@ export class SubtitleDubController {
       return track;
     }
 
-    const cleanUrl = (u) => String(u || '').replace(/&proxy_segs=1/g, '');
+    const cleanUrl = (u) => {
+      const s = String(u || '').trim();
+      if (!s) return '';
+      try {
+        const uo = new URL(s, typeof location !== 'undefined' ? location.origin : 'https://watchlivo.online');
+        uo.searchParams.delete('proxy_segs');
+        uo.searchParams.delete('max_h');
+        uo.searchParams.delete('abr_low');
+        return `${uo.pathname}${uo.search}`;
+      } catch (_) {
+        return s.replace(/([?&])(proxy_segs|max_h|abr_low)=[^&]*/g, '$1').replace(/[?&]+$/, '').replace(/\?&/, '?');
+      }
+    };
     const hlsHasMulti = Array.isArray(this.adapter?.hls?.audioTracks) && this.adapter.hls.audioTracks.length > 1;
+    const nativeHasMulti = Boolean(this.adapter?.video?.audioTracks && this.adapter.video.audioTracks.length > 1);
+    const urlsDiffer = Boolean(track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl));
     if (typeof track.hlsIndex === 'number' && hlsHasMulti) {
       this._applyHlsAudioSelection();
-    } else if (!(isInit && this._skipInitStreamSwitch) && track.mode === 'stream' && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
+    } else if (typeof track.nativeIndex === 'number' && nativeHasMulti) {
+      this._applyNativeAudioSelection();
+    } else if (!(isInit && this._skipInitStreamSwitch) && track.mode === 'stream' && track.url && urlsDiffer) {
       await this.adapter.switchStreamSource(track.url);
     } else {
-      if (isInit && this._skipInitStreamSwitch && track.mode === 'stream' && track.url) {
+      if (isInit && this._skipInitStreamSwitch && track.mode === 'stream' && track.url && urlsDiffer) {
         this.adapter?._pushFallbackAlt?.(track.url);
+        const activeClean = cleanUrl(this.adapter.currentUrl);
+        const loadedTrack = this.audioTracks.find((t) => t.mode === 'stream' && t.url && cleanUrl(t.url) === activeClean);
+        if (loadedTrack && loadedTrack.id !== this.selectedAudioId) {
+          this.selectedAudioId = loadedTrack.id;
+        }
       }
       this._applyHlsAudioSelection();
       this._applyNativeAudioSelection();

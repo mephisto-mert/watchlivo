@@ -1,16 +1,16 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261120_v228';
-import { api, qs as buildQs } from '../api.js?v=20261120_v228';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261120_v228';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261120_v228';
-import { getProvider } from '../providers.js?v=20261120_v228';
-import { expectedPosition } from '../sync.js?v=20261120_v228';
-import { thumbFor } from './lobby.js?v=20261120_v228';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261120_v228';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261120_v228';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261120_v228';
-import { avatar } from '../profile.js?v=20261120_v228';
-import { unlockSfxAudio } from './chat.js?v=20261120_v228';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261121_v231';
+import { api, qs as buildQs } from '../api.js?v=20261121_v231';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261121_v231';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261121_v231';
+import { getProvider } from '../providers.js?v=20261121_v231';
+import { expectedPosition } from '../sync.js?v=20261121_v231';
+import { thumbFor } from './lobby.js?v=20261121_v231';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261121_v231';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261121_v231';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261121_v231';
+import { avatar } from '../profile.js?v=20261121_v231';
+import { unlockSfxAudio } from './chat.js?v=20261121_v231';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1817,7 +1817,20 @@ export function buildControls(frame, ctx) {
     syncMenuPortal();
   }
 
-  const cleanSrvUrl = (u) => String(u || '').replace(/&aud=[^&]+/g, '').replace(/&proxy_segs=1/g, '').trim();
+  const cleanSrvUrl = (u) => {
+    const s = String(u || '').trim();
+    if (!s) return '';
+    try {
+      const uo = new URL(s, typeof location !== 'undefined' ? location.origin : 'https://watchlivo.online');
+      uo.searchParams.delete('aud');
+      uo.searchParams.delete('proxy_segs');
+      uo.searchParams.delete('max_h');
+      uo.searchParams.delete('abr_low');
+      return `${uo.pathname}${uo.search}`;
+    } catch (_) {
+      return s.replace(/([?&])(aud|proxy_segs|max_h|abr_low)=[^&]*/g, '$1').replace(/[?&]+$/, '').replace(/\?&/, '?').trim();
+    }
+  };
 
   async function refreshCurrentStreamSources() {
     const m = state.mesh?.media;
@@ -1831,12 +1844,16 @@ export function buildControls(frame, ctx) {
     const cleanOrigTitle = String(m.originalTitle || cleanSeriesTitle || m.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim();
     try {
       const qs = new URLSearchParams({
+        id: String(m.id || ''),
         provider: String(m.catalogProvider || m.provider || 'cinema'),
         title: cleanOrigTitle || cleanSeriesTitle,
+        originalTitle: cleanOrigTitle,
         displayTitle: cleanSeriesTitle,
         year: String(m.year || ''),
         tmdbId: String(m.tmdbId || ''),
         imdbId: String(m.imdbId || ''),
+        origLang: String(m.origLang || ''),
+        sourceUrl: String(m.officialUrl || m.sourceUrl || ''),
         mediaType: String(m.mediaType || 'movie'),
         season: String(m.season || 1),
         episode: String(m.episode || 1),
@@ -1850,6 +1867,9 @@ export function buildControls(frame, ctx) {
           if (Array.isArray(fresh.altUrls)) m.altUrls = fresh.altUrls;
           if (Array.isArray(fresh.servers)) m.servers = fresh.servers;
           if (Array.isArray(fresh.audioTracks) && fresh.audioTracks.length) m.audioTracks = fresh.audioTracks;
+          if (Array.isArray(fresh.subtitleTracks) && fresh.subtitleTracks.length) m.subtitleTracks = fresh.subtitleTracks;
+          if (fresh.imdbId && !m.imdbId) m.imdbId = fresh.imdbId;
+          if (fresh.origLang && !m.origLang) m.origLang = fresh.origLang;
           host.key = '';
           host.loadedUrl = '';
           await host.setMedia(m, curPos, wasPlaying);
@@ -1942,6 +1962,12 @@ export function buildControls(frame, ctx) {
       const curMedia = state.mesh?.media || host.adapter?.media || host.media || {};
       const isAnimeContent = curMedia.provider === 'anime' || curMedia.origLang === 'ja' || curMedia.type === 'anime' || isAnimeMedia(curMedia);
       const visibleAudioTracks = audioTracks.filter((t) => isAnimeContent || (t.id !== 'tr-ai-dub' && t.id !== 'en-ai-dub' && t.mode !== 'tts'));
+      const serverJumpRow = rawServers.length > 1
+        ? [h('div', {
+            class: 'opt ctl-menu-switch-tab',
+            onclick: (e) => { e.stopPropagation(); renderMenuView('servers'); },
+          }, h('span', {}, `📡 Alternatif Sunucu & Kaynaklar (${rawServers.length})`), h('span', {}, '›'))]
+        : [];
       const audioSection = [
         h('div', { class: 'dim', style: { fontSize: '.74em', fontWeight: '700', padding: '.25em .7em .15em', color: '#a5b4fc' } }, '🎙️ Ses & Dublaj Seçimi'),
         ...visibleAudioTracks.map((t) => h('div', {
@@ -1956,6 +1982,7 @@ export function buildControls(frame, ctx) {
             update();
           },
         }, h('span', {}, t.label), curAudioId === t.id ? h('span', {}, '✓') : null)),
+        ...serverJumpRow,
         h('div', { class: 'dim', style: { fontSize: '.74em', fontWeight: '700', padding: '.45em .7em .15em', borderTop: '1px solid rgba(255,255,255,.1)', marginTop: '.25em', color: '#a5b4fc' } }, `💬 Altyazı Seçimi (${subTracks.length} Dil)`),
       ];
       const rows = [
@@ -1978,9 +2005,14 @@ export function buildControls(frame, ctx) {
           class: `opt ${curSubId === t.id ? 'on' : ''}`,
           onclick: async (e) => {
             e.stopPropagation();
-            await host.adapter?.setSubtitleTrack?.(t.id);
+            const picked = await host.adapter?.setSubtitleTrack?.(t.id);
             ctx.sync?.kick();
-            showOverlay(`💬 Altyazı: ${t.label}`, 1800);
+            const cueCount = host.adapter?.subs?.subCues?.length || 0;
+            if (picked?.source === 'youtube-native' || cueCount > 0) {
+              showOverlay(`💬 Altyazı: ${(picked || t).label}`, 1800);
+            } else {
+              toast('Bu altyazı kaynağı yüklenemedi, lütfen başka bir altyazı deneyin.');
+            }
             closeMenu();
             update();
           },
@@ -2069,11 +2101,17 @@ export function buildControls(frame, ctx) {
           update();
         },
       }, h('span', {}, t.label), curAudioId === t.id ? h('span', {}, '✓') : null));
+      const srvJump = rawServers.length > 1
+        ? h('div', {
+            class: 'opt ctl-menu-switch-tab',
+            onclick: (e) => { e.stopPropagation(); renderMenuView('servers'); },
+          }, h('span', {}, `📡 Yayın Sunucusu Değiştir (${rawServers.length})`), h('span', {}, '›'))
+        : null;
       const subJump = h('div', {
         class: 'opt ctl-menu-switch-tab',
         onclick: (e) => { e.stopPropagation(); renderMenuView('subtitle'); },
       }, h('span', {}, '💬 Altyazı Seçimine Geç'), h('span', {}, '›'));
-      menu.replaceChildren(backHeader('Ses & Dublaj (Audio)', 'list'), h('div', { class: 'ctl-menu-scroll' }, ...rows), subJump);
+      menu.replaceChildren(backHeader('Ses & Dublaj (Audio)', 'list'), h('div', { class: 'ctl-menu-scroll' }, ...rows, srvJump), subJump);
       return;
     }
 
@@ -2125,17 +2163,29 @@ export function buildControls(frame, ctx) {
             e.stopPropagation();
             if (host.autoplayBlocked || (isActuallyMuted() && !host.userMuted)) doUnlockAudio();
             let nextSrvUrl = srv.url;
-            const stickyPref = host.adapter?.subs?.userAudioPref || localStorage.getItem('vortex_audio_proxy_pref') || localStorage.getItem('watchlivo_audio_pref') || 'tr';
-            const wantTrAud = curAudioId === 'tr-dub'
+            const stickyPref = String(
+              host.adapter?.subs?.userAudioPref
+              || localStorage.getItem('vortex_audio_lang')
+              || localStorage.getItem('vortex_audio_proxy_pref')
+              || ''
+            ).trim().toLowerCase();
+            const isExplicitOrig = stickyPref === 'orig' || stickyPref.startsWith('orig-') || curAudioId === 'orig' || String(curAudioId || '').startsWith('orig-');
+            const wantTrAud = !isExplicitOrig && (
+              curAudioId === 'tr-dub'
               || String(curAudioId || '').startsWith('tr-dub-')
               || stickyPref === 'tr-dub'
               || stickyPref === 'tr'
-              || String(stickyPref).startsWith('tr-dub-')
-              || (!stickyPref && m?.origLang && m.origLang !== 'tr');
-            if (wantTrAud && nextSrvUrl.includes('/api/rave/stream?') && !/[?&]aud=/.test(nextSrvUrl) && /dual|tr dublaj|türkçe dublaj|fullhd|ref=fhd/i.test(`${srv.label || ''} ${nextSrvUrl}`)) {
-              nextSrvUrl = nextSrvUrl.includes('&ext=.m3u8')
-                ? nextSrvUrl.replace('&ext=.m3u8', '&aud=tr&ext=.m3u8')
-                : `${nextSrvUrl}&aud=tr`;
+              || stickyPref.startsWith('tr-dub-')
+              || (!stickyPref && m?.origLang && m.origLang !== 'tr')
+            );
+            const isDualSrv = /dual|dublaj.*altyaz|tr dublaj.*orijinal|fullhd|ref=fhd/i.test(`${srv.label || ''} ${nextSrvUrl}`);
+            if (nextSrvUrl.includes('/api/rave/stream?') && !/[?&]aud=/.test(nextSrvUrl) && isDualSrv) {
+              const audVal = isExplicitOrig ? 'orig' : (wantTrAud ? 'tr' : '');
+              if (audVal) {
+                nextSrvUrl = nextSrvUrl.includes('&ext=.m3u8')
+                  ? nextSrvUrl.replace('&ext=.m3u8', `&aud=${audVal}&ext=.m3u8`)
+                  : `${nextSrvUrl}&aud=${audVal}`;
+              }
             }
             m.url = nextSrvUrl;
             host.loadedUrl = nextSrvUrl;
@@ -2956,7 +3006,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261120_v228',
+            v: '20261121_v231',
           });
           api(`/api/rave/seasons?${q.toString()}`, { timeout: 8000 })
             .then((inf) => {

@@ -1,17 +1,17 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261120_v228';
-import { api } from '../api.js?v=20261120_v228';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261120_v228';
-import { resolveMusicItem } from './selection-kinds.js?v=20261120_v228';
-import { MeshConnection } from '../realtime.js?v=20261120_v228';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261120_v228';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261120_v228';
-import { buildLayout } from './mesh-layout.js?v=20261120_v228';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261120_v228';
-import { Voice } from '../voice.js?v=20261120_v228';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261120_v228';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261120_v228';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261120_v228';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261121_v231';
+import { api } from '../api.js?v=20261121_v231';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261121_v231';
+import { resolveMusicItem } from './selection-kinds.js?v=20261121_v231';
+import { MeshConnection } from '../realtime.js?v=20261121_v231';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261121_v231';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261121_v231';
+import { buildLayout } from './mesh-layout.js?v=20261121_v231';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261121_v231';
+import { Voice } from '../voice.js?v=20261121_v231';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261121_v231';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261121_v231';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261121_v231';
 
 let ctx = null;
 
@@ -345,11 +345,16 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
     const isTvParam = rp.mt === 'tv' || Number(rp.s || 0) > 0 || Number(rp.e || 0) > 0;
     const sNum = Math.max(1, Number(rp.s || 1));
     const eNum = Math.max(1, Number(rp.e || 1));
+    const cleanTid = String(rp.tmdbId || '').trim().match(/^(?:tmdb-(?:tv|movie)-)?(\d+)$/i)?.[1] || String(rp.tmdbId || '').trim();
     const qStr = new URLSearchParams({
-      provider: 'cinema',
-      title: rp.t || '',
-      origTitle: rp.t || '',
-      tmdbId: rp.tmdbId || '',
+      provider: rp.p || 'cinema',
+      title: rp.ot || rp.t || '',
+      originalTitle: rp.ot || '',
+      displayTitle: rp.t || '',
+      year: rp.y || rp.year || '',
+      tmdbId: cleanTid,
+      imdbId: rp.imdbId || '',
+      origLang: rp.ol || rp.origLang || '',
       mediaType: isTvParam ? 'tv' : 'movie',
       season: isTvParam ? String(sNum) : '',
       episode: isTvParam ? String(eNum) : '',
@@ -358,10 +363,15 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
       ...room,
       media: {
         provider: 'hls',
+        catalogProvider: rp.p || 'cinema',
         streamType: 'hls',
         url: `/api/rave/resolve-catalog?${qStr}`,
         title: rp.t || room.name || 'Sinema Odası',
-        tmdbId: rp.tmdbId || '',
+        originalTitle: rp.ot || '',
+        year: rp.y || rp.year || '',
+        tmdbId: cleanTid,
+        imdbId: rp.imdbId || '',
+        origLang: rp.ol || rp.origLang || '',
         mediaType: isTvParam ? 'tv' : 'movie',
         season: isTvParam ? sNum : 0,
         episode: isTvParam ? eNum : 0,
@@ -390,8 +400,18 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
   const key = mediaKey(room.media);
   const prevUrl = String(curRoom?.media?.url || '');
   const nextUrl = String(room.media?.url || '');
+  const stripSrvNoise = (u) => String(u || '').replace(/([?&])(aud|proxy_segs|max_h|abr_low)=[^&]*/g, '$1').replace(/[?&]+$/, '').replace(/\?&/, '?');
   const urlResolved = Boolean(nextUrl && !nextUrl.startsWith('/api/rave/resolve-catalog') && (!prevUrl || prevUrl.startsWith('/api/rave/resolve-catalog') || !ctx?.host?.adapter));
-  if (reload || key !== prevKey || urlResolved) {
+  const leaderSwitchedServer = Boolean(
+    !isTimeKeeper()
+    && nextUrl && prevUrl
+    && !nextUrl.startsWith('/api/rave/resolve-catalog')
+    && !prevUrl.startsWith('/api/rave/resolve-catalog')
+    && stripSrvNoise(nextUrl) !== stripSrvNoise(prevUrl)
+    && ctx?.host?.adapter
+    && stripSrvNoise(ctx.host.loadedUrl || '') !== stripSrvNoise(nextUrl)
+  );
+  if (reload || key !== prevKey || urlResolved || leaderSwitchedServer) {
     loadMedia(room.media);
   } else {
     if (!isTimeKeeper() && ctx?.host?.adapter && room.media) {
@@ -514,11 +534,21 @@ async function loadMedia(media) {
             media = {
               ...media,
               provider: res.provider || 'hls',
+              catalogProvider: res.catalogProvider || media.catalogProvider || 'cinema',
               streamType: res.streamType || 'hls',
               url: res.url,
               videoId: res.videoId || media.videoId || '',
               embedUrl: res.embedUrl || media.embedUrl || '',
               title: res.title || media.title || '',
+              seriesTitle: res.seriesTitle || media.seriesTitle || '',
+              originalTitle: res.originalTitle || media.originalTitle || '',
+              year: res.year || media.year || '',
+              tmdbId: res.tmdbId || media.tmdbId || '',
+              imdbId: res.imdbId || media.imdbId || '',
+              origLang: res.origLang || media.origLang || '',
+              mediaType: res.mediaType || media.mediaType || 'movie',
+              season: res.season || media.season || 0,
+              episode: res.episode || media.episode || 0,
               channel: res.channel || media.channel || '',
               thumbnail: res.thumbnail || media.thumbnail || '',
               altUrls: res.altUrls || [],

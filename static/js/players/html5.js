@@ -1,11 +1,11 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261120_v228';
-import { api } from '../api.js?v=20261120_v228';
-import { expectedPosition } from '../sync.js?v=20261120_v228';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261120_v228';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261120_v228';
-import { ensureHlsJs } from './hls-loader.js?v=20261120_v228';
-import { AdaptiveQualityController, buildHlsAbrConfig, formatHeightTag, getNetworkSnapshot, isLowBandwidthMode, setLowBandwidthMode, withEdgeAbrParams } from './abr.js?v=20261120_v228';
+import { SubtitleDubController } from './subtitles.js?v=20261121_v231';
+import { api } from '../api.js?v=20261121_v231';
+import { expectedPosition } from '../sync.js?v=20261121_v231';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261121_v231';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261121_v231';
+import { ensureHlsJs } from './hls-loader.js?v=20261121_v231';
+import { AdaptiveQualityController, buildHlsAbrConfig, formatHeightTag, getNetworkSnapshot, isLowBandwidthMode, setLowBandwidthMode, withEdgeAbrParams } from './abr.js?v=20261121_v231';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -748,13 +748,20 @@ export class Html5Adapter {
       if ((nowRefreshMs - lastLiveRefreshAt > 60000) && !this.isMusic && !media?.live && (media?.tmdbId || media?.imdbId || media?.title)) {
         lastLiveRefreshAt = nowRefreshMs;
         try {
+          const stripEpSuffix = (s) => String(s || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim();
+          const cleanDisp = stripEpSuffix(media.seriesTitle || media.title || '');
+          const cleanOrig = stripEpSuffix(media.originalTitle || cleanDisp || media.title || '');
           const qs = new URLSearchParams({
+            id: String(media.id || ''),
             provider: String(media.catalogProvider || media.provider || 'cinema'),
-            title: String(media.originalTitle || media.seriesTitle || media.title || ''),
-            displayTitle: String(media.seriesTitle || media.title || ''),
+            title: cleanOrig || cleanDisp,
+            originalTitle: cleanOrig,
+            displayTitle: cleanDisp,
             year: String(media.year || ''),
             tmdbId: String(media.tmdbId || ''),
             imdbId: String(media.imdbId || ''),
+            origLang: String(media.origLang || ''),
+            sourceUrl: String(media.officialUrl || media.sourceUrl || ''),
             mediaType: String(media.mediaType || 'movie'),
             season: String(media.season || 1),
             episode: String(media.episode || 1),
@@ -764,6 +771,21 @@ export class Html5Adapter {
           if (this.video === v && fresh && fresh.url) {
             if (Array.isArray(fresh.servers) && fresh.servers.length) media.servers = fresh.servers;
             if (Array.isArray(fresh.altUrls) && fresh.altUrls.length) media.altUrls = fresh.altUrls;
+            if (fresh.imdbId && !media.imdbId) media.imdbId = fresh.imdbId;
+            if (fresh.origLang && !media.origLang) media.origLang = fresh.origLang;
+            if (Array.isArray(fresh.audioTracks) && fresh.audioTracks.length) {
+              media.audioTracks = fresh.audioTracks;
+              if (this.subs) {
+                this.subs.audioTracks = [...fresh.audioTracks];
+              }
+            }
+            if (Array.isArray(fresh.subtitleTracks) && fresh.subtitleTracks.length) {
+              const mergedSubs = this.subs?._dedupeSubtitleTrackIds
+                ? this.subs._dedupeSubtitleTrackIds([...(this.subs.subtitleTracks || []), ...fresh.subtitleTracks])
+                : fresh.subtitleTracks;
+              media.subtitleTracks = mergedSubs;
+              if (this.subs) this.subs.subtitleTracks = mergedSubs;
+            }
             const freshList = [fresh.url, ...(fresh.altUrls || []), ...((fresh.servers || []).map((s) => s?.url))].filter(Boolean);
             const normDedupUrl = (u) => String(u || '').replace(/([?&])proxy_segs=1(&|$)/g, '$1').replace(/[?&]$/, '');
             const curNorm = normDedupUrl(this.currentUrl);
@@ -837,7 +859,10 @@ export class Html5Adapter {
       if (!nextUrl || this._destroyed || this.video !== v) return;
       if (!String(nextUrl).includes('proxy_segs=1')) this._switchedToProxySegs = false;
       const expT = expectedPosition(state.mesh?.media);
-      const curNow = Math.max(Number(this.getTime() || 0), Number(this.highestPlayedPos || 0));
+      const liveVTime = Number(v.currentTime || 0);
+      const curNow = (v.readyState >= 1 && Number.isFinite(liveVTime) && liveVTime > 0.5)
+        ? liveVTime
+        : Math.max(Number(this.getTime() || 0), Number(this.highestPlayedPos || 0));
       const resumePos = curNow > 0.5 ? curNow : ((Number.isFinite(expT) && expT > 0.5) ? expT : (startAt || 0));
       this.highestPlayedPos = resumePos;
       if (resumePos >= 0.5) {
@@ -992,6 +1017,7 @@ export class Html5Adapter {
       let lastMediaErrPos = -1;
       let singleLevelStalls = 0;
       let firstSingleStallAt = 0;
+      const failedAudioTrackIndices = new Set();
       this.hls.on(window.Hls.Events.FRAG_BUFFERED, (_e, data) => {
         netRetries = 0;
         const curPos = Number(v.currentTime || 0);
@@ -1010,6 +1036,30 @@ export class Html5Adapter {
         const errCode = Number(data?.response?.code || 0);
         const isHardUpstreamDead = [401, 403, 404, 410, 451, 502, 504].includes(errCode);
         if (!data?.fatal) {
+          if (data?.details === 'audioTrackLoadError' || data?.details === 'audioTrackLoadTimeOut' || data?.details === 'audioTrackLoadTimeout') {
+            const curAudIdx = typeof this.hls?.audioTrack === 'number' ? this.hls.audioTrack : -1;
+            if (curAudIdx >= 0) failedAudioTrackIndices.add(curAudIdx);
+            const hlsTracks = Array.isArray(this.hls?.audioTracks) ? this.hls.audioTracks : [];
+            const altIdx = hlsTracks.findIndex((_t, idx) => idx !== curAudIdx && !failedAudioTrackIndices.has(idx));
+            if (altIdx >= 0) {
+              try {
+                this.hls.audioTrack = altIdx;
+                const matchedSubAud = this.subs?.audioTracks?.find?.((t) => t.hlsIndex === altIdx);
+                if (matchedSubAud) this.subs.selectedAudioId = matchedSubAud.id;
+                this.events.onTracksChanged?.();
+                return;
+              } catch (_) {}
+            }
+            if (isHardUpstreamDead || failedAudioTrackIndices.size >= Math.max(1, hlsTracks.length)) {
+              this._reportStreamHealth?.(srcUrl, false, { stalled: false, status: errCode || 502 });
+              if (nativeAltIdx < alts.length) {
+                loadCandidateUrl(alts[nativeAltIdx++], doneCb);
+                return;
+              }
+              handleExhaustedCandidates(srcUrl, doneCb);
+              return;
+            }
+          }
           if (isHardUpstreamDead && (data?.details === 'fragLoadError' || data?.details === 'levelLoadError' || data?.details === 'manifestLoadError')) {
             this._reportStreamHealth?.(srcUrl, false, { stalled: false, status: errCode });
             if (nativeAltIdx < alts.length) {
@@ -1263,6 +1313,15 @@ export class Html5Adapter {
           const wantLow = Boolean(wantCap > 0 || netNow.isSlow || netNow.isVerySlow || isIosWebKit());
           initialSrc = withEdgeAbrParams(url, { maxHeight: wantCap, lowStart: wantLow });
           this.currentUrl = initialSrc;
+          const syncNativeAud = () => {
+            if (this._destroyed || this.video !== v) return;
+            if (v.audioTracks?.length) {
+              this.subs.mergeNativeAudioTracks?.(v.audioTracks);
+              this.subs._applyNativeAudioSelection?.();
+            }
+          };
+          v.addEventListener('loadedmetadata', syncNativeAud);
+          try { v.audioTracks?.addEventListener?.('addtrack', syncNativeAud); } catch (_) {}
         }
         v.src = initialSrc;
         if (autoplay) this.tryPlay();
@@ -1910,6 +1969,7 @@ export class Html5Adapter {
     if (this.currentUrl && this.currentUrl !== newUrl) {
       this._pushFallbackAlt?.(this.currentUrl);
     }
+    this.subs?.resetStreamAudioBindings?.();
     if (typeof this._loadCandidateUrl === 'function') {
       this._loadCandidateUrl(newUrl, () => {
         if (this.subs?.selectedSubId && this.subs.selectedSubId !== 'off') {

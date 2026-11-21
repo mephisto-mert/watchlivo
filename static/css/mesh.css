@@ -6333,7 +6333,14 @@ html.is-android-pip .rave-subtitle-cue {
 }
 @media (max-width: 430px) {
   .video-frame .ctl-top #ctl-sub-pill:not(.hidden) {
-    display: none !important;
+    display: inline-flex !important;
+    font-size: 0.7rem !important;
+    padding: 3px 7px !important;
+    gap: 4px !important;
+    max-width: 118px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
   }
 }
 
