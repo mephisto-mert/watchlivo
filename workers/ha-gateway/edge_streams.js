@@ -211,28 +211,95 @@ export async function verifyProxySig(targetUrl, ref, sig, env) {
   return false;
 }
 
+const GREEK_MIRROR_RE = /^(alpha|beta|gamma|delta|epsilon)\.([0-9a-f]{10,}\.[a-z]{2,8})$/i;
+const GREEK_MIRROR_POOL = ["gamma", "beta", "alpha", "epsilon", "delta"];
+const _deadGreekPrefixUntil = new Map();
+
+export function resetGreekMirrorHealth() {
+  _deadGreekPrefixUntil.clear();
+}
+
+function buildGreekMirrorCandidates(targetUrl) {
+  let u;
+  try { u = new URL(targetUrl); } catch { return null; }
+  const m = u.hostname.match(GREEK_MIRROR_RE);
+  if (!m) return null;
+  const origPrefix = m[1].toLowerCase();
+  const baseDomain = m[2].toLowerCase();
+  const now = Date.now();
+  const healthy = [];
+  const dead = [];
+  const ordered = [origPrefix, ...GREEK_MIRROR_POOL.filter((p) => p !== origPrefix)];
+  for (const p of ordered) {
+    if (Number(_deadGreekPrefixUntil.get(p) || 0) > now) dead.push(p);
+    else healthy.push(p);
+  }
+  return [...healthy, ...dead].map((prefix) => {
+    const cu = new URL(u.toString());
+    cu.hostname = `${prefix}.${baseDomain}`;
+    return { prefix, url: cu.toString() };
+  });
+}
+
+async function fetchOneAttempt(targetUrl, curHeaders, timeoutMs, cfOpts, headersOnlyTimeout, method) {
+  if (!isPublicHttpUrl(targetUrl)) throw new Error("Blocked redirect target");
+  let ac = null;
+  let timer = null;
+  let sig;
+  if (headersOnlyTimeout) {
+    ac = new AbortController();
+    timer = setTimeout(() => ac.abort(new DOMException("Connect timeout", "TimeoutError")), timeoutMs);
+    sig = ac.signal;
+  } else {
+    sig = AbortSignal.timeout(timeoutMs);
+  }
+  const init = { method: method === "HEAD" ? "HEAD" : "GET", headers: curHeaders, redirect: "manual", signal: sig };
+  if (cfOpts) init.cf = cfOpts;
+  try {
+    return await fetch(targetUrl, init);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
+
 async function fetchPublicWithRedirects(initialUrl, headers, maxHops = 4, timeoutMs = 15000, cfOpts = undefined, headersOnlyTimeout = false, method = "GET") {
   let curUrl = String(initialUrl || "").trim();
   let curHeaders = headers instanceof Headers ? new Headers(headers) : new Headers(headers || {});
   for (let hop = 0; hop <= maxHops; hop++) {
     if (!isPublicHttpUrl(curUrl)) throw new Error("Blocked redirect target");
-    let ac = null;
-    let timer = null;
-    let sig;
-    if (headersOnlyTimeout) {
-      ac = new AbortController();
-      timer = setTimeout(() => ac.abort(new DOMException("Connect timeout", "TimeoutError")), timeoutMs);
-      sig = ac.signal;
-    } else {
-      sig = AbortSignal.timeout(timeoutMs);
-    }
-    const init = { method: method === "HEAD" ? "HEAD" : "GET", headers: curHeaders, redirect: "manual", signal: sig };
-    if (cfOpts) init.cf = cfOpts;
+    const greekCands = hop > 0 || GREEK_MIRROR_RE.test((() => { try { return new URL(curUrl).hostname; } catch { return ""; } })())
+      ? buildGreekMirrorCandidates(curUrl)
+      : null;
     let resp;
-    try {
-      resp = await fetch(curUrl, init);
-    } finally {
-      if (timer !== null) clearTimeout(timer);
+    if (greekCands && greekCands.length > 1) {
+      const perAttemptMs = Math.min(timeoutMs, 4200);
+      let lastResp = null;
+      let lastErr = null;
+      for (let gi = 0; gi < Math.min(greekCands.length, 4); gi++) {
+        const cand = greekCands[gi];
+        try {
+          const r = await fetchOneAttempt(cand.url, curHeaders, perAttemptMs, cfOpts, headersOnlyTimeout, method);
+          if (r.status < 500 && r.status !== 404) {
+            curUrl = cand.url;
+            resp = r;
+            break;
+          }
+          if (r.status >= 500) {
+            _deadGreekPrefixUntil.set(cand.prefix, Date.now() + 180_000);
+          }
+          if (lastResp) lastResp.body?.cancel?.();
+          lastResp = r;
+        } catch (err) {
+          _deadGreekPrefixUntil.set(cand.prefix, Date.now() + 180_000);
+          lastErr = err;
+        }
+      }
+      if (!resp) {
+        if (lastResp) resp = lastResp;
+        else throw (lastErr || new Error("Greek mirror failover exhausted"));
+      }
+    } else {
+      resp = await fetchOneAttempt(curUrl, curHeaders, timeoutMs, cfOpts, headersOnlyTimeout, method);
     }
     if ([301, 302, 303, 307, 308].includes(resp.status)) {
       const loc = resp.headers.get("Location");
@@ -675,7 +742,10 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
   };
   const aliveStreams = hitStreams.filter((pair) => !isDeadShardPair(pair));
   const hit = hitRaw && aliveStreams.length ? { ...hitRaw, streams: aliveStreams } : null;
-  if (!hit) {
+  const vaultOnlyFlakyDl = Boolean(
+    hit && aliveStreams.every((pair) => /makesomthingup|centralodsseyproud/i.test(String(Array.isArray(pair) ? pair[0] : pair?.url || "")))
+  );
+  if (!hit || vaultOnlyFlakyDl) {
     const buildAnimeResp = (liveAc) => jsonResp({
       id: tmdbId || id,
       provider: "netflix",
@@ -814,7 +884,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
         });
       }
     }
-    if (!isAnimeCandidate && /^\d+$/.test(tmdbId)) {
+    if (!hit && !isAnimeCandidate && /^\d+$/.test(tmdbId)) {
       try {
         const apiKey = String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim();
         const tmResp = await fetch(`https://api.themoviedb.org/3/${mtype}/${tmdbId}?api_key=${encodeURIComponent(apiKey)}`, { signal: AbortSignal.timeout(2500) });
@@ -830,7 +900,9 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
         }
       } catch {}
     }
-    return jsonResp({ ok: false, error: "Bu içerik için doğrudan akış kaynağı şu an bulunamadı." }, 404);
+    if (!hit) {
+      return jsonResp({ ok: false, error: "Bu içerik için doğrudan akış kaynağı şu an bulunamadı." }, 404);
+    }
   }
 
   const urls = [];
@@ -1379,7 +1451,7 @@ export async function handleEdgeStreamProxy(request, url, env) {
       upCt.includes("javascript") ||
       upCt.includes("ecmascript") ||
       upCt.includes("text/plain") ||
-      upCt.includes("font/") ||
+      upCt.includes("font") ||
       (upCt.startsWith("image/") && (extHint === ".ts" || extHint === ".m4s" || extHint === ".mp4"));
     if (needsCloakSniff) {
       if (request?.method === "HEAD") {
@@ -1435,7 +1507,7 @@ export async function handleEdgeStreamProxy(request, url, env) {
     } else if (
       !outHdrs.has("Content-Type") ||
       rawOutCt.includes("octet-stream") ||
-      rawOutCt.includes("font/") ||
+      rawOutCt.includes("font") ||
       rawOutCt.includes("text/css") ||
       rawOutCt.includes("javascript") ||
       rawOutCt.includes("ecmascript")

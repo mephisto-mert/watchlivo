@@ -11,6 +11,7 @@ import {
   handleEdgeSubtitle,
   isCorruptOrForeignSubtitleText,
   formatStreamSubTracks,
+  resetGreekMirrorHealth,
   signProxySig,
 } from "../workers/ha-gateway/edge_streams.js";
 
@@ -817,6 +818,61 @@ test("v234 30-title audit fixes: Avatar forced movie sub fallback, Godfather CD1
     const enList = data.subtitleTracks.filter((t) => t.lang === "en");
     assert.ok(decodeURIComponent(enList[0].url).includes("gf_full.srt"), "Full-length 10370s EN sub must outrank 5594s CD1 split");
   } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("v235 Greek-mirror self-healing failover rescues dead delta/epsilon 522 nodes onto live gamma mirror and proactively skips dead prefix on next segment", async () => {
+  const origFetch = globalThis.fetch;
+  resetGreekMirrorHealth();
+  try {
+    const tsPayload = new Uint8Array(376);
+    tsPayload[0] = 0x47;
+    tsPayload[1] = 0x41;
+    tsPayload[188] = 0x47;
+    tsPayload[189] = 0x01;
+    const hitHosts = [];
+    const seg1 = "https://redi.centralodsseyproud.click/dune2/tr/seg86.css";
+    const seg2 = "https://redi.centralodsseyproud.click/dune2/tr/seg87.woff2";
+    globalThis.fetch = async (input) => {
+      const u = typeof input === "string" ? input : input.url;
+      const host = new URL(u).hostname;
+      hitHosts.push(host);
+      if (u === seg1) {
+        return new Response(null, { status: 302, headers: { Location: "https://delta.014d5623b8bbec.click/dune2/tr/seg86.css" } });
+      }
+      if (u === seg2) {
+        return new Response(null, { status: 302, headers: { Location: "https://delta.ae1c8cd9cf966a.click/dune2/tr/seg87.woff2" } });
+      }
+      if (host.startsWith("delta.")) {
+        return new Response("Origin Timeout", { status: 522 });
+      }
+      if (host.startsWith("gamma.")) {
+        const ct = u.endsWith(".woff2") ? "application/font-woff2" : "text/css";
+        return new Response(tsPayload, { status: 200, headers: { "Content-Type": ct } });
+      }
+      return new Response("Not Found", { status: 404 });
+    };
+
+    // First segment: delta returns 522 -> automatically fails over to gamma and sniffs text/css -> video/mp2t
+    const sig1 = await signProxySig(seg1, "https://one.makesomthingup.click/", TEST_ENV);
+    const req1 = new Request(`https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(seg1)}&sig=${sig1}&ext=.ts&referer=${encodeURIComponent("https://one.makesomthingup.click/")}`);
+    const res1 = await handleEdgeStreamProxy(req1, new URL(req1.url), TEST_ENV);
+    assert.equal(res1.status, 200);
+    assert.equal(res1.headers.get("Content-Type"), "video/mp2t");
+    assert.equal((await res1.arrayBuffer()).byteLength, 376);
+
+    // Second segment: delta is now cached unhealthy -> skips delta completely and hits gamma on attempt #1!
+    hitHosts.length = 0;
+    const sig2 = await signProxySig(seg2, "https://one.makesomthingup.click/", TEST_ENV);
+    const req2 = new Request(`https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(seg2)}&sig=${sig2}&ext=.ts&referer=${encodeURIComponent("https://one.makesomthingup.click/")}`);
+    const res2 = await handleEdgeStreamProxy(req2, new URL(req2.url), TEST_ENV);
+    assert.equal(res2.status, 200);
+    assert.equal(res2.headers.get("Content-Type"), "video/mp2t");
+    assert.equal(hitHosts.some((h) => h.startsWith("delta.")), false, "Dead delta prefix must be skipped proactively on subsequent segments");
+    assert.ok(hitHosts.includes("gamma.ae1c8cd9cf966a.click"), "Must go straight to live gamma mirror");
+  } finally {
+    resetGreekMirrorHealth();
     globalThis.fetch = origFetch;
   }
 });
