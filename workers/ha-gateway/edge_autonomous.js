@@ -31,12 +31,17 @@ const _authRateLimitMap = new Map();
 let _blockedCache = { ts: 0, set: new Set() };
 const DEFAULT_TMDB_KEY = "4f042878f22ef63cb94f25e60cb4ec6e";
 
+const _memEphemeralStore = new Map();
+const _memPersistFallback = new Map();
+let _authDoQuotaUntil = 0;
+
 function isEphemeralStoreKey(key) {
   const k = String(key || "");
   return (
     k.startsWith("rl:") ||
     k.startsWith("soc:pres:") ||
     k.startsWith("soc:typ:") ||
+    k.startsWith("soc:gclaim:") ||
     k.startsWith("tmdb_q:") ||
     k.startsWith("tmdb2imdb:") ||
     k.startsWith("sub:") ||
@@ -47,8 +52,41 @@ function isEphemeralStoreKey(key) {
     k.startsWith("live:") ||
     k.startsWith("catdisc:") ||
     k.startsWith("cat_live:") ||
-    k.startsWith("music:")
+    k.startsWith("music:") ||
+    k.startsWith("ac_tmdb_v2:") ||
+    k.startsWith("ac_ep:") ||
+    k.startsWith("room:") ||
+    k.startsWith("room_closed:") ||
+    k === "rooms:public_index" ||
+    k.startsWith("analytics:")
   );
+}
+
+function getEdgeCacheDefault() {
+  try {
+    return typeof caches !== "undefined" && caches?.default ? caches.default : null;
+  } catch {
+    return null;
+  }
+}
+
+function memStoreGet(map, key) {
+  const rec = map.get(key);
+  if (!rec) return { hit: false, value: null };
+  if (rec.exp > 0 && Date.now() > rec.exp) {
+    map.delete(key);
+    return { hit: false, value: null };
+  }
+  return { hit: true, value: rec.val, deleted: Boolean(rec.deleted) };
+}
+
+function memStoreSet(map, key, val, ttlSec = 0, deleted = false, maxEntries = 1500) {
+  if (map.size >= maxEntries && !map.has(key)) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+  const exp = ttlSec > 0 ? (Date.now() + ttlSec * 1000) : 0;
+  map.set(key, { val, exp, deleted });
 }
 
 function createDurableKvAdapter(env) {
@@ -56,13 +94,11 @@ function createDurableKvAdapter(env) {
   const roomDo = env?.ROOM_DO || null;
   if (!roomDo) return rawKv;
 
-  const getStub = (ephemeral) => {
-    const shard = ephemeral ? "__watchlivo_ephemeral_v1__" : "__watchlivo_auth_store_v1__";
-    return roomDo.get(roomDo.idFromName(shard));
-  };
+  const getAuthStub = () => roomDo.get(roomDo.idFromName("__watchlivo_auth_store_v1__"));
 
   const callDoKv = async (payload) => {
-    const stub = getStub(Boolean(payload.ephemeral));
+    if (Date.now() < _authDoQuotaUntil) throw new Error("do_quota_cooldown");
+    const stub = getAuthStub();
     const resp = await stub.fetch(new Request("https://do.local/__kv", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -72,48 +108,127 @@ function createDurableKvAdapter(env) {
     return await resp.json();
   };
 
+  const noteAuthDoErr = (err) => {
+    const msg = String(err?.message || err || "").toLowerCase();
+    if (msg.includes("exceeded allowed volume") || msg.includes("free tier") || msg.includes("quota") || msg.includes("overloaded")) {
+      _authDoQuotaUntil = Date.now() + 180_000;
+    }
+  };
+
+  const parseOut = (strVal, wantJson) => {
+    if (strVal === null || strVal === undefined) return null;
+    if (wantJson) {
+      try { return JSON.parse(strVal); } catch { return null; }
+    }
+    return strVal;
+  };
+
+  const edgeCacheUrl = (key) => `https://cache.watchlivo.internal/ephemeral/${encodeURIComponent(String(key))}`;
+
   return {
     async get(key, typeOrOpts) {
+      const k = String(key);
       const wantJson = typeOrOpts === "json" || (typeOrOpts && typeof typeOrOpts === "object" && typeOrOpts.type === "json");
-      const eph = isEphemeralStoreKey(key);
-      try {
-        const res = await callDoKv({ op: "get", key: String(key), ephemeral: eph });
-        if (res && res.found) {
-          if (res.deleted || res.value === null || res.value === undefined) return null;
-          if (wantJson) {
-            try { return JSON.parse(res.value); } catch { return null; }
-          }
-          return res.value;
+      const eph = isEphemeralStoreKey(k);
+      if (eph) {
+        // Ephemeral keys NEVER touch Durable Objects (saves >95% of DO free-tier request quota!)
+        const mHit = memStoreGet(_memEphemeralStore, k);
+        if (mHit.hit) return mHit.deleted ? null : parseOut(mHit.value, wantJson);
+        const ec = getEdgeCacheDefault();
+        if (ec) {
+          try {
+            const cResp = await ec.match(edgeCacheUrl(k));
+            if (cResp && cResp.ok) {
+              const txt = await cResp.text();
+              memStoreSet(_memEphemeralStore, k, txt, 60);
+              return parseOut(txt, wantJson);
+            }
+          } catch {}
         }
-      } catch {
-        // Fall through to legacy KV read if DO stub does not support /__kv (e.g., partial unit test mock)
+        if (rawKv && typeof rawKv.get === "function") {
+          const legacyVal = await rawKv.get(k, "text").catch(() => null);
+          if (legacyVal !== null && legacyVal !== undefined) {
+            memStoreSet(_memEphemeralStore, k, legacyVal, 60);
+            return parseOut(legacyVal, wantJson);
+          }
+        }
+        return null;
       }
+
+      // Persistent Auth / Profile / Social keys: DO SQLite primary with quota-safe fallback
+      if (Date.now() >= _authDoQuotaUntil) {
+        try {
+          const res = await callDoKv({ op: "get", key: k, ephemeral: false });
+          if (res && res.found) {
+            if (res.deleted || res.value === null || res.value === undefined) return null;
+            memStoreSet(_memPersistFallback, k, res.value, 600, false, 600);
+            return parseOut(res.value, wantJson);
+          }
+        } catch (err) {
+          noteAuthDoErr(err);
+        }
+      }
+      const pHit = memStoreGet(_memPersistFallback, k);
+      if (pHit.hit) return pHit.deleted ? null : parseOut(pHit.value, wantJson);
       if (rawKv && typeof rawKv.get === "function") {
-        return await rawKv.get(key, typeOrOpts).catch(() => null);
+        return await rawKv.get(k, typeOrOpts).catch(() => null);
       }
       return null;
     },
     async put(key, value, opts = {}) {
+      const k = String(key);
       const strVal = typeof value === "string" ? value : JSON.stringify(value);
       const ttl = Number(opts?.expirationTtl || 0);
-      const eph = isEphemeralStoreKey(key);
-      try {
-        await callDoKv({ op: "put", key: String(key), value: strVal, ttl, ephemeral: eph });
-        return;
-      } catch {
-        // Only fall back to legacy KV if DO stub rejected /__kv (never throw on KV daily limit 10048)
-        if (rawKv && typeof rawKv.put === "function") {
-          await rawKv.put(key, strVal, opts).catch(() => {});
+      const eph = isEphemeralStoreKey(k);
+      if (eph) {
+        const effTtl = ttl > 0 ? Math.min(ttl, 86400) : 300;
+        memStoreSet(_memEphemeralStore, k, strVal, effTtl);
+        const ec = getEdgeCacheDefault();
+        if (ec) {
+          try {
+            await ec.put(edgeCacheUrl(k), new Response(strVal, {
+              status: 200,
+              headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": `public, max-age=${effTtl}` },
+            }));
+          } catch {}
         }
+        return;
+      }
+
+      memStoreSet(_memPersistFallback, k, strVal, ttl > 0 ? Math.min(ttl, 3600) : 1800, false, 600);
+      if (Date.now() >= _authDoQuotaUntil) {
+        try {
+          await callDoKv({ op: "put", key: k, value: strVal, ttl, ephemeral: false });
+          return;
+        } catch (err) {
+          noteAuthDoErr(err);
+        }
+      }
+      if (rawKv && typeof rawKv.put === "function") {
+        await rawKv.put(k, strVal, opts).catch(() => {});
       }
     },
     async delete(key) {
-      const eph = isEphemeralStoreKey(key);
-      try {
-        await callDoKv({ op: "tombstone", key: String(key), ephemeral: eph });
-      } catch {}
+      const k = String(key);
+      const eph = isEphemeralStoreKey(k);
+      if (eph) {
+        memStoreSet(_memEphemeralStore, k, null, 60, true);
+        const ec = getEdgeCacheDefault();
+        if (ec) {
+          try { await ec.delete(edgeCacheUrl(k)); } catch {}
+        }
+        return;
+      }
+      memStoreSet(_memPersistFallback, k, null, 300, true, 600);
+      if (Date.now() >= _authDoQuotaUntil) {
+        try {
+          await callDoKv({ op: "tombstone", key: k, ephemeral: false });
+        } catch (err) {
+          noteAuthDoErr(err);
+        }
+      }
       if (rawKv && typeof rawKv.delete === "function") {
-        await rawKv.delete(key).catch(() => {});
+        await rawKv.delete(k).catch(() => {});
       }
     },
   };

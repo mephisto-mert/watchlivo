@@ -1805,22 +1805,99 @@ async function syncPublicRoomIndex(roomId, serializedRoom, env) {
   }
 }
 
+let _doQuotaExhaustedUntil = 0;
+const _memFallbackRooms = new Map();
+const _memClosedRooms = new Map();
+
+function isDoQuotaOrTransientError(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  return (
+    msg.includes("exceeded allowed volume") ||
+    msg.includes("durable object") ||
+    msg.includes("free tier") ||
+    msg.includes("overloaded") ||
+    msg.includes("quota") ||
+    msg.includes("rate limit")
+  );
+}
+
+function noteDoFailure(err) {
+  if (isDoQuotaOrTransientError(err)) {
+    _doQuotaExhaustedUntil = Date.now() + 180_000;
+  }
+}
+
+function canUseRoomDo(env) {
+  return Boolean(env?.ROOM_DO) && Date.now() >= _doQuotaExhaustedUntil;
+}
+
+function memGetRoom(roomId) {
+  const rec = _memFallbackRooms.get(roomId);
+  if (!rec) return null;
+  if (Date.now() - rec.ts > 43_200_000) {
+    _memFallbackRooms.delete(roomId);
+    return null;
+  }
+  return rec.rm;
+}
+
+function memSetRoom(roomId, rm) {
+  if (!roomId || !rm) return;
+  if (_memFallbackRooms.size >= 300 && !_memFallbackRooms.has(roomId)) {
+    const oldest = _memFallbackRooms.keys().next().value;
+    if (oldest !== undefined) _memFallbackRooms.delete(oldest);
+  }
+  _memFallbackRooms.set(roomId, { rm, ts: Date.now() });
+}
+
+function memIsClosed(roomId) {
+  const exp = _memClosedRooms.get(roomId);
+  if (!exp) return false;
+  if (Date.now() > exp) {
+    _memClosedRooms.delete(roomId);
+    return false;
+  }
+  return true;
+}
+
+function memMarkClosed(roomId) {
+  _memFallbackRooms.delete(roomId);
+  _memClosedRooms.set(roomId, Date.now() + 3_600_000);
+}
+
+export function resetRoomDoQuotaGuardForTests() {
+  _doQuotaExhaustedUntil = 0;
+  _memFallbackRooms.clear();
+  _memClosedRooms.clear();
+}
+
 export async function handleEdgeRoomCreate(request, env, jsonResp) {
   const rawBody = await request.json().catch(() => ({}));
   const { curated: _spoofCurated, __curatedSeed: _spoofSeed, ...body } = rawBody && typeof rawBody === "object" ? rawBody : {};
   const roomId = generateOpaqueRoomId();
   const cid = String(body.clientId || `h_${makeHexNonce(4)}`);
   const createPayload = { ...body, clientId: cid, createdFromApi: true };
-  let out;
-  if (env.ROOM_DO) {
-    const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
-    const r = await stub.fetch(`https://do.local/create?roomId=${encodeURIComponent(roomId)}`, { method: "POST", body: JSON.stringify(createPayload) });
-    out = await r.json();
-  } else {
+  let out = null;
+  if (canUseRoomDo(env)) {
+    try {
+      const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
+      const r = await stub.fetch(`https://do.local/create?roomId=${encodeURIComponent(roomId)}`, { method: "POST", body: JSON.stringify(createPayload) });
+      if (r.ok) {
+        out = await r.json();
+      } else {
+        const errTxt = await r.text().catch(() => "");
+        noteDoFailure(errTxt || `do_${r.status}`);
+      }
+    } catch (err) {
+      noteDoFailure(err);
+    }
+  }
+  if (!out) {
     const rm = makeRoomSkeleton(roomId, createPayload);
     rm.createdFromApi = true;
     await setRoomPassword(rm, body.password || "");
     applyRoomAction(rm, cid, { type: "init", username: rm.creator, color: body.color || "#27DCC8" }, { initialDirty: true, tokenVerified: true });
+    memSetRoom(roomId, rm);
     if (env.WATCHLIVO_KV) await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
     out = { ok: true, clientId: cid, clientToken: await signRoomClientToken(roomId, cid, env), room: await serializeEdgeRoom(rm, cid, env) };
   }
@@ -1860,42 +1937,49 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
     body.type = opts.defaultAction;
   }
   const seed = getCuratedSeed(roomId, curatedMap);
-  if (env.WATCHLIVO_KV) {
-    if (seed) {
-      await env.WATCHLIVO_KV.delete(`room_closed:${roomId}`).catch(() => {});
-    } else {
+  if (seed) {
+    _memClosedRooms.delete(roomId);
+    if (env.WATCHLIVO_KV) await env.WATCHLIVO_KV.delete(`room_closed:${roomId}`).catch(() => {});
+  } else {
+    if (memIsClosed(roomId)) return jsonResp({ ok: false, error: "Oda kapatıldı.", roomClosed: true }, 410);
+    if (env.WATCHLIVO_KV) {
       const closedKv = await env.WATCHLIVO_KV.get(`room_closed:${roomId}`).catch(() => null);
       if (closedKv) return jsonResp({ ok: false, error: "Oda kapatıldı.", roomClosed: true }, 410);
     }
   }
-  if (env.ROOM_DO) {
-    const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
-    if (seed) {
-      body.__curatedSeed = seed;
-      if (!body.activeMedia && seed.media) body.activeMedia = seed.media;
+  if (canUseRoomDo(env)) {
+    try {
+      const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
+      if (seed) {
+        body.__curatedSeed = seed;
+        if (!body.activeMedia && seed.media) body.activeMedia = seed.media;
+      }
+      const r = await stub.fetch(`https://do.local/sync?roomId=${encodeURIComponent(roomId)}`, { method: "POST", body: JSON.stringify(body) });
+      const data = await r.json();
+      if (body.type === "close_room" && r.ok && data?.roomClosed && !seed && env.WATCHLIVO_KV) {
+        memMarkClosed(roomId);
+        await env.WATCHLIVO_KV.put(`room_closed:${roomId}`, "1", { expirationTtl: 3600 }).catch(() => {});
+        const idx = (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [];
+        await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(idx.filter((x) => x && x.id !== roomId)), { expirationTtl: 21600 }).catch(() => {});
+      } else if (
+        r.ok &&
+        data?.room &&
+        env.WATCHLIVO_KV &&
+        (["init", "join", "leave", "hb", "heartbeat", "play", "pause", "seek", "media", "set_media", "change_media", "resolve_media", "host_action", "kick", "privacy"].includes(body.type) ||
+          Boolean(body.activeMedia) ||
+          Boolean(data.pruned) ||
+          Boolean(data.idxNeedsRefresh))
+      ) {
+        await syncPublicRoomIndex(roomId, data.room, env);
+      }
+      return jsonResp(data, r.status);
+    } catch (err) {
+      noteDoFailure(err);
     }
-    const r = await stub.fetch(`https://do.local/sync?roomId=${encodeURIComponent(roomId)}`, { method: "POST", body: JSON.stringify(body) });
-    const data = await r.json();
-    if (body.type === "close_room" && r.ok && data?.roomClosed && !seed && env.WATCHLIVO_KV) {
-      await env.WATCHLIVO_KV.put(`room_closed:${roomId}`, "1", { expirationTtl: 3600 }).catch(() => {});
-      const idx = (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [];
-      await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(idx.filter((x) => x && x.id !== roomId)), { expirationTtl: 21600 }).catch(() => {});
-    } else if (
-      r.ok &&
-      data?.room &&
-      env.WATCHLIVO_KV &&
-      (["init", "join", "leave", "hb", "heartbeat", "play", "pause", "seek", "media", "set_media", "change_media", "resolve_media", "host_action", "kick", "privacy"].includes(body.type) ||
-        Boolean(body.activeMedia) ||
-        Boolean(data.pruned) ||
-        Boolean(data.idxNeedsRefresh))
-    ) {
-      await syncPublicRoomIndex(roomId, data.room, env);
-    }
-    return jsonResp(data, r.status);
   }
 
   let cid = String(body.clientId || `h_${makeHexNonce(4)}`);
-  let rm = env.WATCHLIVO_KV ? await env.WATCHLIVO_KV.get(`room:${roomId}`, "json").catch(() => null) : null;
+  let rm = memGetRoom(roomId) || (env.WATCHLIVO_KV ? await env.WATCHLIVO_KV.get(`room:${roomId}`, "json").catch(() => null) : null);
   let healed = false;
   if (!rm) {
     rm = (await tryRestoreSyncToken(roomId, body.syncToken, env)) || makeRoomSkeleton(roomId, seed || body);
@@ -1921,6 +2005,7 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
     if (seed || rm.curated || !tokenVerified || !isHostOrCreator(rm, cid)) {
       return jsonResp({ ok: false, error: seed || rm.curated ? "Sabit 7/24 odalar kapatılamaz." : "Sadece oda kurucusu odayı kapatabilir." }, 403);
     }
+    memMarkClosed(roomId);
     if (env.WATCHLIVO_KV) {
       await env.WATCHLIVO_KV.delete(`room:${roomId}`).catch(() => {});
       await env.WATCHLIVO_KV.put(`room_closed:${roomId}`, "1", { expirationTtl: 3600 }).catch(() => {});
@@ -1938,6 +2023,7 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
   const tKvNow = nowSec();
   const kvIdxRefresh = Boolean(rm.privacy === "public" && (!rm._lastIdxSync || tKvNow - rm._lastIdxSync > 45));
   if (kvIdxRefresh) rm._lastIdxSync = tKvNow;
+  memSetRoom(roomId, rm);
   const serialized = await serializeEdgeRoom(rm, cid, env);
   if ((res.dirty || pruned || healed || res.pendingPassword !== undefined || kvIdxRefresh) && env.WATCHLIVO_KV) {
     await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
@@ -1957,33 +2043,40 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
 export async function handleEdgeRoomInfo(roomId, request, env, jsonResp, curatedMap = null) {
   const seed = getCuratedSeed(roomId, curatedMap);
   const url = new URL(request.url);
-  if (env.WATCHLIVO_KV) {
-    if (seed) {
-      await env.WATCHLIVO_KV.delete(`room_closed:${roomId}`).catch(() => {});
-    } else {
+  if (seed) {
+    _memClosedRooms.delete(roomId);
+    if (env.WATCHLIVO_KV) await env.WATCHLIVO_KV.delete(`room_closed:${roomId}`).catch(() => {});
+  } else {
+    if (memIsClosed(roomId)) return jsonResp({ ok: false, error: "Bu oda artık mevcut değil", roomClosed: true }, 410);
+    if (env.WATCHLIVO_KV) {
       const closedKv = await env.WATCHLIVO_KV.get(`room_closed:${roomId}`).catch(() => null);
       if (closedKv) return jsonResp({ ok: false, error: "Bu oda artık mevcut değil", roomClosed: true }, 410);
     }
   }
-  if (env.ROOM_DO) {
-    const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
-    const doUrl = new URL("https://do.local/info");
-    doUrl.searchParams.set("roomId", roomId);
-    const cid = url.searchParams.get("clientId") || "";
-    const ctok = url.searchParams.get("clientToken") || "";
-    if (cid) doUrl.searchParams.set("clientId", cid);
-    if (ctok) doUrl.searchParams.set("clientToken", ctok);
-    const hdrs = new Headers();
-    if (seed) hdrs.set("x-watchlivo-curated-seed", b64EncodeUtf8(JSON.stringify(seed)));
-    const r = await stub.fetch(new Request(doUrl.toString(), { method: "GET", headers: hdrs }));
-    const data = await r.json();
-    return jsonResp(data, r.status);
+  if (canUseRoomDo(env)) {
+    try {
+      const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
+      const doUrl = new URL("https://do.local/info");
+      doUrl.searchParams.set("roomId", roomId);
+      const cid = url.searchParams.get("clientId") || "";
+      const ctok = url.searchParams.get("clientToken") || "";
+      if (cid) doUrl.searchParams.set("clientId", cid);
+      if (ctok) doUrl.searchParams.set("clientToken", ctok);
+      const hdrs = new Headers();
+      if (seed) hdrs.set("x-watchlivo-curated-seed", b64EncodeUtf8(JSON.stringify(seed)));
+      const r = await stub.fetch(new Request(doUrl.toString(), { method: "GET", headers: hdrs }));
+      const data = await r.json();
+      return jsonResp(data, r.status);
+    } catch (err) {
+      noteDoFailure(err);
+    }
   }
-  const rm = env.WATCHLIVO_KV ? await env.WATCHLIVO_KV.get(`room:${roomId}`, "json").catch(() => null) : null;
+  const rm = memGetRoom(roomId) || (env.WATCHLIVO_KV ? await env.WATCHLIVO_KV.get(`room:${roomId}`, "json").catch(() => null) : null);
   if (seed) {
     if (rm) {
       const healed = reconcileCuratedRoom(rm, seed);
       const pruned = pruneStaleParticipants(rm);
+      memSetRoom(roomId, rm);
       if ((healed || pruned) && env.WATCHLIVO_KV) {
         await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
       }
@@ -1995,6 +2088,7 @@ export async function handleEdgeRoomInfo(roomId, request, env, jsonResp, curated
     return jsonResp({ ok: false, error: "Bu oda artık mevcut değil" }, 404);
   }
   const pruned = pruneStaleParticipants(rm);
+  memSetRoom(roomId, rm);
   if (pruned && env.WATCHLIVO_KV) {
     await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
   }
@@ -2013,36 +2107,46 @@ export async function handleEdgeRoomWs(roomId, request, url, env, curatedMap = n
     try { nfServer.close(4010, "room_closed"); } catch {}
     return new Response(null, { status: 101, webSocket: nfClient });
   }
-  if (!env.ROOM_DO) return new Response("WS fallback to HTTP poll", { status: 503 });
-  const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
-  const doUrl = new URL("https://do.local/ws");
-  url.searchParams.forEach((v, k) => doUrl.searchParams.set(k, v));
-  doUrl.searchParams.set("roomId", roomId);
-  const seed = getCuratedSeed(roomId, curatedMap);
-  const hdrs = new Headers(request.headers);
-  hdrs.delete("x-watchlivo-curated-seed");
-  if (seed) {
-    hdrs.set("x-watchlivo-curated-seed", b64EncodeUtf8(JSON.stringify(seed)));
+  if (!canUseRoomDo(env)) return new Response("WS fallback to HTTP poll", { status: 503 });
+  try {
+    const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
+    const doUrl = new URL("https://do.local/ws");
+    url.searchParams.forEach((v, k) => doUrl.searchParams.set(k, v));
+    doUrl.searchParams.set("roomId", roomId);
+    const seed = getCuratedSeed(roomId, curatedMap);
+    const hdrs = new Headers(request.headers);
+    hdrs.delete("x-watchlivo-curated-seed");
+    if (seed) {
+      hdrs.set("x-watchlivo-curated-seed", b64EncodeUtf8(JSON.stringify(seed)));
+    }
+    return await stub.fetch(new Request(doUrl.toString(), { method: request.method, headers: hdrs }));
+  } catch (err) {
+    noteDoFailure(err);
+    return new Response("WS fallback to HTTP poll", { status: 503 });
   }
-  return stub.fetch(new Request(doUrl.toString(), { method: request.method, headers: hdrs }));
 }
 
 export async function handleEdgeRoomVoiceRelay(roomId, request, env, jsonResp, curatedMap = null, relayHdrs = {}) {
-  if (!env?.ROOM_DO) return null;
-  const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
-  const srcUrl = new URL(request.url);
-  const doUrl = new URL("https://do.local/voice-relay");
-  srcUrl.searchParams.forEach((v, k) => doUrl.searchParams.set(k, v));
-  doUrl.searchParams.set("roomId", roomId);
-  const seed = getCuratedSeed(roomId, curatedMap);
-  const hdrs = new Headers();
-  if (seed) hdrs.set("x-watchlivo-curated-seed", b64EncodeUtf8(JSON.stringify(seed)));
-  const init = { method: request.method, headers: hdrs };
-  if (request.method === "POST") {
-    hdrs.set("Content-Type", "application/json");
-    init.body = await request.text();
+  if (!canUseRoomDo(env)) return null;
+  try {
+    const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
+    const srcUrl = new URL(request.url);
+    const doUrl = new URL("https://do.local/voice-relay");
+    srcUrl.searchParams.forEach((v, k) => doUrl.searchParams.set(k, v));
+    doUrl.searchParams.set("roomId", roomId);
+    const seed = getCuratedSeed(roomId, curatedMap);
+    const hdrs = new Headers();
+    if (seed) hdrs.set("x-watchlivo-curated-seed", b64EncodeUtf8(JSON.stringify(seed)));
+    const init = { method: request.method, headers: hdrs };
+    if (request.method === "POST") {
+      hdrs.set("Content-Type", "application/json");
+      init.body = await request.text();
+    }
+    const r = await stub.fetch(new Request(doUrl.toString(), init));
+    const data = await r.json().catch(() => ({ ok: false, error: "Ses rölesi yanıt veremedi" }));
+    return jsonResp(data, r.status, relayHdrs);
+  } catch (err) {
+    noteDoFailure(err);
+    return null;
   }
-  const r = await stub.fetch(new Request(doUrl.toString(), init));
-  const data = await r.json().catch(() => ({ ok: false, error: "Ses rölesi yanıt veremedi" }));
-  return jsonResp(data, r.status, relayHdrs);
 }

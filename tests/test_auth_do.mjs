@@ -245,3 +245,84 @@ test('Legacy WATCHLIVO_KV accounts transparently migrate on read and stay delete
     globalThis.fetch = origFetch;
   }
 });
+
+test('Rooms create/sync/info succeed with ZERO 503 when BOTH Durable Objects free tier AND KV daily write limit are exhausted', async () => {
+  let doCalls = 0;
+  const quotaExceededDo = {
+    idFromName(name) { return name; },
+    get() {
+      return {
+        async fetch() {
+          doCalls += 1;
+          throw new Error('Exceeded allowed volume of requests in Durable Objects free tier.');
+        },
+      };
+    },
+  };
+  const exhaustedKv = createQuotaExhaustedKv();
+  const env = {
+    ROOM_DO: quotaExceededDo,
+    WATCHLIVO_KV: exhaustedKv,
+    PROXY_SECRET: 'test_secret_key_for_do_quota_failover_999999',
+  };
+
+  // 1. POST /api/rooms succeeds with 200 OK instead of 503!
+  const createResp = await handleAutonomousEdge(
+    new Request('https://watchlivo.online/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Game of Thrones Odası',
+        privacy: 'public',
+        creator: 'Mert',
+        media: { title: 'Game of Thrones', url: '/api/rave/stream?sid=got&ext=.m3u8', provider: 'hls' },
+      }),
+    }),
+    new URL('https://watchlivo.online/api/rooms'),
+    '/api/rooms',
+    env,
+  );
+  assert.equal(createResp.status, 200);
+  const created = await createResp.json();
+  assert.equal(created.ok, true);
+  assert.ok(created.room?.id);
+  assert.ok(created.clientToken);
+  assert.ok(created.room?.syncToken, 'Fallback room must emit signed syncToken');
+  const rid = created.room.id;
+
+  // 2. Subsequent room sync (play/chat/poll) succeeds with 200 OK and short-circuits DO!
+  const callsAfterCreate = doCalls;
+  const syncResp = await handleAutonomousEdge(
+    new Request(`https://watchlivo.online/api/rooms/${rid}/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'chat',
+        clientId: created.clientId,
+        clientToken: created.clientToken,
+        syncToken: created.room.syncToken,
+        username: 'Mert',
+        text: 'Selam',
+      }),
+    }),
+    new URL(`https://watchlivo.online/api/rooms/${rid}/sync`),
+    `/api/rooms/${rid}/sync`,
+    env,
+  );
+  assert.equal(syncResp.status, 200);
+  const synced = await syncResp.json();
+  assert.equal(synced.ok, true);
+  assert.equal(doCalls, callsAfterCreate, 'Quota circuit breaker must skip failing DO calls during cooldown');
+
+  // 3. GET /api/rooms/:id info returns 200 OK from in-isolate memory fallback!
+  const infoResp = await handleAutonomousEdge(
+    new Request(`https://watchlivo.online/api/rooms/${rid}`),
+    new URL(`https://watchlivo.online/api/rooms/${rid}`),
+    `/api/rooms/${rid}`,
+    env,
+  );
+  assert.equal(infoResp.status, 200);
+  const info = await infoResp.json();
+  assert.equal(info.ok, true);
+  assert.equal(info.room?.id, rid);
+});
