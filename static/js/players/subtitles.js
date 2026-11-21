@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261121_v233';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261121_v234';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -843,7 +843,7 @@ export class SubtitleDubController {
         season: String(effSeason),
         episode: String(effEpisode),
         duration: String(Math.round(Number(this.adapter?.getDuration?.() || media.duration || 0)) || ''),
-        _v: '20261121v233',
+        _v: '20261121v234',
       };
       if (!rawTidExtracted && baseUrl) queryParams.url = baseUrl;
       const qs = new URLSearchParams(queryParams);
@@ -1618,12 +1618,14 @@ export class SubtitleDubController {
           || (dur > 2400 && curSpanInit < dur * 0.945)
         )
       );
+      const effMovieDur = dur >= 3600 ? dur : (this.media?.mediaType === 'movie' && curSpanInit >= 3600 ? curSpanInit : 0);
+      const isMovieForcedSub = Boolean(effMovieDur >= 3600 && cues.length > 0 && cues.length < 180 && (cues.length / (effMovieDur / 60)) < 1.8);
       const isForcedOrTruncated = track.source === 'local'
         ? false
         : (isInit
-          ? (isStreamEmbeddedFansub
+          ? (isMovieForcedSub || (isStreamEmbeddedFansub
             ? (cues.length < 20)
-            : (cues.length < 35 || (cues.length < 45 && curSpanInit < minEnd)))
+            : (cues.length < 35 || (cues.length < 45 && curSpanInit < minEnd))))
           : false);
       if (wrongAutoLang || isForcedOrTruncated || hasDurationMismatch || cues.length === 0) {
         const alts = this.subtitleTracks.filter((t) => t.id !== track.id && normalizeClientSubLang(t.lang, t.label) === targetLangForFallback);
@@ -1642,6 +1644,14 @@ export class SubtitleDubController {
           if (isInit && alt._detectedLang && targetLangForFallback && alt._detectedLang !== targetLangForFallback) continue;
           const curSpan = getSpan(cues);
           const altSpan = getSpan(altCues);
+          if (isMovieForcedSub) {
+            if (altCues.length >= Math.max(250, cues.length * 3) && (dur <= 900 || altSpan >= dur * 0.72)) {
+              track = alt;
+              cues = altCues;
+              break;
+            }
+            continue;
+          }
           if (wrongAutoLang && altCues.length >= 20) {
             track = alt;
             cues = altCues;

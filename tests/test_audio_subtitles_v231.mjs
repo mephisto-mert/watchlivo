@@ -747,3 +747,76 @@ test("v233 dub audio silence fixes: text/css MPEG-TS cloak sniff, AUTOSELECT=YES
     else globalThis.window = prevWin;
   }
 });
+
+test("v234 30-title audit fixes: Avatar forced movie sub fallback, Godfather CD1 EN demotion, and reliable Dual CDN preference over flaky dl_embed", async () => {
+  // 1. Forced movie subtitle (82 cues on 9722s Avatar) must auto-fallback to full 400-cue TR subtitle
+  const adapter = {
+    currentUrl: "/api/rave/stream?sid=avatar&ext=.m3u8",
+    video: null,
+    hls: null,
+    events: { onSubtitleCue() {}, onTracksChanged() {} },
+    getTime() { return 0; },
+    getDuration() { return 9722; },
+    async switchStreamSource() {},
+  };
+  const ctrl = new SubtitleDubController(adapter);
+  ctrl.media = { tmdbId: "19995", mediaType: "movie", title: "Avatar", duration: 9722 };
+  const makeCues = (n, lastEnd) => Array.from({ length: n }, (_, i) => {
+    const st = Math.floor((i + 1) * (lastEnd / (n + 1)));
+    return { start: st, end: st + 2, maxEnd: st + 2, text: `Türkçe replik numara ${i + 1} burada` };
+  });
+  ctrl.subtitleTracks = [
+    { id: "stream-tr", lang: "tr", source: "dl_embed", synced: true, url: "/sub/avatar_forced.vtt", label: "🇹🇷 Türkçe (Dizilife)" },
+    { id: "os-tr-1", lang: "tr", source: "opensubtitles", url: "/sub/avatar_full.vtt", label: "🇹🇷 Türkçe (OpenSubtitles)" },
+  ];
+  ctrl.cuesCache.set("/sub/avatar_forced.vtt", { vtt: "", cues: makeCues(82, 7219), failedAt: 0 });
+  ctrl.cuesCache.set("/sub/avatar_full.vtt", { vtt: "", cues: makeCues(420, 9410), failedAt: 0 });
+  await ctrl.setSubtitleTrack("stream-tr", true);
+  assert.equal(ctrl.selectedSubId, "os-tr-1", "82-cue forced movie sub must fallback to full 420-cue TR subtitle");
+  assert.equal(ctrl.subCues.length, 420);
+
+  // 2. Half-length CD1 EN subtitle (5594s on 10629s Godfather) must be demoted below full-length EN subtitle
+  const makeMovieSrt = (n, spanSec) => {
+    const fmt = (sec) => {
+      const h = String(Math.floor(sec / 3600)).padStart(2, "0");
+      const m = String(Math.floor((sec % 3600) / 60)).padStart(2, "0");
+      const s = String(Math.floor(sec % 60)).padStart(2, "0");
+      return `${h}:${m}:${s},000`;
+    };
+    return Array.from({ length: n }, (_, i) => {
+      const st = 40 + Math.floor((i / Math.max(1, n - 1)) * (spanSec - 50));
+      return `${i + 1}\n${fmt(st)} --> ${fmt(st + 2)}\nThe family business is everything you should know about this movie.`;
+    }).join("\n\n");
+  };
+  const cd1En = makeMovieSrt(120, 5594);
+  const fullEn = makeMovieSrt(220, 10370);
+  const origFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      const u = typeof input === "string" ? input : input.url;
+      if (u.includes("api.themoviedb.org/3/movie/238/external_ids")) {
+        return new Response(JSON.stringify({ imdb_id: "tt0068646" }), { status: 200 });
+      }
+      if (u.includes("opensubtitles-v3.strem.io/subtitles/movie/tt0068646.json")) {
+        return new Response(JSON.stringify({
+          subtitles: [
+            { id: "en-cd1", lang: "eng", fpsMilli: 23976, SubDownloadsCnt: 9000, subtitleFileName: "The.Godfather.1972.BluRay.en.srt", url: "https://subs5.strem.io/sub/gf_cd1.srt" },
+            { id: "en-full", lang: "eng", fpsMilli: 23976, SubDownloadsCnt: 500, subtitleFileName: "The.Godfather.1972.WEB-DL.en.srt", url: "https://subs5.strem.io/sub/gf_full.srt" },
+          ],
+        }), { status: 200 });
+      }
+      if (u.includes("gf_cd1.srt")) return new Response(cd1En, { status: 200 });
+      if (u.includes("gf_full.srt")) return new Response(fullEn, { status: 200 });
+      return new Response("Not Found", { status: 404 });
+    };
+    const env = { ...TEST_ENV, WATCHLIVO_KV: createMockKv() };
+    const reqUrl = new URL("https://watchlivo.online/api/rave/subtitles?tmdbId=238&mediaType=movie&duration=10629");
+    const resp = await handleAutonomousEdge(new Request(reqUrl.toString()), reqUrl, "/api/rave/subtitles", env);
+    assert.equal(resp.status, 200);
+    const data = await resp.json();
+    const enList = data.subtitleTracks.filter((t) => t.lang === "en");
+    assert.ok(decodeURIComponent(enList[0].url).includes("gf_full.srt"), "Full-length 10370s EN sub must outrank 5594s CD1 split");
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});

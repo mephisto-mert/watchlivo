@@ -1816,9 +1816,9 @@ function mergeResolvedResults(resultList) {
     const isVm = isVmpxOrVidmolyUrl(u);
     const dualBonus = (!isVm && isStreamDualAudio(st)) ? 0 : 10;
     let hostRank = 4;
-    if (/makesomthingup|centralodsseyproud|\/r6\//.test(u)) hostRank = 0;
-    else if (/dbx\.molystream\.org|player\.filmizle\.in|storage\.diziyou\.love|ksdpictures\.site|video\.twimg\.com/.test(u)) hostRank = 1;
+    if (/dbx\.molystream\.org|player\.filmizle\.in|storage\.diziyou\.love|ksdpictures\.site|video\.twimg\.com/.test(u)) hostRank = 0;
     else if (/sprintcdn|r66nv9ed|owphbf24|filemoon|byse|cdnimg|rapidvid/.test(u)) hostRank = 1;
+    else if (/makesomthingup|centralodsseyproud|\/r6\//.test(u)) hostRank = 2;
     else if (/tau-video|irtau1/.test(u)) hostRank = 2;
     else if (/imgsapi\.pro|pilavyer/.test(u)) hostRank = 3;
     else if (/vixsrc\.to|dragonballzfans/.test(u)) hostRank = 4;
@@ -3071,7 +3071,8 @@ export async function resolveTurkishCatalogStream({ title, displayTitle, origina
                 }
                 if (allClean.length) {
                   const cov = getStreamAudioCoverage(allClean);
-                  if (cov.hasTr && cov.hasOrig) {
+                  const hasReliableNonDl = allClean.some((st) => !/makesomthingup|centralodsseyproud/i.test(String(st.url || "")));
+                  if (cov.hasTr && cov.hasOrig && hasReliableNonDl) {
                     scheduleGrace(graceMs, "both");
                   } else if (!graceMode) {
                     scheduleGrace(Math.max(graceMs, singleLangGraceMs), "single");

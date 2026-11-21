@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261121_v233';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261121_v233';
-import { api, qs, humanApiError } from '../api.js?v=20261121_v233';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261121_v233';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261121_v233';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261121_v233';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261121_v233';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261121_v234';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261121_v234';
+import { api, qs, humanApiError } from '../api.js?v=20261121_v234';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261121_v234';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261121_v234';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261121_v234';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261121_v234';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,13 +13,14 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261121_v233';
+} from '../store.js?v=20261121_v234';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
 }
 
 let _activeHomePick = null;
+const isBadTmdbHash = (u) => /4Mt7WHox67uJ1yErwTBFcV8KWgG|od5S7r2v306B2eR0E5t6vP8K2wG/i.test(String(u || ''));
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -496,7 +497,6 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let autoRotateTicks = 0;
   let autoRotateTimer = null;
   let superSearchSeq = 0;
-  const isBadTmdbHash = (u) => /4Mt7WHox67uJ1yErwTBFcV8KWgG|od5S7r2v306B2eR0E5t6vP8K2wG/i.test(String(u || ''));
   const _superSearchCache = new Map();
   const _superSearchInFlight = new Map();
   function fetchSuperSearch(q, timeout = 15000) {

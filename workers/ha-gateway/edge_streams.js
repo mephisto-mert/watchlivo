@@ -1,5 +1,6 @@
 import {
   ANIMECIX_KNOWN_TMDB,
+  detectM3u8AudioLangs,
   isBlockedAdHost,
   isAdSegmentOrPlaylistUrl,
   isDirectEmbedPageUrl,
@@ -860,8 +861,8 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     const proxied = isMp4
       ? await buildSignedProxyPath(rawU, inferStreamReferer(rawU), ".mp4", env)
       : `/api/rave/stream?tmdbId=${encodeURIComponent(tmdbId || id)}&mtype=${encodeURIComponent(mtype)}&sid=${b64UrlEncode(rawU)}&ext=.m3u8`;
-    urls.push({ url: proxied, streamType: isMp4 ? "mp4" : "hls", label: `📡 Sunucu ${i + 1} · Edge Direct (${isMp4 ? "MP4 HD" : "1080p HLS"})` });
-    servers.push({ id: `srv-${i + 1}`, label: `📡 Sunucu ${i + 1} · Cloudflare 7/24 (${isMp4 ? "MP4 HD" : "1080p HLS"})`, url: proxied, streamType: isMp4 ? "mp4" : "hls" });
+    urls.push({ url: proxied, streamType: isMp4 ? "mp4" : "hls", label: `📡 Sunucu ${i + 1} · Edge Direct (${isMp4 ? "MP4 HD" : "1080p HLS"})`, rawUrl: rawU });
+    servers.push({ id: `srv-${i + 1}`, label: `📡 Sunucu ${i + 1} · Cloudflare 7/24 (${isMp4 ? "MP4 HD" : "1080p HLS"})`, url: proxied, streamType: isMp4 ? "mp4" : "hls", _rawUrl: rawU });
   }
 
   const subs = formatStreamSubTracks(hit.subs || []);
@@ -869,11 +870,45 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
   if (!urls.length) {
     return jsonResp({ ok: false, error: "Bu içerik için güvenli doğrudan akış kaynağı bulunamadı." }, 404);
   }
+  const vaultServers = servers.slice(0, 8);
+  // Inspect primary static-vault HLS manifest (e.g. Dune: Part Two) to expose embedded Dual TR+EN audio tracks
+  const primarySrv = vaultServers[0];
+  if (primarySrv && primarySrv.streamType === "hls" && primarySrv._rawUrl && isPublicHttpUrl(primarySrv._rawUrl)) {
+    try {
+      const ref0 = inferStreamReferer(primarySrv._rawUrl);
+      const h0 = { "User-Agent": UA_CHROME, Accept: "*/*", ...(ref0 ? { Referer: ref0 } : {}) };
+      const { resp: mResp } = await fetchPublicWithRedirects(primarySrv._rawUrl, h0, 3, 2200);
+      if (mResp.ok) {
+        const mTxt = await mResp.text();
+        const det = detectM3u8AudioLangs(mTxt);
+        if (det.langs.length) {
+          primarySrv.audioLangs = det.langs;
+          if (det.hasTr && det.hasOrig) {
+            primarySrv.label = "📡 Sunucu 1 · Türkçe Dublaj + Orijinal (1080p HLS)";
+          } else if (det.hasTr) {
+            primarySrv.label = "📡 Sunucu 1 · Türkçe Dublaj (1080p HLS)";
+          }
+        }
+      } else {
+        mResp.body?.cancel?.();
+      }
+    } catch {}
+  }
+  for (const sv of vaultServers) delete sv._rawUrl;
+
   const primary = urls[0];
   const resolvedTitle = reqDisplayTitle || reqTitle || hit.title || "";
   const backupAltUrls = urls.slice(1).filter((x) => x.url && x.streamType !== "embed").map((x) => x.url);
-  const vaultServers = servers.slice(0, 8);
   const vaultAudioTracks = buildEdgeAudioTracks(vaultServers, primary.url, (url.searchParams.get("origLang") || hit.origLang || "").trim());
+  const reqAudVault = (url.searchParams.get("aud") || "").trim().toLowerCase();
+  let chosenVaultUrl = primary.url;
+  if (reqAudVault === "orig" || reqAudVault === "en" || reqAudVault === "eng") {
+    const oTrk = vaultAudioTracks.find((t) => t.id === "orig" && t.url);
+    if (oTrk) chosenVaultUrl = oTrk.url;
+  } else {
+    const trTrk = vaultAudioTracks.find((t) => t.id === "tr-dub" && t.url);
+    if (trTrk && trTrk.url.includes("aud=tr")) chosenVaultUrl = trTrk.url;
+  }
   return jsonResp({
     id: tmdbId || id,
     provider: primary.streamType === "embed" ? "embed" : "netflix",
@@ -892,7 +927,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     thumbnail: reqPoster,
     backdrop: reqPoster,
     streamType: primary.streamType,
-    url: primary.url,
+    url: chosenVaultUrl,
     embedUrl: primary.streamType === "embed" ? primary.url : "",
     altUrls: backupAltUrls,
     servers: vaultServers,

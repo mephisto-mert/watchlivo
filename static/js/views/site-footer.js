@@ -1,7 +1,7 @@
 // Watchlivo Institutional Footer, On-Page SEO Hub, FAQ Accordion, Legal Modals & Contact/DMCA Engine (v125)
-import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261121_v233';
-import { api, isEdgeUnavailable, humanApiError } from '../api.js?v=20261121_v233';
-import { state } from '../store.js?v=20261121_v233';
+import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261121_v234';
+import { api, isEdgeUnavailable, humanApiError } from '../api.js?v=20261121_v234';
+import { state } from '../store.js?v=20261121_v234';
 
 export const OFFICIAL_CONTACT_EMAIL = 'jokallame0@gmail.com';
 
@@ -415,7 +415,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
       h('div', { class: 'wl-footer-cols' },
         h('div', { class: 'wl-footer-col brand-col' },
           h('div', { class: 'wl-footer-brand' },
-            h('img', { src: '/static/watchlivo-logo.svg?v=20261121_v233', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
+            h('img', { src: '/static/watchlivo-logo.svg?v=20261121_v234', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
             h('span', { class: 'wl-footer-wordmark' }, 'WATCHLIVO')),
           h('p', { class: 'wl-footer-brand-desc' },
             'Arkadaşlarınla aynı anda, tek kare gecikmesiz birlikte sinema, dizi, anime, canlı TV ve müzik odaları.'),

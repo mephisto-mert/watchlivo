@@ -2932,7 +2932,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       const rawFpsMilli = Number(it.fpsMilli || 0);
       const rawSubFps = Number(it.SubFPS || 0);
       const effFps = rawFpsMilli > 0 ? (rawFpsMilli / 1000) : rawSubFps;
-      if (/\b(?:forced|foreign[\s._-]*only|signs[\s._&-]*songs?|trailer|teaser|fragman|promo|sample|cd1|cd2|korsub|hc)\b/i.test(fn)) sc -= 80;
+      if (/\b(?:forced|foreign[\s._-]*only|signs[\s._&-]*songs?|trailer|teaser|fragman|promo|sample|cd\s*1|cd\s*2|disc\s*1|disc\s*2|part\s*1|korsub|hc)\b/i.test(fn)) sc -= 80;
       if (/(?:bluray|bdrip|brrip|web[-.]?dl|webrip|\bweb\b|amzn|nf\b|dsnp|hmax)/i.test(`${fmt} ${fn}`)) sc += 30;
       else if (/(?:hdtv|dvdrip|\bdvd\b)/i.test(`${fmt} ${fn}`)) sc += 12;
       if (/(?:telesync|\bts\b|\bcam\b|hdcam|\btc\b|hdts)/i.test(`${fmt} ${fn}`)) sc -= 28;
@@ -3111,10 +3111,10 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       }
     }
 
-    // Parallel probe on top 4 TR + top 3 EN tracks to reject dead/corrupt/Tamil-mojibake/wrong-episode/trailer uploads, penalize 25fps PAL & betting spam, & reclassify mislabeled files
+    // Parallel probe on top 4 TR + top 4 EN tracks to reject dead/corrupt/Tamil-mojibake/wrong-episode/trailer uploads, penalize 25fps PAL, CD1 splits, forced subs & betting spam, & reclassify mislabeled files
     const probeTargets = [
       ...trList.slice(0, 4),
-      ...enList.slice(0, 3),
+      ...enList.slice(0, 4),
     ];
     const minFullCues = mtype === "tv" ? 20 : 45;
     const parseTsSec = (h, m, sec) => (Number(h || 0) * 3600) + (Number(m || 0) * 60) + Number(sec || 0);
@@ -3204,7 +3204,11 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       for (const c of selected) {
         if (c.dead || c.isTrailerStub || !c.lastEndSec || c.lastEndSec < 300) continue;
         const ratio = c.lastEndSec / refSpanSec;
-        if (ratio < 0.85 || ratio > 1.15) {
+        if (ratio < 0.68) {
+          c.score -= 95; // Half-length CD1/Disc1 split (e.g. Godfather 5594s on 10629s movie)
+        } else if (refSpanSec >= 3600 && Number(c.cueCount || 0) > 0 && Number(c.cueCount || 0) < 150) {
+          c.score -= 85; // Forced foreign-dialogue-only track on a full-length movie (e.g. Avatar Na'vi-only)
+        } else if (ratio < 0.85 || ratio > 1.15) {
           c.score -= 48; // Wrong cut / wrong episode / wrong movie duration
         } else if (reqDurSec >= 600 && ratio > 1.025) {
           c.score -= 32; // Longer than actual video (e.g. includes unplayed TV recap)
