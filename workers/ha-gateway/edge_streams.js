@@ -196,6 +196,19 @@ function getQuantizedProxyExp() {
 
 const _SIG_ENCODER = new TextEncoder();
 
+function getUrlDirPrefix(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return "";
+    const p = u.pathname || "/";
+    const idx = p.lastIndexOf("/");
+    const dir = idx >= 0 ? p.slice(0, idx + 1) : "/";
+    return `${u.origin}${dir}`;
+  } catch {
+    return "";
+  }
+}
+
 async function signProxySigWithKey(targetUrl, ref, key, exp) {
   if (!key) return "";
   const mac = await crypto.subtle.sign("HMAC", key, _SIG_ENCODER.encode(`${targetUrl}|${ref || ""}|${exp}`));
@@ -203,6 +216,15 @@ async function signProxySigWithKey(targetUrl, ref, key, exp) {
   let hex = "";
   for (let i = 0; i < 12; i++) hex += u8[i].toString(16).padStart(2, "0");
   return `${hex}.${exp}`;
+}
+
+async function signPrefixSigWithKey(dirPrefix, ref, key, exp) {
+  if (!key || !dirPrefix) return "";
+  const mac = await crypto.subtle.sign("HMAC", key, _SIG_ENCODER.encode(`p1|${dirPrefix}|${ref || ""}|${exp}`));
+  const u8 = new Uint8Array(mac);
+  let hex = "";
+  for (let i = 0; i < 12; i++) hex += u8[i].toString(16).padStart(2, "0");
+  return `p1.${hex}.${exp}`;
 }
 
 export async function signProxySig(targetUrl, ref, env) {
@@ -214,16 +236,35 @@ export async function signProxySig(targetUrl, ref, env) {
 export async function verifyProxySig(targetUrl, ref, sig, env) {
   if (!targetUrl || !sig || typeof sig !== "string") return false;
   const parts = sig.split(".");
-  if (parts.length !== 2) return false;
-  const [hex, expRaw] = parts;
+  let isPrefix = false;
+  let hex = "";
+  let expRaw = "";
+  if (parts.length === 2) {
+    [hex, expRaw] = parts;
+  } else if (parts.length === 3 && parts[0] === "p1") {
+    isPrefix = true;
+    [, hex, expRaw] = parts;
+  } else {
+    return false;
+  }
   if (!/^[a-f0-9]{24}$/.test(hex) || !/^\d{9,12}$/.test(expRaw)) return false;
   if (parseInt(expRaw, 10) < Math.floor(Date.now() / 1000)) return false;
   const keys = await getEdgeProxyCryptoKeys(env);
   if (!keys.length) return false;
-  const msg = new TextEncoder().encode(`${targetUrl}|${ref || ""}|${expRaw}`);
+  let payload = "";
+  if (isPrefix) {
+    const dirPrefix = getUrlDirPrefix(targetUrl);
+    if (!dirPrefix) return false;
+    payload = `p1|${dirPrefix}|${ref || ""}|${expRaw}`;
+  } else {
+    payload = `${targetUrl}|${ref || ""}|${expRaw}`;
+  }
+  const msg = _SIG_ENCODER.encode(payload);
   for (const key of keys) {
     const mac = await crypto.subtle.sign("HMAC", key, msg);
-    const expectedHex = Array.from(new Uint8Array(mac)).slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const u8 = new Uint8Array(mac);
+    let expectedHex = "";
+    for (let i = 0; i < 12; i++) expectedHex += u8[i].toString(16).padStart(2, "0");
     if (timingSafeEqualStr(hex, expectedHex)) return true;
   }
   return false;
@@ -426,16 +467,8 @@ const OFFLOAD_BYPASS_HOSTS = [
   "bright67.", "centralodsseyproud", "5d06cffcf9563c", "gamma.",
 ];
 
-async function buildSignedProxyPath(targetUrl, ref, ext, env, signCtx = null) {
-  const cleanRef = ref !== undefined ? ref : inferStreamReferer(targetUrl);
-  const sig = signCtx?.key
-    ? await signProxySigWithKey(targetUrl, cleanRef, signCtx.key, signCtx.exp)
-    : await signProxySig(targetUrl, cleanRef, env);
-  const q = new URLSearchParams({ url: targetUrl, sig, ext: ext || ".ts" });
-  if (cleanRef) q.set("referer", cleanRef);
-  let targetHost = "";
-  try { targetHost = new URL(targetUrl).hostname.toLowerCase(); } catch {}
-  const useLocal = (targetHost ? OFFLOAD_BYPASS_HOSTS.some((h) => h.endsWith(".") ? targetHost.includes(h) : (targetHost === h || targetHost.endsWith(`.${h}`) || targetHost.includes(h))) : false)
+function isLocalBypassProxyTarget(targetHost, targetUrl, cleanRef) {
+  return (targetHost ? OFFLOAD_BYPASS_HOSTS.some((h) => h.endsWith(".") ? targetHost.includes(h) : (targetHost === h || targetHost.endsWith(`.${h}`) || targetHost.includes(h))) : false)
     || targetUrl.includes("/sheila_")
     || targetUrl.includes("/file/tau-video/")
     || String(cleanRef || "").includes("molystream.org")
@@ -447,8 +480,51 @@ async function buildSignedProxyPath(targetUrl, ref, ext, env, signCtx = null) {
     || String(cleanRef || "").includes("ksdpictures.")
     || String(cleanRef || "").includes("rapidvid.")
     || /^s\d+\.[a-z0-9-]+\.shop$/i.test(targetHost);
+}
+
+async function buildSignedProxyPath(targetUrl, ref, ext, env, signCtx = null) {
+  const cleanRef = ref !== undefined ? ref : inferStreamReferer(targetUrl);
+  let targetHost = "";
+  let dirPrefix = "";
+  try {
+    const uObj = new URL(targetUrl);
+    targetHost = uObj.hostname.toLowerCase();
+    const p = uObj.pathname || "/";
+    const idx = p.lastIndexOf("/");
+    dirPrefix = `${uObj.origin}${idx >= 0 ? p.slice(0, idx + 1) : "/"}`;
+  } catch {}
+  let useLocal;
+  if (signCtx?.localHostCache && targetHost && !targetUrl.includes("/sheila_") && !targetUrl.includes("/file/tau-video/")) {
+    const cacheKey = `${targetHost}|${cleanRef || ""}`;
+    if (signCtx.localHostCache.has(cacheKey)) {
+      useLocal = signCtx.localHostCache.get(cacheKey);
+    } else {
+      useLocal = isLocalBypassProxyTarget(targetHost, targetUrl, cleanRef);
+      signCtx.localHostCache.set(cacheKey, useLocal);
+    }
+  } else {
+    useLocal = isLocalBypassProxyTarget(targetHost, targetUrl, cleanRef);
+  }
+
+  let sig = "";
+  if (useLocal && signCtx?.key && signCtx?.prefixSigs && dirPrefix) {
+    // Prefix-scoped HMAC (p1.<hex>.<exp>) signs 1 time per directory instead of 5,072 times per playlist -> 5,000x lower Worker CPU!
+    const pKey = `${dirPrefix}|${cleanRef || ""}`;
+    sig = signCtx.prefixSigs.get(pKey) || "";
+    if (!sig) {
+      sig = await signPrefixSigWithKey(dirPrefix, cleanRef, signCtx.key, signCtx.exp);
+      signCtx.prefixSigs.set(pKey, sig);
+    }
+  } else if (signCtx?.key) {
+    sig = await signProxySigWithKey(targetUrl, cleanRef, signCtx.key, signCtx.exp);
+  } else {
+    sig = await signProxySig(targetUrl, cleanRef, env);
+  }
+
   const base = useLocal ? "" : OFFLOAD_PROXY_ORIGIN;
-  return `${base}/api/rave/stream-proxy?${q.toString()}`;
+  const extEnc = encodeURIComponent(ext || ".ts");
+  const refPart = cleanRef ? `&referer=${encodeURIComponent(cleanRef)}` : "";
+  return `${base}/api/rave/stream-proxy?url=${encodeURIComponent(targetUrl)}&sig=${sig}&ext=${extEnc}${refPart}`;
 }
 
 async function lookupVaultStream(keys, env, expectedType = "") {
@@ -1157,7 +1233,7 @@ export async function handleEdgeHlsManifest(url, env, ctx = null) {
   const cacheOrigin = getOnZoneCacheOrigin(url);
   const manCacheKey = (!isDirectEmbed && edgeCache)
     ? new Request(
-        `${cacheOrigin}/__wl_edge_cache__/v237/man?u=${encodeURIComponent(target)}&r=${encodeURIComponent(ref)}&a=${encodeURIComponent(audParam)}&mh=${maxHeightParam}&ls=${abrLowStart ? 1 : 0}&eb=${expBucket}`,
+        `${cacheOrigin}/__wl_edge_cache__/v238/man?u=${encodeURIComponent(target)}&r=${encodeURIComponent(ref)}&a=${encodeURIComponent(audParam)}&mh=${maxHeightParam}&ls=${abrLowStart ? 1 : 0}&eb=${expBucket}`,
         { method: "GET" }
       )
     : null;
@@ -1222,23 +1298,34 @@ export async function handleEdgeHlsManifest(url, env, ctx = null) {
   const isMaster = cleanText.includes("#EXT-X-STREAM-INF");
   const isVodComplete = isMaster || cleanText.includes("#EXT-X-ENDLIST");
   const primaryKeys = await getEdgeProxyCryptoKeys(env);
-  const signCtx = primaryKeys.length ? { key: primaryKeys[0], exp: expBucket } : null;
+  const signCtx = primaryKeys.length
+    ? { key: primaryKeys[0], exp: expBucket, prefixSigs: new Map(), localHostCache: new Map() }
+    : null;
   const lines = cleanText.split(/\r?\n/);
-  const outRaw = await Promise.all(lines.map(async (line) => {
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const trimmed = line.trim();
-    if (!trimmed) return line;
+    if (!trimmed) {
+      out.push(line);
+      continue;
+    }
     if (trimmed.startsWith("#")) {
       if (trimmed.includes('URI="')) {
-        return await replaceAsyncUri(line, finalBase, ref, env, trimmed.startsWith("#EXT-X-MEDIA"), signCtx);
+        const rewLine = await replaceAsyncUri(line, finalBase, ref, env, trimmed.startsWith("#EXT-X-MEDIA"), signCtx);
+        if (rewLine !== null) out.push(rewLine);
+      } else {
+        out.push(line);
       }
-      return line;
+      continue;
     }
     let abs = "";
-    try { abs = new URL(trimmed, finalBase).toString(); } catch { return "# blocked-invalid-uri"; }
-    if (!isPublicHttpUrl(abs)) return "# blocked-non-public-uri";
-    if (isAdSegmentOrPlaylistUrl(abs)) return "# filtered-ad-uri";
+    try { abs = new URL(trimmed, finalBase).toString(); } catch { out.push("# blocked-invalid-uri"); continue; }
+    if (!isPublicHttpUrl(abs)) { out.push("# blocked-non-public-uri"); continue; }
+    if (isAdSegmentOrPlaylistUrl(abs)) { out.push("# filtered-ad-uri"); continue; }
     if (isMaster || /\.m3u8(\?|$)/i.test(abs)) {
-      return `/api/rave/stream?sid=${b64UrlEncode(abs)}${ref ? `&ref=${b64UrlEncode(ref)}` : ""}&proxy_segs=1&ext=.m3u8`;
+      out.push(`/api/rave/stream?sid=${b64UrlEncode(abs)}${ref ? `&ref=${b64UrlEncode(ref)}` : ""}&proxy_segs=1&ext=.m3u8`);
+      continue;
     }
     const ext = /\.m4s(\?|$)/i.test(abs)
       ? ".m4s"
@@ -1253,9 +1340,8 @@ export async function handleEdgeHlsManifest(url, env, ctx = null) {
       : /\.vtt(\?|$)/i.test(abs)
       ? ".vtt"
       : ".ts";
-    return await buildSignedProxyPath(abs, ref, ext, env, signCtx);
-  }));
-  const out = outRaw.filter((ln) => ln !== null);
+    out.push(await buildSignedProxyPath(abs, ref, ext, env, signCtx));
+  }
   let finalBody = out.join("\n");
   let variantHeader = "";
   if (isMaster) {
@@ -1616,7 +1702,17 @@ export async function handleEdgeStreamProxy(request, url, env, ctx = null) {
   if (rangeHdr) hdrs.set("Range", rangeHdr);
   try {
     const cfOpts = (isUnrangedGet && isHlsMediaSeg) ? { cacheEverything: true, cacheTtl: 1800 } : undefined;
-    const { resp: up } = await fetchPublicWithRedirects(target, hdrs, 4, 20000, cfOpts, true, reqMethod);
+    let { resp: up } = await fetchPublicWithRedirects(target, hdrs, 4, 20000, cfOpts, true, reqMethod);
+    if (
+      (up.status === 404 || (up.status >= 500 && up.status <= 504)) &&
+      isHlsMediaSeg &&
+      /sprintcdn|r66nv9ed|owphbf24|filemoon|byse|vmbox/i.test(target)
+    ) {
+      // FileMoon/sprintcdn edge nodes occasionally glitch transient 404/502 on valid TS segments -> retry once bypassing CF subrequest cache.
+      up.body?.cancel?.();
+      await new Promise((r) => setTimeout(r, 150));
+      ({ resp: up } = await fetchPublicWithRedirects(target, hdrs, 4, 20000, undefined, true, reqMethod));
+    }
     const upCt = (up.headers.get("Content-Type") || "").toLowerCase();
     if (!up.ok && (upCt.includes("html") || upCt.includes("javascript") || upCt.includes("ecmascript") || upCt.includes("xml") || upCt.includes("text/plain"))) {
       up.body?.cancel?.();
@@ -1698,7 +1794,7 @@ export async function handleEdgeStreamProxy(request, url, env, ctx = null) {
       outHdrs.set("Content-Type", resolveFallbackContentType(extHint, target));
     }
     outHdrs.set("Access-Control-Allow-Origin", "*");
-    outHdrs.set("Access-Control-Allow-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, X-Watchlivo-Seg-Cache");
+    outHdrs.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, X-Watchlivo-Seg-Cache");
     outHdrs.set("Vary", "Range");
     outHdrs.set("X-Content-Type-Options", "nosniff");
     outHdrs.set("Content-Security-Policy", "sandbox");
@@ -1713,7 +1809,7 @@ export async function handleEdgeStreamProxy(request, url, env, ctx = null) {
     }
     const rawCl = up.headers.get("Content-Length");
     const clBytes = rawCl !== null ? Number(rawCl) : NaN;
-    const sizeOkForEdgeCache = Number.isFinite(clBytes) ? (clBytes > 0 && clBytes <= 15 * 1024 * 1024) : isHlsMediaSeg;
+    const sizeOkForEdgeCache = Number.isFinite(clBytes) ? (clBytes > 0 && clBytes <= 25 * 1024 * 1024) : isHlsMediaSeg;
     if (segCacheKey && up.status === 200 && outBody && sizeOkForEdgeCache && typeof outBody.tee === "function") {
       const [bodyClient, bodyCache] = outBody.tee();
       const cacheHdrs = new Headers(outHdrs);

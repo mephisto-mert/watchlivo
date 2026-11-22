@@ -1,17 +1,17 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal, handleWindowsAppDownload } from '../ui.js?v=20261122_v237';
+import { h, icons, toast, confirmPopup, fill, openThemeModal, handleWindowsAppDownload } from '../ui.js?v=20261122_v238';
 import {
   state, setUiPref, subscribe, isLeader, isHostOnly, isFriend,
   getWatchHistory, getMusicHistory,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite,
-} from '../store.js?v=20261122_v237';
-import { avatar } from '../profile.js?v=20261122_v237';
-import { clock } from '../sync.js?v=20261122_v237';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261122_v237';
-import { copyInvite, inviteUrl } from './chat.js?v=20261122_v237';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261122_v237';
-import { resolveMedia } from './selection.js?v=20261122_v237';
-import { resolveMusicItem, resolveCatalogItem } from './selection-kinds.js?v=20261122_v237';
+} from '../store.js?v=20261122_v238';
+import { avatar } from '../profile.js?v=20261122_v238';
+import { clock } from '../sync.js?v=20261122_v238';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261122_v238';
+import { copyInvite, inviteUrl } from './chat.js?v=20261122_v238';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261122_v238';
+import { resolveMedia } from './selection.js?v=20261122_v238';
+import { resolveMusicItem, resolveCatalogItem } from './selection-kinds.js?v=20261122_v238';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -356,18 +356,15 @@ function Friends() {
     const inviteText = `🎬 ${sender} seni Watchlivo'da "${roomTitle}" izlemeye çağırıyor!${pwdPart} Tek tıkla odaya katıl: ${shareUrl}`;
     const waUrl = `https://wa.me/?text=${encodeURIComponent(inviteText)}`;
     const tgUrl = `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(`🎬 ${sender} seni Watchlivo'da "${roomTitle}" izlemeye çağırıyor!${pwdPart}`)}`;
-    let qrSrc = '';
+    let qrDataUrl = shareUrl || location.origin;
     try {
       const cleanQr = new URL(shareUrl);
-      const rTok = state.mesh?.syncToken || (rid ? sessionStorage.getItem(`vortex_st_${rid}`) : '') || '';
-      if (rTok && !cleanQr.searchParams.get('r_tok')) {
-        cleanQr.searchParams.set('r_tok', rTok);
-      }
-      qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data=${encodeURIComponent(cleanQr.toString())}`;
-    } catch (_) {
-      qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data=${encodeURIComponent(shareUrl || location.origin)}`;
-    }
-    return { shareUrl, roomTitle, roomPassword, sender, inviteText, waUrl, tgUrl, qrSrc };
+      cleanQr.searchParams.delete('r_tok');
+      qrDataUrl = cleanQr.toString();
+    } catch (_) {}
+    const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=1&data=${encodeURIComponent(qrDataUrl)}`;
+    const qrFallbackSrc = `https://quickchart.io/qr?size=300&margin=1&text=${encodeURIComponent(qrDataUrl)}`;
+    return { shareUrl, roomTitle, roomPassword, sender, inviteText, waUrl, tgUrl, qrSrc, qrFallbackSrc };
   };
 
   const copyCardMsg = async () => {
@@ -386,6 +383,14 @@ function Friends() {
     alt: 'Davet QR kodu',
     loading: 'lazy',
     src: '',
+    onerror: (e) => {
+      const el = e.currentTarget || e.target;
+      const fb = el?.dataset?.qrFallback || '';
+      if (fb && !el.dataset.qrFbTried) {
+        el.dataset.qrFbTried = '1';
+        el.src = fb;
+      }
+    },
   });
 
   const renderLiveFriends = () => {
@@ -455,7 +460,7 @@ function Friends() {
   };
 
   const refreshFriendsPanel = () => {
-    const { shareUrl, roomTitle, roomPassword, sender, waUrl, tgUrl, qrSrc } = computeInviteMeta();
+    const { shareUrl, roomTitle, roomPassword, sender, waUrl, tgUrl, qrSrc, qrFallbackSrc } = computeInviteMeta();
     previewTitleEl.textContent = roomTitle;
     previewSubEl.textContent = `${sender} seni birlikte film/dizi izlemeye davet ediyor.${roomPassword ? ` · 🔒 Şifre: ${roomPassword}` : ''}`;
     shareInputEl.value = shareUrl;
@@ -463,6 +468,8 @@ function Friends() {
     tgLinkEl.href = tgUrl;
     if (qrImgEl.dataset.qrSrc !== qrSrc) {
       qrImgEl.dataset.qrSrc = qrSrc;
+      qrImgEl.dataset.qrFallback = qrFallbackSrc || '';
+      delete qrImgEl.dataset.qrFbTried;
       qrImgEl.src = qrSrc;
     }
     renderLiveFriends();

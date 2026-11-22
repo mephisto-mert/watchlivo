@@ -13,6 +13,7 @@ import {
   formatStreamSubTracks,
   resetGreekMirrorHealth,
   signProxySig,
+  verifyProxySig,
 } from "../workers/ha-gateway/edge_streams.js";
 
 import {
@@ -1114,4 +1115,167 @@ test("v237 CDN ranking + audio tracks: fast multi-ABR diziyou_love TR+Orig split
   assert.ok(tracks[0].url.includes("sid=s1"), "TR dub track must use fast diziyou_love TR server");
   assert.equal(tracks[1].id, "orig");
   assert.ok(tracks[1].url.includes("sid=s2"), "Original track must use fast diziyou_love Orig server");
+});
+
+test("v238 prefix-scoped HMAC (p1.): rewrites 5000-segment playlist in 1 HMAC op and strictly enforces directory scope against traversal/cross-dir", async () => {
+  const origFetch = globalThis.fetch;
+  try {
+    const mediaUrl = "https://s1.newmoviescenas1.shop/hls/movie99/index.m3u8";
+    const lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:2"];
+    for (let i = 0; i < 5000; i++) {
+      lines.push("#EXTINF:2.002,", `seg_${String(i).padStart(4, "0")}.ts`);
+    }
+    lines.push("#EXT-X-ENDLIST");
+    const bigPlaylist = lines.join("\n");
+    globalThis.fetch = async (input) => {
+      const u = typeof input === "string" ? input : input.url;
+      if (u === mediaUrl) return new Response(bigPlaylist, { status: 200, headers: { "Content-Type": "application/vnd.apple.mpegurl" } });
+      return new Response("Not Found", { status: 404 });
+    };
+
+    const t0 = Date.now();
+    const res = await handleEdgeHlsManifest(
+      new URL(`https://watchlivo.online/api/rave/stream?url=${encodeURIComponent(mediaUrl)}&ref=${encodeURIComponent("https://player.filmizle.in/")}&proxy_segs=1&ext=.m3u8`),
+      TEST_ENV
+    );
+    const elapsedMs = Date.now() - t0;
+    assert.equal(res.status, 200);
+    const body = await res.text();
+    const segLines = body.split("\n").filter((l) => l.startsWith("/api/rave/stream-proxy?"));
+    assert.equal(segLines.length, 5000);
+    assert.ok(elapsedMs < 500, `5000-segment playlist rewrite should be ultra-fast (<500ms), took ${elapsedMs}ms`);
+
+    const firstUrl = new URL(`https://watchlivo.online${segLines[0]}`);
+    const lastUrl = new URL(`https://watchlivo.online${segLines[4999]}`);
+    const sig0 = firstUrl.searchParams.get("sig");
+    const sigLast = lastUrl.searchParams.get("sig");
+    assert.ok(sig0.startsWith("p1."), `Expected prefix-scoped p1. signature, got ${sig0}`);
+    assert.equal(sig0, sigLast, "All segments in same directory must share the single computed p1. HMAC");
+
+    // Security boundary checks on verifyProxySig
+    const ref = firstUrl.searchParams.get("referer") || "";
+    assert.equal(await verifyProxySig("https://s1.newmoviescenas1.shop/hls/movie99/seg_4999.ts", ref, sig0, TEST_ENV), true);
+    assert.equal(await verifyProxySig("https://s1.newmoviescenas1.shop/hls/other/seg_0000.ts", ref, sig0, TEST_ENV), false, "Must reject sibling directory");
+    assert.equal(await verifyProxySig("https://s1.newmoviescenas1.shop/hls/movie99/../other/seg_0000.ts", ref, sig0, TEST_ENV), false, "Must reject .. path traversal");
+    assert.equal(await verifyProxySig("https://evil.example/hls/movie99/seg_0000.ts", ref, sig0, TEST_ENV), false, "Must reject foreign origin");
+    assert.equal(await verifyProxySig("https://s1.newmoviescenas1.shop/hls/movie99/seg_0000.ts", ref, sig0.replace("p1.", "p1.0"), TEST_ENV), false, "Must reject tampered sig");
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("v238 FileMoon sprintcdn transient 404 retry + 25 MiB segment edge cache + standard Access-Control-Expose-Headers", async () => {
+  const origFetch = globalThis.fetch;
+  const origCaches = globalThis.caches;
+  const mockCache = createMockEdgeCache();
+  globalThis.caches = { default: mockCache };
+  const pendingWaitUntil = [];
+  const ctx = { waitUntil(p) { pendingWaitUntil.push(Promise.resolve(p)); } };
+  try {
+    const fmSeg = "https://edge1-madrid-sprintcdn.r66nv9ed.com/hls/godfather/seg-3-v1-a1.ts";
+    const bigSeg = "https://s1.newmoviescenas1.shop/hls/matrix/seg_0001.ts";
+    const tsBytes = new Uint8Array(376);
+    tsBytes[0] = 0x47;
+    tsBytes[188] = 0x47;
+    let fmAttempts = 0;
+    let bigAttempts = 0;
+    globalThis.fetch = async (input) => {
+      const u = typeof input === "string" ? input : input.url;
+      if (u === fmSeg) {
+        fmAttempts += 1;
+        if (fmAttempts === 1) return new Response("Not Found", { status: 404, headers: { "Content-Type": "text/plain" } });
+        return new Response(tsBytes, { status: 200, headers: { "Content-Type": "video/mp2t", "Content-Length": String(tsBytes.byteLength) } });
+      }
+      if (u === bigSeg) {
+        bigAttempts += 1;
+        // Declare Content-Length = 20,000,000 bytes (19.07 MiB — above old 15 MiB cap, within new 25 MiB cap!)
+        return new Response(tsBytes, { status: 200, headers: { "Content-Type": "video/mp2t", "Content-Length": "20000000" } });
+      }
+      return new Response("Not Found", { status: 404 });
+    };
+
+    // 1. Transient FileMoon 404 recovers transparently on automatic retry #2
+    const sigFm = await signProxySig(fmSeg, "", TEST_ENV);
+    const reqFm = new Request(`https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(fmSeg)}&sig=${sigFm}&ext=.ts`);
+    const resFm = await handleEdgeStreamProxy(reqFm, new URL(reqFm.url), TEST_ENV, ctx);
+    assert.equal(resFm.status, 200);
+    assert.equal(fmAttempts, 2, "Must automatically retry transient FileMoon 404 once");
+    assert.equal(resFm.headers.get("Access-Control-Expose-Headers"), "Content-Length, Content-Range, Accept-Ranges, X-Watchlivo-Seg-Cache");
+    assert.equal(resFm.headers.get("Access-Control-Allow-Expose-Headers"), null, "Must not emit typo header Access-Control-Allow-Expose-Headers");
+    await resFm.arrayBuffer();
+
+    // 2. 19.07 MiB segment (like The Matrix seg[1]) now gets edge-cached (MISS -> HIT)!
+    const sigBig = await signProxySig(bigSeg, "https://player.filmizle.in/", TEST_ENV);
+    const reqBig = new Request(`https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(bigSeg)}&sig=${sigBig}&ext=.ts&referer=${encodeURIComponent("https://player.filmizle.in/")}`);
+    const rBig1 = await handleEdgeStreamProxy(reqBig, new URL(reqBig.url), TEST_ENV, ctx);
+    assert.equal(rBig1.status, 200);
+    assert.equal(rBig1.headers.get("X-Watchlivo-Seg-Cache"), "MISS");
+    await rBig1.arrayBuffer();
+    await Promise.all(pendingWaitUntil);
+
+    const rBig2 = await handleEdgeStreamProxy(reqBig, new URL(reqBig.url), TEST_ENV, ctx);
+    assert.equal(rBig2.status, 200);
+    assert.equal(rBig2.headers.get("X-Watchlivo-Seg-Cache"), "HIT");
+    assert.equal(bigAttempts, 1, "19.07 MiB segment must be served from edge cache on 2nd viewer");
+  } finally {
+    globalThis.fetch = origFetch;
+    globalThis.caches = origCaches;
+  }
+});
+
+test("v238 CDN ranking: storage.diziyou.love deterministically outranks ksdpictures.site (diziyou_net), while ksdpictures.site still beats dl_embed", () => {
+  // Put diziyou_net BEFORE diziyou_love to prove order-independent deterministic ranking (fixes Dark & Money Heist flip)
+  const merged = mergeResolvedResults([
+    {
+      source: "diziyou_net",
+      streams: [
+        {
+          url: "https://ksdpictures.site/hls/dark_s1e1/master.m3u8",
+          referer: "https://www.diziyou.net/",
+          label: "📡 DiziyouNet · Türkçe Dublaj + Orijinal (1080p HLS)",
+          audioLangs: ["tr", "en"],
+          source: "diziyou_net",
+        },
+      ],
+      subs: [],
+    },
+    {
+      source: "diziyou_love",
+      streams: [
+        {
+          url: "https://storage.diziyou.love/episodes/dark_tr/play.m3u8",
+          referer: "https://www.diziyou.love/",
+          label: "📡 Diziyou · Türkçe Dublaj (HD HLS)",
+          audioLangs: ["tr"],
+          source: "diziyou_love",
+        },
+        {
+          url: "https://storage.diziyou.love/episodes/dark_en/play.m3u8",
+          referer: "https://www.diziyou.love/",
+          label: "📡 Diziyou · Orijinal (HD HLS)",
+          audioLangs: ["orig"],
+          source: "diziyou_love",
+        },
+      ],
+      subs: [],
+    },
+    {
+      source: "dl_embed",
+      streams: [
+        {
+          url: "https://one.makesomthingup.click/r6/dark/master.m3u8",
+          referer: "https://one.makesomthingup.click/",
+          label: "📡 Dizilife · Türkçe Dublaj + Orijinal",
+          audioLangs: ["tr", "en"],
+          source: "dl_embed",
+        },
+      ],
+      subs: [],
+    },
+  ]);
+
+  assert.equal(merged.streams[0].source, "diziyou_love", "Short-segment diziyou_love must deterministically rank #1 above ksdpictures.site");
+  assert.equal(merged.streams[1].source, "diziyou_love");
+  assert.equal(merged.streams[2].source, "diziyou_net", "ksdpictures.site must remain #2 ahead of slow dl_embed");
+  assert.equal(merged.streams[3].source, "dl_embed");
 });
