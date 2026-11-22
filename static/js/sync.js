@@ -1,10 +1,10 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261121_v236';
+import { isRoomMediaPlaying } from './store.js?v=20261122_v237';
 
 const CYCLE_MS = 1000;
-const JUMP_DELTA = 4.2;
-const IN_SYNC = 4.2;
+const JUMP_DELTA = 5.2;
+const IN_SYNC = 5.2;
 const STARVE_CEILING = 55.0;  // Max behind before forcing jump
 const DEFER_MAX_MS = 35000;   // Max defer window while buffer builds
 const SEEK_SETTLE_MS = 12000;
@@ -380,10 +380,10 @@ export class SyncEngine {
         return 1200;
       }
       const inBuf = buffered(expected);
-      const behindAct = (this.didInitialSync && delta > 0 && delta < 10.0 && !stateChanged)
+      const behindAct = (this.didInitialSync && delta > 0 && delta < 18.0 && !stateChanged)
         ? this.decideBehindAction(ad, curr, expected, delta)
         : 'jump';
-      if (behindAct === 'defer' && (!this.deferStartedAt || now - this.deferStartedAt < Math.min(DEFER_MAX_MS, 14000))) {
+      if (behindAct === 'defer' && (!this.deferStartedAt || now - this.deferStartedAt < Math.min(DEFER_MAX_MS, 20000))) {
         if (!this.deferStartedAt) this.deferStartedAt = now;
         const showBuf = abs > JUMP_DELTA;
         this.mode = showBuf ? 'buffering' : 'inSync';
@@ -412,21 +412,21 @@ export class SyncEngine {
       this.deferStartedAt = 0;
       const fwdBuf = (Number(ad.getBuffered?.() || 0)) - curr;
       const isMob = isMobilePlaybackDevice();
-      const nudgeEnter = isMob ? 1.65 : 1.15;
-      const nudgeExit = isMob ? 0.65 : 0.45;
+      const nudgeEnter = isMob ? 2.2 : 1.8;
+      const nudgeExit = isMob ? 0.8 : 0.6;
       const shouldNudge = (abs > nudgeEnter || (this.isRateNudging && abs > nudgeExit))
         && abs <= JUMP_DELTA
         && buffered(expected)
-        && fwdBuf > 3.5
+        && fwdBuf > 6.0
         && ad.caps?.rate !== false;
       if (shouldNudge) {
         this.isRateNudging = true;
-        const nudgeStep = isMob ? 0.04 : 0.05;
+        const nudgeStep = 0.03;
         const targetRate = Number((base + Math.sign(delta) * nudgeStep).toFixed(3));
         if (Math.abs(ad.getRate() - targetRate) >= 0.02) {
           ad.setRate(targetRate);
         }
-        timeout = isMob ? 2000 : 1600;
+        timeout = isMob ? 2200 : 1800;
       } else {
         this.isRateNudging = false;
         if (Math.abs(ad.getRate() - base) >= 0.005) {

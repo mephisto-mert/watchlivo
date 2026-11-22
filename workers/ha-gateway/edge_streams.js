@@ -144,6 +144,7 @@ function timingSafeEqualStr(a, b) {
 }
 
 const _hmacKeyCache = new Map();
+const _derivedSecretCache = new Map();
 async function importEdgeHmacKey(secretStr, usage = "sign") {
   const s = String(secretStr || "").trim();
   if (!s) return null;
@@ -159,10 +160,14 @@ async function deriveEdgeFallbackProxySecret(env) {
   for (const k of ["VORTEX_SECRET", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_TOKEN", "REDIS_URL"]) {
     const cand = String(env?.[k] || "").trim();
     if (cand.length >= 24) {
+      if (_derivedSecretCache.has(cand)) return _derivedSecretCache.get(cand);
       const key = await importEdgeHmacKey(cand, "sign");
       if (!key) continue;
       const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("watchlivo-shared-secret-v4:PROXY_SECRET"));
-      return Array.from(new Uint8Array(mac)).slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
+      const derived = Array.from(new Uint8Array(mac)).slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
+      if (_derivedSecretCache.size >= 8) _derivedSecretCache.clear();
+      _derivedSecretCache.set(cand, derived);
+      return derived;
     }
   }
   return "";
@@ -184,13 +189,26 @@ async function getEdgeProxyCryptoKeys(env) {
   return keys;
 }
 
+function getQuantizedProxyExp() {
+  // Quantize to 1-hour boundaries (always 6-7h valid) so all room peers share deterministic segment URLs & edge cache entries.
+  return Math.ceil((Math.floor(Date.now() / 1000) + 21600) / 3600) * 3600;
+}
+
+const _SIG_ENCODER = new TextEncoder();
+
+async function signProxySigWithKey(targetUrl, ref, key, exp) {
+  if (!key) return "";
+  const mac = await crypto.subtle.sign("HMAC", key, _SIG_ENCODER.encode(`${targetUrl}|${ref || ""}|${exp}`));
+  const u8 = new Uint8Array(mac);
+  let hex = "";
+  for (let i = 0; i < 12; i++) hex += u8[i].toString(16).padStart(2, "0");
+  return `${hex}.${exp}`;
+}
+
 export async function signProxySig(targetUrl, ref, env) {
   const keys = await getEdgeProxyCryptoKeys(env);
   if (!keys.length) return "";
-  const exp = Math.floor(Date.now() / 1000) + 21600;
-  const mac = await crypto.subtle.sign("HMAC", keys[0], new TextEncoder().encode(`${targetUrl}|${ref || ""}|${exp}`));
-  const hex = Array.from(new Uint8Array(mac)).slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
-  return `${hex}.${exp}`;
+  return await signProxySigWithKey(targetUrl, ref, keys[0], getQuantizedProxyExp());
 }
 
 export async function verifyProxySig(targetUrl, ref, sig, env) {
@@ -272,31 +290,105 @@ async function fetchPublicWithRedirects(initialUrl, headers, maxHops = 4, timeou
       : null;
     let resp;
     if (greekCands && greekCands.length > 1) {
-      const perAttemptMs = Math.min(timeoutMs, 4200);
+      const perAttemptMs = Math.min(timeoutMs, 2600);
+      const DEAD_TTL_MS = 600_000;
+      const tryCand = async (cand) => {
+        const r = await fetchOneAttempt(cand.url, curHeaders, perAttemptMs, cfOpts, headersOnlyTimeout, method);
+        if (r.status < 500 && r.status !== 404) {
+          return { ok: true, cand, r };
+        }
+        if (r.status >= 500) {
+          _deadGreekPrefixUntil.set(cand.prefix, Date.now() + DEAD_TTL_MS);
+        }
+        return { ok: false, cand, r };
+      };
+
+      // Hedged race on top 2 mirrors: if primary mirror hangs >550ms (e.g. dead delta 522 timeout), race backup gamma/beta immediately!
       let lastResp = null;
       let lastErr = null;
-      for (let gi = 0; gi < Math.min(greekCands.length, 4); gi++) {
-        const cand = greekCands[gi];
-        try {
-          const r = await fetchOneAttempt(cand.url, curHeaders, perAttemptMs, cfOpts, headersOnlyTimeout, method);
-          if (r.status < 500 && r.status !== 404) {
-            curUrl = cand.url;
-            resp = r;
-            break;
+      const c0 = greekCands[0];
+      const c1 = greekCands[1];
+      let p0Settled = false;
+      const p0 = tryCand(c0)
+        .then((res) => { p0Settled = true; return res; })
+        .catch((err) => { p0Settled = true; _deadGreekPrefixUntil.set(c0.prefix, Date.now() + DEAD_TTL_MS); return { ok: false, cand: c0, err }; });
+
+      let hedgeTimer = null;
+      let p1 = null;
+      const firstHit = await new Promise((resolve) => {
+        let resolved = false;
+        let pending = 1;
+        const finishWith = (winner) => {
+          if (resolved) {
+            if (winner?.r) winner.r.body?.cancel?.();
+            return;
           }
-          if (r.status >= 500) {
-            _deadGreekPrefixUntil.set(cand.prefix, Date.now() + 180_000);
+          resolved = true;
+          if (hedgeTimer !== null) clearTimeout(hedgeTimer);
+          resolve(winner);
+        };
+        const onOutcome = (res, isPrimary) => {
+          pending -= 1;
+          if (res?.ok) {
+            if (!isPrimary && !p0Settled) {
+              _deadGreekPrefixUntil.set(c0.prefix, Date.now() + DEAD_TTL_MS);
+            }
+            finishWith(res);
+            return;
           }
-          if (lastResp) lastResp.body?.cancel?.();
-          lastResp = r;
-        } catch (err) {
-          _deadGreekPrefixUntil.set(cand.prefix, Date.now() + 180_000);
-          lastErr = err;
+          if (res?.r) {
+            if (lastResp) lastResp.body?.cancel?.();
+            lastResp = res.r;
+          }
+          if (res?.err) lastErr = res.err;
+          if (isPrimary && !p1 && c1) {
+            // Primary failed fast (e.g. immediate 522) -> fire backup immediately without waiting for hedge timer
+            if (hedgeTimer !== null) { clearTimeout(hedgeTimer); hedgeTimer = null; }
+            pending += 1;
+            p1 = tryCand(c1)
+              .catch((err) => { _deadGreekPrefixUntil.set(c1.prefix, Date.now() + DEAD_TTL_MS); return { ok: false, cand: c1, err }; });
+            p1.then((r1) => onOutcome(r1, false));
+            return;
+          }
+          if (pending <= 0) finishWith(null);
+        };
+        p0.then((r0) => onOutcome(r0, true));
+        hedgeTimer = setTimeout(() => {
+          hedgeTimer = null;
+          if (resolved || p1 || !c1) return;
+          pending += 1;
+          p1 = tryCand(c1)
+            .catch((err) => { _deadGreekPrefixUntil.set(c1.prefix, Date.now() + DEAD_TTL_MS); return { ok: false, cand: c1, err }; });
+          p1.then((r1) => onOutcome(r1, false));
+        }, 550);
+      });
+
+      if (firstHit?.ok) {
+        curUrl = firstHit.cand.url;
+        resp = firstHit.r;
+      } else {
+        for (let gi = 2; gi < Math.min(greekCands.length, 4); gi++) {
+          const cand = greekCands[gi];
+          try {
+            const res = await tryCand(cand);
+            if (res.ok) {
+              curUrl = cand.url;
+              resp = res.r;
+              break;
+            }
+            if (lastResp) lastResp.body?.cancel?.();
+            lastResp = res.r;
+          } catch (err) {
+            _deadGreekPrefixUntil.set(cand.prefix, Date.now() + DEAD_TTL_MS);
+            lastErr = err;
+          }
         }
       }
       if (!resp) {
         if (lastResp) resp = lastResp;
         else throw (lastErr || new Error("Greek mirror failover exhausted"));
+      } else if (lastResp && lastResp !== resp) {
+        lastResp.body?.cancel?.();
       }
     } else {
       resp = await fetchOneAttempt(curUrl, curHeaders, timeoutMs, cfOpts, headersOnlyTimeout, method);
@@ -334,9 +426,11 @@ const OFFLOAD_BYPASS_HOSTS = [
   "bright67.", "centralodsseyproud", "5d06cffcf9563c", "gamma.",
 ];
 
-async function buildSignedProxyPath(targetUrl, ref, ext, env) {
+async function buildSignedProxyPath(targetUrl, ref, ext, env, signCtx = null) {
   const cleanRef = ref !== undefined ? ref : inferStreamReferer(targetUrl);
-  const sig = await signProxySig(targetUrl, cleanRef, env);
+  const sig = signCtx?.key
+    ? await signProxySigWithKey(targetUrl, cleanRef, signCtx.key, signCtx.exp)
+    : await signProxySig(targetUrl, cleanRef, env);
   const q = new URLSearchParams({ url: targetUrl, sig, ext: ext || ".ts" });
   if (cleanRef) q.set("referer", cleanRef);
   let targetHost = "";
@@ -424,11 +518,17 @@ export function buildEdgeAudioTracks(servers, primaryUrl = "", reqOrigLang = "")
     return /altyaz|orijinal/i.test(String(s.label || "")) && !/dublaj/i.test(String(s.label || ""));
   };
 
-  const dualSrv = list.find(isDualSrv);
-  const trOnlySrv = list.find(isTrOnlySrv);
-  const origOnlySrv = list.find(isOrigOnlySrv);
+  const dualIdx = list.findIndex(isDualSrv);
+  const trOnlyIdx = list.findIndex(isTrOnlySrv);
+  const origOnlyIdx = list.findIndex(isOrigOnlySrv);
+  const dualSrv = dualIdx >= 0 ? list[dualIdx] : null;
+  const trOnlySrv = trOnlyIdx >= 0 ? list[trOnlyIdx] : null;
+  const origOnlySrv = origOnlyIdx >= 0 ? list[origOnlyIdx] : null;
+  const preferSplitPair = Boolean(
+    trOnlySrv && origOnlySrv && (dualIdx < 0 || Math.min(trOnlyIdx, origOnlyIdx) < dualIdx)
+  );
 
-  if (dualSrv) {
+  if (dualSrv && !preferSplitPair) {
     const dualLangs = Array.isArray(dualSrv.audioLangs) ? dualSrv.audioLangs : [];
     const nonTrLang = dualLangs.find((l) => l && l !== "tr") || origCode;
     const origLabel = nonTrLang === "en" ? "🇬🇧 İngilizce (Orijinal Ses · 1080p)" : "🎬 Orijinal Ses (1080p HD)";
@@ -1008,7 +1108,28 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
   });
 }
 
-export async function handleEdgeHlsManifest(url, env) {
+function getStreamEdgeCache() {
+  try {
+    return typeof caches !== "undefined" && caches?.default ? caches.default : null;
+  } catch {
+    return null;
+  }
+}
+
+function getOnZoneCacheOrigin(url) {
+  // Cloudflare Workers caches.default requires an active on-zone custom domain hostname
+  // (synthetic .internal / .local / .workers.dev hostnames are ignored by Cloudflare Cache API).
+  const host = String(url?.hostname || "").toLowerCase();
+  if (host === "watchlivo.online" || host === "www.watchlivo.online") {
+    return "https://watchlivo.online";
+  }
+  if (host && host !== "localhost" && !host.endsWith(".workers.dev") && !host.endsWith(".internal") && !host.endsWith(".local")) {
+    return `${url.protocol}//${url.host}`;
+  }
+  return "https://watchlivo.online";
+}
+
+export async function handleEdgeHlsManifest(url, env, ctx = null) {
   let target = (url.searchParams.get("url") || url.searchParams.get("u") || "").trim();
   const sid = (url.searchParams.get("sid") || "").trim();
   if (!target && sid) {
@@ -1028,6 +1149,24 @@ export async function handleEdgeHlsManifest(url, env) {
     } catch {}
   }
   if (!ref) ref = inferStreamReferer(target);
+  const maxHeightParam = Math.max(0, Math.min(2160, Number(url.searchParams.get("max_h") || 0) || 0));
+  const abrLowStart = url.searchParams.get("abr_low") === "1";
+  const audParam = (url.searchParams.get("aud") || "").trim().toLowerCase();
+  const expBucket = getQuantizedProxyExp();
+  const edgeCache = getStreamEdgeCache();
+  const cacheOrigin = getOnZoneCacheOrigin(url);
+  const manCacheKey = (!isDirectEmbed && edgeCache)
+    ? new Request(
+        `${cacheOrigin}/__wl_edge_cache__/v237/man?u=${encodeURIComponent(target)}&r=${encodeURIComponent(ref)}&a=${encodeURIComponent(audParam)}&mh=${maxHeightParam}&ls=${abrLowStart ? 1 : 0}&eb=${expBucket}`,
+        { method: "GET" }
+      )
+    : null;
+  if (manCacheKey) {
+    try {
+      const cachedMan = await edgeCache.match(manCacheKey);
+      if (cachedMan) return cachedMan;
+    } catch {}
+  }
   if (isDirectEmbed) {
     const unwrapped = await resolveEmbedHtmlToHls(target, fetchPublicWithRedirects).catch(() => null);
     if (!unwrapped?.url || !isPublicHttpUrl(unwrapped.url)) {
@@ -1081,16 +1220,16 @@ export async function handleEdgeHlsManifest(url, env) {
   }
   const cleanText = filterM3u8AdDiscontinuities(text);
   const isMaster = cleanText.includes("#EXT-X-STREAM-INF");
-  const maxHeightParam = Math.max(0, Math.min(2160, Number(url.searchParams.get("max_h") || 0) || 0));
-  const abrLowStart = url.searchParams.get("abr_low") === "1";
-  const audParam = (url.searchParams.get("aud") || "").trim().toLowerCase();
+  const isVodComplete = isMaster || cleanText.includes("#EXT-X-ENDLIST");
+  const primaryKeys = await getEdgeProxyCryptoKeys(env);
+  const signCtx = primaryKeys.length ? { key: primaryKeys[0], exp: expBucket } : null;
   const lines = cleanText.split(/\r?\n/);
   const outRaw = await Promise.all(lines.map(async (line) => {
     const trimmed = line.trim();
     if (!trimmed) return line;
     if (trimmed.startsWith("#")) {
       if (trimmed.includes('URI="')) {
-        return await replaceAsyncUri(line, finalBase, ref, env, trimmed.startsWith("#EXT-X-MEDIA"));
+        return await replaceAsyncUri(line, finalBase, ref, env, trimmed.startsWith("#EXT-X-MEDIA"), signCtx);
       }
       return line;
     }
@@ -1114,7 +1253,7 @@ export async function handleEdgeHlsManifest(url, env) {
       : /\.vtt(\?|$)/i.test(abs)
       ? ".vtt"
       : ".ts";
-    return await buildSignedProxyPath(abs, ref, ext, env);
+    return await buildSignedProxyPath(abs, ref, ext, env, signCtx);
   }));
   const out = outRaw.filter((ln) => ln !== null);
   let finalBody = out.join("\n");
@@ -1127,12 +1266,31 @@ export async function handleEdgeHlsManifest(url, env) {
   const respHeaders = {
     "Content-Type": "application/vnd.apple.mpegurl",
     "Access-Control-Allow-Origin": "*",
-    "Cache-Control": "no-store",
+    "Cache-Control": isVodComplete ? "public, max-age=180" : "no-store",
     "X-Content-Type-Options": "nosniff",
   };
   if (variantHeader) {
     respHeaders["X-Watchlivo-Variants"] = variantHeader;
-    respHeaders["Access-Control-Expose-Headers"] = "X-Watchlivo-Variants";
+    respHeaders["Access-Control-Expose-Headers"] = "X-Watchlivo-Variants, X-Watchlivo-Man-Cache";
+  } else {
+    respHeaders["Access-Control-Expose-Headers"] = "X-Watchlivo-Man-Cache";
+  }
+  if (manCacheKey && isVodComplete) {
+    const bodyBytes = _SIG_ENCODER.encode(finalBody);
+    const cacheResp = new Response(bodyBytes, {
+      status: 200,
+      headers: {
+        ...respHeaders,
+        "Content-Length": String(bodyBytes.byteLength),
+        "Cache-Control": "public, max-age=300",
+        "X-Watchlivo-Man-Cache": "HIT",
+      },
+    });
+    const putP = edgeCache.put(manCacheKey, cacheResp).catch(() => {});
+    if (ctx?.waitUntil) ctx.waitUntil(putP);
+    respHeaders["X-Watchlivo-Man-Cache"] = "MISS";
+  } else {
+    respHeaders["X-Watchlivo-Man-Cache"] = "BYPASS";
   }
   return new Response(finalBody, {
     status: 200,
@@ -1308,7 +1466,7 @@ export function adaptMasterM3u8Variants(rewrittenLines, { maxHeight = 0, lowStar
   return { body: rebuilt.join("\n"), heights };
 }
 
-async function replaceAsyncUri(line, base, ref, env, isMediaPlaylist) {
+async function replaceAsyncUri(line, base, ref, env, isMediaPlaylist, signCtx = null) {
   const m = line.match(/URI="([^"]+)"/);
   if (!m) return line;
   const isMediaTag = line.trim().startsWith("#EXT-X-MEDIA");
@@ -1323,7 +1481,7 @@ async function replaceAsyncUri(line, base, ref, env, isMediaPlaylist) {
   const isKeyLine = line.includes("#EXT-X-KEY") || line.includes("#EXT-X-SESSION-KEY");
   const rew = (!isKeyLine && (isMediaPlaylist || /\.m3u8(\?|$)/i.test(abs)))
     ? `/api/rave/stream?sid=${b64UrlEncode(abs)}${ref ? `&ref=${b64UrlEncode(ref)}` : ""}&proxy_segs=1&ext=.m3u8`
-    : await buildSignedProxyPath(abs, ref, isKeyLine ? ".key" : ".mp4", env);
+    : await buildSignedProxyPath(abs, ref, isKeyLine ? ".key" : ".mp4", env, signCtx);
   return line.replace(m[0], `URI="${rew}"`);
 }
 
@@ -1390,7 +1548,7 @@ async function readNonEmptyHeadChunk(reader) {
   return null;
 }
 
-export async function handleEdgeStreamProxy(request, url, env) {
+export async function handleEdgeStreamProxy(request, url, env, ctx = null) {
   if (request?.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -1417,24 +1575,49 @@ export async function handleEdgeStreamProxy(request, url, env) {
     return new Response("Invalid or expired stream signature", { status: 403, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
   }
 
+  let extHint = (url.searchParams.get("ext") || "").toLowerCase();
+  if (!extHint) {
+    try {
+      const pm = new URL(target).pathname.match(/\.(ts|m4s|mp4|aac|m4a|mp3|key|vtt|srt|m3u8)$/i);
+      if (pm) extHint = `.${pm[1].toLowerCase()}`;
+    } catch {}
+  }
+
+  const reqMethod = request?.method === "HEAD" ? "HEAD" : "GET";
+  const rangeHdr = request?.headers?.get("Range");
+  const isUnrangedGet = reqMethod === "GET" && !rangeHdr;
+  const isHlsMediaSeg =
+    extHint === ".ts" ||
+    extHint === ".m4s" ||
+    extHint === ".aac" ||
+    extHint === ".m4a" ||
+    extHint === ".key" ||
+    /\.(?:ts|m4s|aac|m4a|key)(\?|$)/i.test(target) ||
+    target.includes("/r6/s/") ||
+    target.includes("/hls/");
+  const edgeCache = getStreamEdgeCache();
+  const cacheOrigin = getOnZoneCacheOrigin(url);
+  // Key segment cache by upstream target URL on active Cloudflare zone (ignoring per-user sig/exp) so Host + all Guests hit Edge Cache!
+  const segCacheKey = (edgeCache && isUnrangedGet && isHlsMediaSeg)
+    ? new Request(`${cacheOrigin}/__wl_edge_cache__/v237/seg?u=${encodeURIComponent(target)}`, { method: "GET" })
+    : null;
+  if (segCacheKey) {
+    try {
+      const cachedSeg = await edgeCache.match(segCacheKey);
+      if (cachedSeg) return cachedSeg;
+    } catch {}
+  }
+
   const hdrs = new Headers({ "User-Agent": UA_CHROME, Accept: "*/*" });
   if (ref) {
     hdrs.set("Referer", ref);
     try { hdrs.set("Origin", new URL(ref).origin); } catch {}
   }
-  const rangeHdr = request?.headers?.get("Range");
   if (rangeHdr) hdrs.set("Range", rangeHdr);
   try {
-    const reqMethod = request?.method === "HEAD" ? "HEAD" : "GET";
-    const { resp: up } = await fetchPublicWithRedirects(target, hdrs, 4, 20000, undefined, true, reqMethod);
+    const cfOpts = (isUnrangedGet && isHlsMediaSeg) ? { cacheEverything: true, cacheTtl: 1800 } : undefined;
+    const { resp: up } = await fetchPublicWithRedirects(target, hdrs, 4, 20000, cfOpts, true, reqMethod);
     const upCt = (up.headers.get("Content-Type") || "").toLowerCase();
-    let extHint = (url.searchParams.get("ext") || "").toLowerCase();
-    if (!extHint) {
-      try {
-        const pm = new URL(target).pathname.match(/\.(ts|m4s|mp4|aac|m4a|mp3|key|vtt|srt|m3u8)$/i);
-        if (pm) extHint = `.${pm[1].toLowerCase()}`;
-      } catch {}
-    }
     if (!up.ok && (upCt.includes("html") || upCt.includes("javascript") || upCt.includes("ecmascript") || upCt.includes("xml") || upCt.includes("text/plain"))) {
       up.body?.cancel?.();
       return new Response(`Upstream ${up.status}`, { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
@@ -1515,14 +1698,31 @@ export async function handleEdgeStreamProxy(request, url, env) {
       outHdrs.set("Content-Type", resolveFallbackContentType(extHint, target));
     }
     outHdrs.set("Access-Control-Allow-Origin", "*");
-    outHdrs.set("Access-Control-Allow-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+    outHdrs.set("Access-Control-Allow-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, X-Watchlivo-Seg-Cache");
     outHdrs.set("Vary", "Range");
     outHdrs.set("X-Content-Type-Options", "nosniff");
     outHdrs.set("Content-Security-Policy", "sandbox");
-    outHdrs.set("Cache-Control", up.ok ? "public, max-age=300" : "no-store");
+    const isPartial = Boolean(rangeHdr || up.status === 206);
+    outHdrs.set(
+      "Cache-Control",
+      !up.ok ? "no-store" : (isPartial ? "private, max-age=300" : (isHlsMediaSeg ? "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600" : "public, max-age=300"))
+    );
     if (reqMethod === "HEAD") {
       up.body?.cancel?.();
       return new Response(null, { status: up.status, headers: outHdrs });
+    }
+    const rawCl = up.headers.get("Content-Length");
+    const clBytes = rawCl !== null ? Number(rawCl) : NaN;
+    const sizeOkForEdgeCache = Number.isFinite(clBytes) ? (clBytes > 0 && clBytes <= 15 * 1024 * 1024) : isHlsMediaSeg;
+    if (segCacheKey && up.status === 200 && outBody && sizeOkForEdgeCache && typeof outBody.tee === "function") {
+      const [bodyClient, bodyCache] = outBody.tee();
+      const cacheHdrs = new Headers(outHdrs);
+      cacheHdrs.delete("Vary");
+      cacheHdrs.set("X-Watchlivo-Seg-Cache", "HIT");
+      const cachePut = edgeCache.put(segCacheKey, new Response(bodyCache, { status: 200, headers: cacheHdrs })).catch(() => {});
+      if (ctx?.waitUntil) ctx.waitUntil(cachePut);
+      outHdrs.set("X-Watchlivo-Seg-Cache", "MISS");
+      return new Response(bodyClient, { status: up.status, headers: outHdrs });
     }
     return new Response(outBody, { status: up.status, headers: outHdrs });
   } catch (err) {

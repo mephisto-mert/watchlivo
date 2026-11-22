@@ -502,3 +502,91 @@ test('v236 cross-device D1 ROOMS_DB sync: Host A (Isolate 1) and Friend B (Isola
   assert.ok(listData.rooms.some((r) => r.id === rid && r.participantCount === 2), 'Public lobby list must show room with 2 participants');
   resetRoomDoQuotaGuardForTests();
 });
+
+test('v237 WatchlivoRoomDO heartbeat throttles steady-state storage writes and broadcasts WebSocket sync on host buffer drift (>= 1.8s)', async () => {
+  let storagePuts = 0;
+  const backing = new Map();
+  const state = {
+    storage: {
+      async get(k) { return backing.has(k) ? structuredClone(backing.get(k)) : undefined; },
+      async put(k, v) { storagePuts += 1; backing.set(k, structuredClone(v)); },
+      async delete(k) { backing.delete(k); },
+    },
+  };
+  const env = { PROXY_SECRET: 'test_secret_key_for_v237_hb_do_123456' };
+  const roomDo = new WatchlivoRoomDO(state, env);
+
+  // 1. Create room with playing media at t=100s
+  const createResp = await roomDo.fetch(new Request('https://do.local/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Room-Id': 'wl-hb-test' },
+    body: JSON.stringify({
+      name: 'HB Test',
+      creator: 'HostMert',
+      media: { title: 'You S1E5', url: '/api/rave/stream?sid=you5', provider: 'hls', playing: true, currentTime: 100 },
+    }),
+  }));
+  const created = await createResp.json();
+  assert.equal(created.ok, true);
+
+  // Attach a mock Guest WebSocket subscriber on the DO
+  const guestMsgs = [];
+  const mockGuestWs = {
+    readyState: 1,
+    send(payload) { guestMsgs.push(JSON.parse(payload)); },
+  };
+  roomDo.sockets.set(mockGuestWs, { cid: 'guest_1', uname: 'Arkadas' });
+
+  // 2. First steady-state heartbeat right after creation (drift < 0.5s) -> saves once (initial _lastHbSave), NO sync broadcast spam
+  const putsAfterCreate = storagePuts;
+  const hb1 = await roomDo.fetch(new Request('https://do.local/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Room-Id': 'wl-hb-test' },
+    body: JSON.stringify({
+      type: 'heartbeat',
+      clientId: created.clientId,
+      clientToken: created.clientToken,
+      currentTime: 100.1,
+      playing: true,
+    }),
+  }));
+  assert.equal(hb1.status, 200);
+  const putsAfterHb1 = storagePuts;
+  assert.equal(putsAfterHb1, putsAfterCreate + 1, 'First heartbeat records initial _lastHbSave');
+  assert.equal(guestMsgs.length, 0, 'Steady-state heartbeat with <1.8s drift must NOT spam WebSocket sync events');
+
+  // 3. Second steady-state heartbeat immediately after (drift < 0.3s, <20s elapsed) -> ZERO storage write, ZERO WS spam!
+  const hb2 = await roomDo.fetch(new Request('https://do.local/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Room-Id': 'wl-hb-test' },
+    body: JSON.stringify({
+      type: 'heartbeat',
+      clientId: created.clientId,
+      clientToken: created.clientToken,
+      currentTime: 100.2,
+      playing: true,
+    }),
+  }));
+  assert.equal(hb2.status, 200);
+  assert.equal(storagePuts, putsAfterHb1, 'Steady-state heartbeat within 20s window must throttle DO storage writes');
+  assert.equal(guestMsgs.length, 0);
+
+  // 4. Host stalls/buffers for 4s (reported currentTime lags expected by 4s >= 1.8s) -> MUST persist & broadcast sync to Guest WS!
+  const hbDrift = await roomDo.fetch(new Request('https://do.local/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Room-Id': 'wl-hb-test' },
+    body: JSON.stringify({
+      type: 'heartbeat',
+      clientId: created.clientId,
+      clientToken: created.clientToken,
+      currentTime: 95.5,
+      playing: true,
+    }),
+  }));
+  assert.equal(hbDrift.status, 200);
+  assert.equal(storagePuts, putsAfterHb1 + 1, 'Significant drift >= 1.8s must flush DO storage');
+  assert.equal(guestMsgs.length, 1, 'Significant drift >= 1.8s must broadcast sync event over WebSocket to Guests');
+  assert.equal(guestMsgs[0].type, 'sync');
+  assert.equal(guestMsgs[0].action, 'heartbeat');
+  assert.equal(guestMsgs[0].currentTime, 95.5);
+});

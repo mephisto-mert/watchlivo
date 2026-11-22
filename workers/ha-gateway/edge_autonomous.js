@@ -2987,10 +2987,10 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     return await handleEdgeResolveCatalog(url, env, edgeJson);
   }
   if (safePath === "/api/rave/stream" || safePath === "/api/rave/stream_manifest" || safePath === "/api/rave/stream-manifest" || safePath === "/api/rave/hls-proxy") {
-    return await handleEdgeHlsManifest(url, env);
+    return await handleEdgeHlsManifest(url, env, ctx);
   }
   if (safePath === "/api/rave/stream-proxy" || safePath === "/api/rave/stream_chunk") {
-    return await handleEdgeStreamProxy(request, url, env);
+    return await handleEdgeStreamProxy(request, url, env, ctx);
   }
   if (safePath === "/api/rave/subtitle.vtt") {
     return await handleEdgeSubtitle(url, env);

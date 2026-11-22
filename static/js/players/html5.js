@@ -1,11 +1,11 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261121_v236';
-import { api } from '../api.js?v=20261121_v236';
-import { expectedPosition } from '../sync.js?v=20261121_v236';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261121_v236';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261121_v236';
-import { ensureHlsJs } from './hls-loader.js?v=20261121_v236';
-import { AdaptiveQualityController, buildHlsAbrConfig, formatHeightTag, getNetworkSnapshot, isLowBandwidthMode, setLowBandwidthMode, withEdgeAbrParams } from './abr.js?v=20261121_v236';
+import { SubtitleDubController } from './subtitles.js?v=20261122_v237';
+import { api } from '../api.js?v=20261122_v237';
+import { expectedPosition } from '../sync.js?v=20261122_v237';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261122_v237';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261122_v237';
+import { ensureHlsJs } from './hls-loader.js?v=20261122_v237';
+import { AdaptiveQualityController, buildHlsAbrConfig, formatHeightTag, getNetworkSnapshot, isLowBandwidthMode, setLowBandwidthMode, withEdgeAbrParams } from './abr.js?v=20261122_v237';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -1086,9 +1086,14 @@ export class Html5Adapter {
       let lastMediaErrPos = -1;
       let singleLevelStalls = 0;
       let firstSingleStallAt = 0;
+      let lastSingleStallAt = 0;
+      let transientFrag5xx = 0;
+      let transientAud5xx = 0;
       const failedAudioTrackIndices = new Set();
       this.hls.on(window.Hls.Events.FRAG_BUFFERED, (_e, data) => {
         netRetries = 0;
+        transientFrag5xx = 0;
+        if (data?.frag?.type === 'audio') transientAud5xx = 0;
         const curPos = Number(v.currentTime || 0);
         if (lastMediaErrPos >= 0 && curPos - lastMediaErrPos >= 2.0) {
           mediaRetries = 0;
@@ -1103,13 +1108,17 @@ export class Html5Adapter {
       });
       this.hls.on(window.Hls.Events.ERROR, (_e, data) => {
         const errCode = Number(data?.response?.code || 0);
-        const isHardUpstreamDead = [401, 403, 404, 410, 451, 502, 504].includes(errCode);
+        const isPermUpstreamDead = [401, 403, 404, 410, 451].includes(errCode);
+        const isTransient5xx = [502, 503, 504].includes(errCode);
+        const isHardUpstreamDead = isPermUpstreamDead || isTransient5xx;
         if (!data?.fatal) {
           if (data?.details === 'audioTrackLoadError' || data?.details === 'audioTrackLoadTimeOut' || data?.details === 'audioTrackLoadTimeout') {
+            if (isTransient5xx) transientAud5xx += 1;
             const curAudIdx = typeof this.hls?.audioTrack === 'number' ? this.hls.audioTrack : -1;
-            if (curAudIdx >= 0) failedAudioTrackIndices.add(curAudIdx);
             const hlsTracks = Array.isArray(this.hls?.audioTracks) ? this.hls.audioTracks : [];
-            const altIdx = hlsTracks.findIndex((_t, idx) => idx !== curAudIdx && !failedAudioTrackIndices.has(idx));
+            const shouldFailAudioNow = isPermUpstreamDead || transientAud5xx >= 2;
+            if (shouldFailAudioNow && curAudIdx >= 0) failedAudioTrackIndices.add(curAudIdx);
+            const altIdx = shouldFailAudioNow ? hlsTracks.findIndex((_t, idx) => idx !== curAudIdx && !failedAudioTrackIndices.has(idx)) : -1;
             if (altIdx >= 0) {
               try {
                 this.hls.audioTrack = altIdx;
@@ -1119,7 +1128,7 @@ export class Html5Adapter {
                 return;
               } catch (_) {}
             }
-            if (isHardUpstreamDead || failedAudioTrackIndices.size >= Math.max(1, hlsTracks.length)) {
+            if (shouldFailAudioNow && (isPermUpstreamDead || failedAudioTrackIndices.size >= Math.max(1, hlsTracks.length))) {
               this._reportStreamHealth?.(srcUrl, false, { stalled: false, status: errCode || 502 });
               if (nativeAltIdx < alts.length) {
                 loadCandidateUrl(alts[nativeAltIdx++], doneCb);
@@ -1129,7 +1138,23 @@ export class Html5Adapter {
               return;
             }
           }
-          if (isHardUpstreamDead && (data?.details === 'fragLoadError' || data?.details === 'levelLoadError' || data?.details === 'manifestLoadError')) {
+          if (data?.details === 'fragLoadError') {
+            if (isTransient5xx) {
+              transientFrag5xx += 1;
+              // Never destroy the player on a single transient 502/503/504 segment hiccup — let hls.js retry!
+              if (transientFrag5xx < 3) return;
+            }
+            if (isPermUpstreamDead || transientFrag5xx >= 3) {
+              this._reportStreamHealth?.(srcUrl, false, { stalled: false, status: errCode });
+              if (nativeAltIdx < alts.length) {
+                loadCandidateUrl(alts[nativeAltIdx++], doneCb);
+                return;
+              }
+              handleExhaustedCandidates(srcUrl, doneCb);
+              return;
+            }
+          }
+          if (isHardUpstreamDead && (data?.details === 'levelLoadError' || data?.details === 'manifestLoadError')) {
             this._reportStreamHealth?.(srcUrl, false, { stalled: false, status: errCode });
             if (nativeAltIdx < alts.length) {
               loadCandidateUrl(alts[nativeAltIdx++], doneCb);
@@ -1195,14 +1220,16 @@ export class Html5Adapter {
               } else if (lvlCount <= 1 && nativeAltIdx < alts.length) {
                 const nowMs = Date.now();
                 const inRecentSeek = v.seeking || v.readyState >= 3 || (this.lastSeekAt && nowMs - this.lastSeekAt < 8000);
-                if (!inRecentSeek) {
-                  if (!firstSingleStallAt || nowMs - firstSingleStallAt > 24000) {
+                const bufAheadNow = this._getBufferAheadSec();
+                if (!inRecentSeek && bufAheadNow < 0.25 && (!lastSingleStallAt || nowMs - lastSingleStallAt >= 4500)) {
+                  lastSingleStallAt = nowMs;
+                  if (!firstSingleStallAt || nowMs - firstSingleStallAt > 60000) {
                     firstSingleStallAt = nowMs;
                     singleLevelStalls = 1;
                   } else {
                     singleLevelStalls += 1;
                   }
-                  if (singleLevelStalls >= 3) {
+                  if (singleLevelStalls >= 5) {
                     singleLevelStalls = 0;
                     this._reportStreamHealth?.(srcUrl, false, { stalled: true });
                     loadCandidateUrl(alts[nativeAltIdx++], doneCb);

@@ -666,18 +666,18 @@ export default {
               });
             }
             if (hasAutonomousEdge(env)) {
-              return await runAutonomousFallback(request, url, safePath, null, env);
+              return await runAutonomousFallback(request, url, safePath, null, env, ctx);
             }
             return await safeFetchSecondary(request, url, null, env, "render-eu-stream-fallback", ctx, false);
           }
           if (hasAutonomousEdge(env)) {
-            return await runAutonomousFallback(request, url, safePath, null, env);
+            return await runAutonomousFallback(request, url, safePath, null, env, ctx);
           }
           return await safeFetchSecondary(request, url, null, env, "tunnel-stream-proxy", ctx, false);
         }
         if (bypassWorker) {
           if (hasAutonomousEdge(env) && (Date.now() < tunnelOfflineUntil || env.FORCE_SECONDARY === "1")) {
-            return await runAutonomousFallback(request, url, safePath, null, env);
+            return await runAutonomousFallback(request, url, safePath, null, env, ctx);
           }
           return await safeFetchSecondary(request, url, null, env, "tunnel-stream-proxy", ctx, false);
         }

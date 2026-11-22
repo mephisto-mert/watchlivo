@@ -1773,7 +1773,7 @@ export function inferStreamSubSource(st) {
   return "";
 }
 
-function mergeResolvedResults(resultList) {
+export function mergeResolvedResults(resultList) {
   const rawStreams = [];
   const subs = [];
   const seenUrls = new Set();
@@ -1811,12 +1811,28 @@ function mergeResolvedResults(resultList) {
     ? rawStreams.filter((st) => !isCfPoisonedVmpxUrl(st.url))
     : rawStreams;
 
+  const isFastReliableHost = (u) =>
+    /dbx\.molystream\.org|player\.filmizle\.in|storage\.diziyou\.love|ksdpictures\.site|video\.twimg\.com/.test(u);
+  const fastDualSources = new Set();
+  const byFastSource = new Map();
+  for (const st of filtered) {
+    const u = String(st.url || "").toLowerCase();
+    if (!isFastReliableHost(u) || !st.source) continue;
+    if (!byFastSource.has(st.source)) byFastSource.set(st.source, []);
+    byFastSource.get(st.source).push(st);
+  }
+  for (const [srcName, srcStreams] of byFastSource.entries()) {
+    const cov = getStreamAudioCoverage(srcStreams);
+    if (cov.hasTr && cov.hasOrig) fastDualSources.add(srcName);
+  }
+
   const rankStream = (st) => {
     const u = String(st.url || "").toLowerCase();
     const isVm = isVmpxOrVidmolyUrl(u);
-    const dualBonus = (!isVm && isStreamDualAudio(st)) ? 0 : 10;
+    const hasFullSourceDual = Boolean(st.source && fastDualSources.has(st.source));
+    const dualBonus = (!isVm && (isStreamDualAudio(st) || hasFullSourceDual)) ? 0 : 10;
     let hostRank = 4;
-    if (/dbx\.molystream\.org|player\.filmizle\.in|storage\.diziyou\.love|ksdpictures\.site|video\.twimg\.com/.test(u)) hostRank = 0;
+    if (isFastReliableHost(u)) hostRank = 0;
     else if (/sprintcdn|r66nv9ed|owphbf24|filemoon|byse|cdnimg|rapidvid/.test(u)) hostRank = 1;
     else if (/makesomthingup|centralodsseyproud|\/r6\//.test(u)) hostRank = 2;
     else if (/tau-video|irtau1/.test(u)) hostRank = 2;

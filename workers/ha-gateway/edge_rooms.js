@@ -893,14 +893,43 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       });
     }
   } else if (act === "heartbeat" && isHostOrCreator(rm, cid) && body.currentTime !== undefined) {
+    const prevPlaying = Boolean(rm.media.playing);
+    const prevElapsed = Math.max(0, t - (Number(rm.media.updatedAt) || t));
+    const prevRate = Number(rm.media.rate) || 1;
+    const prevExp = prevPlaying ? (Number(rm.media.currentTime) || 0) + prevElapsed * prevRate : (Number(rm.media.currentTime) || 0);
     const rawPos = Math.max(0, Number(body.currentTime) || 0);
     if (body.playing !== undefined) rm.media.playing = Boolean(body.playing);
     const rawAt = Number(body.atTime || 0);
     const transit = (rm.media.playing && rawAt > 1e9 && t - rawAt > 0 && t - rawAt < 0.85) ? (t - rawAt) : 0;
     const rate = Number(rm.media.rate) || 1;
-    rm.media.currentTime = rawPos + transit * rate;
+    const nextPos = rawPos + transit * rate;
+    rm.media.currentTime = nextPos;
     rm.media.updatedAt = t;
-    dirty = true;
+    const driftSec = Math.abs(nextPos - prevExp);
+    const playingChanged = prevPlaying !== Boolean(rm.media.playing);
+    const significantDrift = Boolean(body.anchor || playingChanged || driftSec >= 1.8);
+    if (significantDrift || !rm._lastHbSave || (t - Number(rm._lastHbSave || 0) >= 20)) {
+      rm._lastHbSave = t;
+      dirty = true;
+    }
+    if (significantDrift) {
+      pushedEvents.push({
+        attachRoom: false,
+        ev: {
+          id: `hb_${Date.now()}_${makeHexNonce(3)}`,
+          cid,
+          user: uname,
+          username: uname,
+          ts: t,
+          type: "sync",
+          action: "heartbeat",
+          currentTime: rm.media.currentTime,
+          playing: rm.media.playing,
+          rate: rm.media.rate,
+          media: buildMediaOut(rm),
+        },
+      });
+    }
   } else if (act === "change_media" || act === "resolve_media") {
     if (rm.playMode === "leader" && !isPrivilegedInRoom(rm, cid)) {
       return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Medya değiştirme yetkisi oda yöneticisine aittir." };

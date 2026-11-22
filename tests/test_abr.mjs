@@ -32,6 +32,11 @@ test('buildHlsAbrConfig adapts startLevel, timeouts, and EWMA conservatively on 
   });
   assert.equal(fastCfg.startLevel, -1);
   assert.ok(fastCfg.abrEwmaDefaultEstimate >= 2_000_000);
+  assert.equal(fastCfg.progressive, true, 'v237 must enable progressive Fetch streaming transmuxing');
+  assert.ok(fastCfg.maxBufferSize >= 100_000_000, 'Desktop buffer size must accommodate large opening keyframes');
+  assert.ok(fastCfg.fragLoadingMaxRetry >= 4, 'Fragment retries must survive transient CDN blips');
+  assert.equal(slowCfg.progressive, true);
+  assert.ok(slowCfg.maxBufferSize >= 50_000_000, 'Mobile buffer size must hold multi-MB segments without thrashing');
 });
 
 test('AdaptiveQualityController downshifts immediately on stall/timeout and smoothly recovers back to HD when speed returns', () => {

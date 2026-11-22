@@ -18,6 +18,7 @@ import {
 import {
   detectM3u8AudioLangs,
   extractDiziyouNet,
+  mergeResolvedResults,
   resolveTurkishCatalogStream,
 } from "../workers/ha-gateway/edge_extractors.js";
 
@@ -875,4 +876,242 @@ test("v235 Greek-mirror self-healing failover rescues dead delta/epsilon 522 nod
     resetGreekMirrorHealth();
     globalThis.fetch = origFetch;
   }
+});
+
+function createMockEdgeCache() {
+  const map = new Map();
+  return {
+    keys: () => Array.from(map.keys()),
+    async match(req) {
+      const k = typeof req === "string" ? req : req.url;
+      const rec = map.get(k);
+      if (!rec) return undefined;
+      return new Response(rec.body.slice(0), { status: rec.status, headers: new Headers(rec.headers) });
+    },
+    async put(req, resp) {
+      const k = typeof req === "string" ? req : req.url;
+      const body = new Uint8Array(await resp.arrayBuffer());
+      map.set(k, { status: resp.status, headers: Array.from(resp.headers.entries()), body });
+    },
+  };
+}
+
+test("v237 edge segment cache: on-zone watchlivo.online cache key serves Host + Guest across different signatures with 1 upstream fetch and bypasses Range requests", async () => {
+  const origFetch = globalThis.fetch;
+  const origCaches = globalThis.caches;
+  const mockCache = createMockEdgeCache();
+  globalThis.caches = { default: mockCache };
+  const pendingWaitUntil = [];
+  const ctx = { waitUntil(p) { pendingWaitUntil.push(Promise.resolve(p)); } };
+  try {
+    const segUrl = "https://storage.diziyou.love/episodes/551/seg_0001.ts";
+    const tsBytes = new Uint8Array(1880);
+    tsBytes[0] = 0x47;
+    tsBytes[188] = 0x47;
+    let upstreamHits = 0;
+    globalThis.fetch = async (input) => {
+      const u = typeof input === "string" ? input : input.url;
+      if (u === segUrl) {
+        upstreamHits += 1;
+        return new Response(tsBytes, {
+          status: 200,
+          headers: { "Content-Type": "video/mp2t", "Content-Length": String(tsBytes.byteLength) },
+        });
+      }
+      return new Response("Not Found", { status: 404 });
+    };
+
+    const sigHost = await signProxySig(segUrl, "https://www.diziyou.love/", TEST_ENV);
+    const reqHost = new Request(`https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(segUrl)}&sig=${sigHost}&ext=.ts&referer=${encodeURIComponent("https://www.diziyou.love/")}`);
+    const resHost = await handleEdgeStreamProxy(reqHost, new URL(reqHost.url), TEST_ENV, ctx);
+    assert.equal(resHost.status, 200);
+    assert.equal(resHost.headers.get("X-Watchlivo-Seg-Cache"), "MISS");
+    assert.equal((await resHost.arrayBuffer()).byteLength, 1880);
+    await Promise.all(pendingWaitUntil);
+
+    // Cache key MUST use active Cloudflare zone watchlivo.online (never .internal)
+    const keys = mockCache.keys();
+    assert.equal(keys.length, 1);
+    assert.ok(keys[0].startsWith("https://watchlivo.online/__wl_edge_cache__/v237/seg?u="), `Expected on-zone cache key, got ${keys[0]}`);
+
+    // Guest requests SAME segment with different referer/sig context -> Edge Cache HIT with ZERO additional upstream fetch!
+    const sigGuest = await signProxySig(segUrl, "", TEST_ENV);
+    const reqGuest = new Request(`https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(segUrl)}&sig=${sigGuest}&ext=.ts`);
+    const resGuest = await handleEdgeStreamProxy(reqGuest, new URL(reqGuest.url), TEST_ENV, ctx);
+    assert.equal(resGuest.status, 200);
+    assert.equal(resGuest.headers.get("X-Watchlivo-Seg-Cache"), "HIT");
+    assert.equal((await resGuest.arrayBuffer()).byteLength, 1880);
+    assert.equal(upstreamHits, 1, "Guest must be served from Cloudflare Edge Cache without re-hitting slow upstream CDN");
+
+    // Range request must bypass unranged cache and hit upstream cleanly
+    const reqRange = new Request(`https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(segUrl)}&sig=${sigGuest}&ext=.ts`, {
+      headers: { Range: "bytes=0-187" },
+    });
+    const resRange = await handleEdgeStreamProxy(reqRange, new URL(reqRange.url), TEST_ENV, ctx);
+    assert.equal(resRange.status, 200);
+    assert.equal(upstreamHits, 2, "Ranged request must bypass unranged edge cache");
+  } finally {
+    globalThis.fetch = origFetch;
+    globalThis.caches = origCaches;
+  }
+});
+
+test("v237 edge VOD manifest cache: caches VOD playlists with #EXT-X-ENDLIST & quantized signatures, bypasses live sliding-window playlists", async () => {
+  const origFetch = globalThis.fetch;
+  const origCaches = globalThis.caches;
+  const mockCache = createMockEdgeCache();
+  globalThis.caches = { default: mockCache };
+  const pendingWaitUntil = [];
+  const ctx = { waitUntil(p) { pendingWaitUntil.push(Promise.resolve(p)); } };
+  try {
+    const vodUrl = "https://storage.diziyou.love/episodes/551/index.m3u8";
+    const liveUrl = "https://cdn.live-tv.example/trt1/live.m3u8";
+    let vodHits = 0;
+    let liveHits = 0;
+    globalThis.fetch = async (input) => {
+      const u = typeof input === "string" ? input : input.url;
+      if (u === vodUrl) {
+        vodHits += 1;
+        return new Response("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nseg0.ts\n#EXTINF:4.0,\nseg1.ts\n#EXT-X-ENDLIST\n", {
+          status: 200,
+          headers: { "Content-Type": "application/vnd.apple.mpegurl" },
+        });
+      }
+      if (u === liveUrl) {
+        liveHits += 1;
+        return new Response(`#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-MEDIA-SEQUENCE:${liveHits}\n#EXTINF:4.0,\nchunk_${liveHits}.ts\n`, {
+          status: 200,
+          headers: { "Content-Type": "application/vnd.apple.mpegurl" },
+        });
+      }
+      return new Response("Not Found", { status: 404 });
+    };
+
+    const vodReqUrl = new URL(`https://watchlivo.online/api/rave/stream?url=${encodeURIComponent(vodUrl)}&proxy_segs=1&ext=.m3u8`);
+    const r1 = await handleEdgeHlsManifest(vodReqUrl, TEST_ENV, ctx);
+    assert.equal(r1.status, 200);
+    assert.equal(r1.headers.get("X-Watchlivo-Man-Cache"), "MISS");
+    const txt1 = await r1.text();
+    await Promise.all(pendingWaitUntil);
+
+    const r2 = await handleEdgeHlsManifest(vodReqUrl, TEST_ENV, ctx);
+    assert.equal(r2.status, 200);
+    assert.equal(r2.headers.get("X-Watchlivo-Man-Cache"), "HIT");
+    const txt2 = await r2.text();
+    assert.equal(txt2, txt1, "Cached VOD manifest must return byte-identical rewritten playlist");
+    assert.equal(vodHits, 1, "Second VOD manifest fetch must hit edge cache without re-running HMAC signing");
+
+    // Live playlist lacking #EXT-X-ENDLIST must NOT be cached
+    const liveReqUrl = new URL(`https://watchlivo.online/api/rave/stream?url=${encodeURIComponent(liveUrl)}&proxy_segs=1&ext=.m3u8`);
+    const l1 = await handleEdgeHlsManifest(liveReqUrl, TEST_ENV, ctx);
+    assert.equal(l1.headers.get("X-Watchlivo-Man-Cache"), "BYPASS");
+    const l2 = await handleEdgeHlsManifest(liveReqUrl, TEST_ENV, ctx);
+    assert.equal(l2.headers.get("X-Watchlivo-Man-Cache"), "BYPASS");
+    assert.equal(liveHits, 2, "Live sliding-window playlist must always fetch fresh upstream");
+  } finally {
+    globalThis.fetch = origFetch;
+    globalThis.caches = origCaches;
+  }
+});
+
+test("v237 hedged 550ms Greek-mirror failover rescues slow-hanging delta mirror in <1200ms via gamma without 4.2s stall", async () => {
+  const origFetch = globalThis.fetch;
+  resetGreekMirrorHealth();
+  try {
+    const tsPayload = new Uint8Array(376);
+    tsPayload[0] = 0x47;
+    tsPayload[188] = 0x47;
+    const seg1 = "https://redi.centralodsseyproud.click/you4/tr/seg10.css";
+    globalThis.fetch = async (input, init) => {
+      const u = typeof input === "string" ? input : input.url;
+      const host = new URL(u).hostname;
+      if (u === seg1) {
+        return new Response(null, { status: 302, headers: { Location: "https://delta.5d06cffcf9563c.click/you4/tr/seg10.css" } });
+      }
+      if (host.startsWith("delta.")) {
+        // Simulate hung dead mirror (2500ms stall)
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, 2500);
+          init?.signal?.addEventListener?.("abort", () => { clearTimeout(timer); reject(new Error("aborted")); }, { once: true });
+        });
+        return new Response("Timeout", { status: 522 });
+      }
+      if (host.startsWith("gamma.")) {
+        await new Promise((r) => setTimeout(r, 15));
+        return new Response(tsPayload, { status: 200, headers: { "Content-Type": "text/css" } });
+      }
+      return new Response("Not Found", { status: 404 });
+    };
+
+    const sig1 = await signProxySig(seg1, "https://one.makesomthingup.click/", TEST_ENV);
+    const req1 = new Request(`https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(seg1)}&sig=${sig1}&ext=.ts&referer=${encodeURIComponent("https://one.makesomthingup.click/")}`);
+    const t0 = Date.now();
+    const res1 = await handleEdgeStreamProxy(req1, new URL(req1.url), TEST_ENV);
+    const elapsedMs = Date.now() - t0;
+    assert.equal(res1.status, 200);
+    assert.equal(res1.headers.get("Content-Type"), "video/mp2t");
+    assert.ok(elapsedMs < 1300, `Hedged failover should rescue in ~570ms instead of 2500-4200ms stall, took ${elapsedMs}ms`);
+  } finally {
+    resetGreekMirrorHealth();
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("v237 CDN ranking + audio tracks: fast multi-ABR diziyou_love TR+Orig split pair outranks slow single-level dl_embed Dual", () => {
+  const merged = mergeResolvedResults([
+    {
+      source: "dl_embed",
+      streams: [
+        {
+          url: "https://cdn.makesomthingup.click/r6/you_s1e5/master.m3u8",
+          referer: "https://one.makesomthingup.click/",
+          label: "📡 DiziLife · Türkçe Dublaj + Orijinal (1080p HLS)",
+          audioLangs: ["tr", "en"],
+          source: "dl_embed",
+        },
+      ],
+      subs: [],
+    },
+    {
+      source: "diziyou_love",
+      streams: [
+        {
+          url: "https://storage.diziyou.love/episodes/4839_tr/master.m3u8",
+          referer: "https://www.diziyou.love/",
+          label: "📡 DiziYou · Türkçe Dublaj (1080p HLS)",
+          audioLangs: ["tr"],
+          source: "diziyou_love",
+        },
+        {
+          url: "https://storage.diziyou.love/episodes/4839_en/master.m3u8",
+          referer: "https://www.diziyou.love/",
+          label: "📡 DiziYou · Orijinal / Altyazılı (1080p HLS)",
+          audioLangs: ["orig"],
+          source: "diziyou_love",
+        },
+      ],
+      subs: [],
+    },
+  ]);
+
+  assert.equal(merged.streams[0].source, "diziyou_love", "Fast multi-ABR diziyou_love covering both TR & Orig must rank #1 above slow dl_embed");
+  assert.equal(merged.streams[1].source, "diziyou_love");
+  assert.equal(merged.streams[2].source, "dl_embed");
+
+  // buildEdgeAudioTracks must also pick the fast #1/#2 split pair over lower-ranked slow dualSrv
+  const tracks = buildEdgeAudioTracks(
+    merged.streams.map((s, idx) => ({
+      id: `srv-${idx + 1}`,
+      label: s.label,
+      url: `/api/rave/stream?sid=s${idx + 1}&ext=.m3u8`,
+      audioLangs: s.audioLangs,
+    })),
+    "/api/rave/stream?sid=s1&ext=.m3u8",
+    "en"
+  );
+  assert.equal(tracks.length, 2);
+  assert.equal(tracks[0].id, "tr-dub");
+  assert.ok(tracks[0].url.includes("sid=s1"), "TR dub track must use fast diziyou_love TR server");
+  assert.equal(tracks[1].id, "orig");
+  assert.ok(tracks[1].url.includes("sid=s2"), "Original track must use fast diziyou_love Orig server");
 });
