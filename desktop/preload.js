@@ -6,4 +6,11 @@ contextBridge.exposeInMainWorld('vortexDesktop', {
   version: '2.0.0',
   partition: 'persist:vortex-drm',
   openExternal: (url) => ipcRenderer.invoke('vortex:open-external', url),
+  startDesktopOAuth: (loginHint = '') => ipcRenderer.invoke('vortex:start-oauth', loginHint),
+  onOAuthResult: (cb) => {
+    if (typeof cb !== 'function') return () => {};
+    const listener = (_ev, payload) => cb(payload);
+    ipcRenderer.on('vortex:oauth-result', listener);
+    return () => ipcRenderer.removeListener('vortex:oauth-result', listener);
+  },
 });

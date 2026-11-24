@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261122_v238';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261122_v238';
-import { api, qs, humanApiError } from '../api.js?v=20261122_v238';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261122_v238';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261122_v238';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261122_v238';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261122_v238';
+import { h, icons, popup, toast, fill, proxyPosterUrl, healPosterError } from '../ui.js?v=20261124_v239';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261124_v239';
+import { api, qs, humanApiError } from '../api.js?v=20261124_v239';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261124_v239';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261124_v239';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261124_v239';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261124_v239';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261122_v238';
+} from '../store.js?v=20261124_v239';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -21,6 +21,11 @@ function checkProviderAuthGate(itemOrProv, defaultProv) {
 
 let _activeHomePick = null;
 const isBadTmdbHash = (u) => /4Mt7WHox67uJ1yErwTBFcV8KWgG|od5S7r2v306B2eR0E5t6vP8K2wG/i.test(String(u || ''));
+const _parseSeasonNum = (val, fallback = 1) => {
+  if (val === undefined || val === null || val === '' || typeof val === 'boolean') return fallback;
+  const n = Number(val);
+  return (Number.isFinite(n) && n >= 0) ? Math.floor(n) : fallback;
+};
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -340,7 +345,11 @@ const HERO_DEFAULT_POOL = [
   { id: '475557', tmdbId: '475557', mediaType: 'movie', title: 'Joker', originalTitle: 'Joker', year: '2019', rating: '8.1', overview: 'Toplum tarafından dışlanan başarısız komedyen Arthur Fleck, Gotham şehrinde adım adım suç ve kaosun sembolüne dönüşür.', backdrop: 'https://image.tmdb.org/t/p/w780/n6bUvigpRFqSwmPp1m2YADdbRBc.jpg', poster: 'https://image.tmdb.org/t/p/w500/udDclJoHjfjb8Ekgsd4FDteOkCU.jpg' },
   { id: '634649', tmdbId: '634649', mediaType: 'movie', title: 'Örümcek-Adam: Eve Dönüş Yok', originalTitle: 'Spider-Man: No Way Home', year: '2021', rating: '8.0', overview: 'Kimliği açığa çıkan Peter Parker, Doktor Strange\'den yardım ister ancak büyü ters gidince çoklu evrenden düşmanlar ortaya çıkar.', backdrop: 'https://image.tmdb.org/t/p/w780/14QbnygCuTO0vl7CAFmPf1fgZfV.jpg', poster: 'https://image.tmdb.org/t/p/w500/1g0dhYtq4irTY1GPXvft6k4YLjm.jpg' },
   { id: '66732', tmdbId: '66732', mediaType: 'tv', title: 'Stranger Things', originalTitle: 'Stranger Things', year: '2016', rating: '8.6', overview: 'Küçük bir kasabada küçük bir çocuğun gizemli şekilde kaybolması, doğaüstü güçleri ve gizli deneyleri gün yüzüne çıkarır.', backdrop: 'https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg', poster: 'https://image.tmdb.org/t/p/w500/uOOtwVbSr4QDjAGIifLDwpb2Pdl.jpg' },
-];
+].map((it) => ({
+  ...it,
+  poster: proxyPosterUrl(it.poster, it),
+  backdrop: proxyPosterUrl(it.backdrop, it),
+}));
 
 function shuffleArray(arr) {
   const copy = [...arr];
@@ -488,7 +497,11 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     { id: 'ep-280030-s1e10', tmdbId: '280030', mediaType: 'tv', title: 'Gassal', originalTitle: 'Gassal', season: 1, episode: 10, episodeLabel: 'S1:B10', episodeTitle: '1. Sezon 10. Bölüm', sourceBadge: '🇹🇷 tabii Yeni Bölüm', provider: 'tabii', poster: 'https://image.tmdb.org/t/p/w500/dvTFLhkIlCJaaDi32MxG7ke4vv1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/6YMuWmlXKQkhQ0FiwDo9zmIsnEb.jpg', year: '2025', rating: 8.7 },
     { id: 'ep-100088-s2e1', tmdbId: '100088', mediaType: 'tv', title: 'The Last of Us', originalTitle: 'The Last of Us', season: 2, episode: 1, episodeLabel: 'S2:B1', episodeTitle: 'Future Days', sourceBadge: '🔥 Yeni Sezon Bölümü', provider: 'max', poster: 'https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/uDgy6hyPd82kOHh6I95FLtLnj6p.jpg', year: '2025', rating: 8.8 },
     { id: 'ep-95396-s2e10', tmdbId: '95396', mediaType: 'tv', title: 'Severance', originalTitle: 'Severance', season: 2, episode: 10, episodeLabel: 'S2:B10', episodeTitle: 'Cold Harbor', sourceBadge: '🔥 Yeni Bölüm · 4K', provider: 'apple', poster: 'https://image.tmdb.org/t/p/w500/pPHpeI2X1qEd1CS1SeyrdhZ4qnT.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/ixgFmf1X59PUZam2qbAfskx2gQr.jpg', year: '2025', rating: 8.7 },
-  ];
+  ].map((ep) => ({
+    ...ep,
+    poster: proxyPosterUrl(ep.poster, ep),
+    backdrop: proxyPosterUrl(ep.backdrop, ep),
+  }));
   let latestEpsFetched = false;
   let latestEpsLoading = false;
   let heroIndex = 0;
@@ -542,6 +555,24 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     }
   };
   document.addEventListener('pointerdown', _onDocPointerDown, true);
+  const _onDocKeyDown = (ev) => {
+    if (!root.isConnected) {
+      document.removeEventListener('keydown', _onDocKeyDown);
+      return;
+    }
+    if (ev.key !== 'Escape' || ev.defaultPrevented || !provider) return;
+    if (document.querySelector('.popup-backdrop:not(.is-closing), .modal-backdrop, .context-menu')) return;
+    const detailBackBtn = root.querySelector('.catalog-detail:not(.hidden) .series-top-row .btn');
+    if (detailBackBtn) {
+      ev.preventDefault();
+      detailBackBtn.click();
+      return;
+    }
+    ev.preventDefault();
+    provider = null;
+    render();
+  };
+  document.addEventListener('keydown', _onDocKeyDown);
   fetchAccounts().then(() => {
     if (!provider && root.isConnected && !superQuery) {
       const activeInp = root.querySelector('input');
@@ -575,11 +606,12 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     if (watchBtnSpans[1]) watchBtnSpans[1].textContent = heroItem.mediaType === 'tv' ? 'Sezon & Bölüm Seç' : 'Odaya Katıl & Şimdi İzle';
     const artImg = heroEl.querySelector('.hero-main-img');
     if (artImg) {
-      const nextSrc = heroItem.backdrop || heroItem.poster || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop';
+      const nextSrc = proxyPosterUrl(heroItem.backdrop || heroItem.poster || '', heroItem);
       if (artImg.src !== nextSrc) {
         artImg.style.opacity = '0.35';
         artImg.src = nextSrc;
         artImg.alt = heroItem.title;
+        artImg.onerror = (e) => healPosterError(e.currentTarget || e.target, heroItem);
         setTimeout(() => { artImg.style.opacity = '1'; }, 120);
       }
     }
@@ -727,20 +759,21 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
 
   function openMoviePreviewModal(t, defProv, onAction) {
     const isTv = t.mediaType === 'tv' || t.type === 'SHOW';
-    const banner = String(t.backdrop || t.poster || '/static/watchlivo-poster.svg').replace(/["'()\\\r\n]/g, '');
-    const poster = t.poster || t.backdrop || '/static/watchlivo-poster.svg';
+    const banner = String(proxyPosterUrl(t.backdrop || t.poster || '', { ...t, mediaType: isTv ? 'tv' : 'movie' })).replace(/["'()\\\r\n]/g, '');
+    const poster = proxyPosterUrl(t.poster || t.backdrop || '', { ...t, mediaType: isTv ? 'tv' : 'movie' });
+    const trTag = t.origLang === 'tr' ? '🇹🇷 Yerli' : (t.hasTrDub ? '🇹🇷 Dublaj & Altyazı' : '');
     let modalRef = null;
     const body = h('div', { class: 'wl-preview-modal' },
       h('div', { class: 'wl-preview-backdrop', style: { backgroundImage: `url("${banner}")` } },
         h('div', { class: 'wl-preview-blur-mask' })),
       h('div', { class: 'wl-preview-content' },
-        h('img', { class: 'wl-preview-poster', src: poster, alt: t.title, onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+        h('img', { class: 'wl-preview-poster', src: poster, alt: t.title, onerror: (e) => healPosterError(e.currentTarget || e.target, { ...t, mediaType: isTv ? 'tv' : 'movie' }) }),
         h('div', { class: 'wl-preview-info' },
           h('div', { class: 'wl-preview-badges' },
             h('span', { class: 'wl-preview-tag type' }, isTv ? '📺 DİZİ / ANİME' : '🎬 SİNEMA FİLMİ'),
             t.year ? h('span', { class: 'wl-preview-tag' }, String(t.year)) : null,
             h('span', { class: 'wl-preview-tag rating' }, `⭐ IMDb ${t.rating || '8.2'}`),
-            h('span', { class: 'wl-preview-tag tr' }, '🇹🇷 Dublaj & Altyazı')),
+            trTag ? h('span', { class: 'wl-preview-tag tr' }, trTag) : null),
           h('h3', { class: 'wl-preview-title' }, t.title),
           h('p', { class: 'wl-preview-desc' }, t.overview || 'Watchlivo arşivinde 1080p/4K kalitesinde Türkçe dublaj ve altyazı seçenekleriyle arkadaşlarınla senkronize izle.'),
           h('div', { class: 'wl-preview-actions' },
@@ -854,7 +887,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     input.addEventListener('input', () => {
       clearTimeout(cmdkTimer);
       const q = input.value.trim();
-      if (!q) {
+      if (q.length < 2) {
+        superSearchSeq += 1;
         superQuery = '';
         results.replaceChildren();
         results.classList.add('hidden');
@@ -908,15 +942,17 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                   return (await pickSafe(media)) !== false;
                 };
                 cmdkTriggers.push(triggerPlay);
+                const cmdkMeta = { ...normalized, mediaType: isTv ? 'tv' : 'movie' };
+                const langTag = it.origLang === 'tr' ? ' · 🇹🇷 Yerli' : (it.hasTrDub ? ' · 🇹🇷 Dublaj' : '');
                 return h('div', {
                   class: 'wl-cmdk-item',
                   onmouseenter: () => { cmdkSelectedIdx = rowIdx; syncCmdkSelection(); },
                   onclick: triggerPlay,
                 },
-                  h('img', { class: 'wl-cmdk-poster', src: it.poster || '/static/watchlivo-poster.svg', alt: it.title, onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+                  h('img', { class: 'wl-cmdk-poster', src: proxyPosterUrl(it.poster || '', cmdkMeta), alt: it.title, onerror: (e) => healPosterError(e.currentTarget || e.target, cmdkMeta) }),
                   h('div', { class: 'wl-cmdk-meta wl-cmdk-info' },
                     h('div', { class: 'wl-cmdk-title' }, it.title),
-                    h('div', { class: 'wl-cmdk-sub' }, `${it.year || '2025'} · ${isTv ? '📺 Dizi / Anime' : '🎬 Sinema Filmi'} · 🇹🇷 TR Dublaj & Altyazı`)),
+                    h('div', { class: 'wl-cmdk-sub' }, `${it.year ? `${it.year} · ` : ''}${isTv ? '📺 Dizi / Anime' : '🎬 Sinema Filmi'}${it.rating ? ` · ⭐ ${it.rating}` : ''}${langTag}`)),
                   h('button', {
                     type: 'button',
                     class: 'wl-cmdk-preview-btn',
@@ -971,9 +1007,11 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         type: 'button',
         id: 'btn-vizyon-modal-pill',
         class: 'provider-cat-pill trend-pill',
-        title: 'Vizyondaki Yeni Filmleri Gör veya Yeni Film / Dizi Ekle',
+        title: (state.self && !state.self.isGuest && (state.self.isAdmin === true || state.self.role === 'admin'))
+          ? 'Vizyondaki Yeni Filmleri Gör veya Yeni Film / Dizi Ekle'
+          : 'Vizyondaki Yeni Filmleri ve Yeni Bölümleri Gör',
         onclick: () => openVizyonModal(pickSafe),
-      }, '🍿 Vizyon & Yeni Ekle') : null,
+      }, (state.self && !state.self.isGuest && (state.self.isAdmin === true || state.self.role === 'admin')) ? '🍿 Vizyon & Yeni Ekle' : '🍿 Vizyon & Yeni Bölümler') : null,
       !compact ? h('button', {
         type: 'button',
         id: 'btn-trending-toggle',
@@ -1050,10 +1088,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               }
             },
           },
-            h('img', { src: item.poster || item.backdrop || '/static/watchlivo-poster.svg', alt: item.title, loading: 'lazy', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+            h('img', { src: proxyPosterUrl(item.poster || item.backdrop || '', item), alt: item.title, loading: 'lazy', onerror: (e) => healPosterError(e.currentTarget || e.target, item) }),
             h('div', { class: 'trending-mini-info' },
               h('div', { class: 't-title' }, item.title),
-              h('div', { class: 't-sub' }, `${item.year || '2025'} · ⭐ ${item.rating || '8.4'} · 🇹🇷 TR`)));
+              h('div', { class: 't-sub' }, `${item.year || '2025'} · ⭐ ${item.rating || '8.4'}${item.origLang === 'tr' ? ' · 🇹🇷 Yerli' : (item.hasTrDub ? ' · 🇹🇷 Dublaj' : '')}`)));
         }))) : null;
 
     const fullHistory = (!compact && !state.mesh) ? getWatchHistory() : [];
@@ -1088,7 +1126,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           const durSec = Math.max(0, Math.floor(Number(item.duration || 0)));
           const pct = durSec > 30 ? Math.max(4, Math.min(99, Math.round((resumeSec / durSec) * 100))) : Math.max(6, Math.min(95, Math.round(Number(item.percent || 8))));
           const remMin = durSec > resumeSec + 60 ? Math.ceil((durSec - resumeSec) / 60) : 0;
-          const epTag = item.mediaType === 'tv' ? `S${item.season || 1}:B${item.episode || 1} · ` : '';
+          const epTag = item.mediaType === 'tv' ? `S${_parseSeasonNum(item.season, 1)}:B${item.episode || 1} · ` : '';
           const subTxt = `${epTag}${resumeSec > 0 ? fmtDur(resumeSec) : 'Başlangıçta'}${remMin > 0 ? ` · ${remMin} dk kaldı` : ''}`;
           const itemKey = item.historyId || item.key || item.tmdbId || item.title;
           return h('div', {
@@ -1145,7 +1183,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 if (!item.isMusic) {
                   try {
                     resolved = await Promise.race([
-                      resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1, '', { silentErrors: true }),
+                      resolveCatalogItem(resolvePayload, targetProv, _parseSeasonNum(item.season, 1), item.episode || 1, '', { silentErrors: true }),
                       new Promise((r) => setTimeout(() => r(null), 12000)),
                     ]);
                   } catch (e) {
@@ -1159,7 +1197,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                   return;
                 }
                 if (resolvedMediaType === 'tv' && (resolvePayload.tmdbId || resolvePayload.title)) {
-                  toast(`⚠️ S${item.season || 1}:B${item.episode || 1} kaynağı henüz bulunamadı — mevcut bölümler açılıyor...`);
+                  toast(`⚠️ S${_parseSeasonNum(item.season, 1)}:B${item.episode || 1} kaynağı henüz bulunamadı — mevcut bölümler açılıyor...`);
                   openTvSeriesModal(resolvePayload, targetProv);
                   return;
                 }
@@ -1171,25 +1209,17 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             },
           },
             h('div', { class: 'wl-continue-thumb' },
-              h('img', {
-                src: (item.poster && !item.poster.includes('watchlivo-poster.svg') && !isBadTmdbHash(item.poster))
-                  ? item.poster
-                  : ((item.thumbnail && !item.thumbnail.includes('watchlivo-poster.svg') && !isBadTmdbHash(item.thumbnail))
-                    ? item.thumbnail
-                    : ((item.backdrop && !item.backdrop.includes('watchlivo-poster.svg') && !isBadTmdbHash(item.backdrop))
-                      ? item.backdrop
-                      : `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim() || item.title, ot: item.originalTitle || '', y: item.year || '', mt: item.mediaType || 'movie' })}`)),
-                alt: item.title || '',
-                loading: 'lazy',
-                onerror: (e) => {
-                  const cleanT = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim();
-                  if (!e.target.src.includes('/api/rave/poster') && cleanT) {
-                    e.target.src = `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: cleanT, ot: item.originalTitle || '', y: item.year || '', mt: item.mediaType || 'movie' })}`;
-                  } else {
-                    e.target.src = '/static/watchlivo-poster.svg';
-                  }
-                },
-              }),
+              (() => {
+                const cleanHistT = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim() || item.title;
+                const histMeta = { provider: item.provider || '', tmdbId: item.tmdbId || item.id || '', title: cleanHistT, originalTitle: item.originalTitle || '', year: item.year || '', mediaType: item.mediaType || 'movie' };
+                const rawHImg = (!isBadTmdbHash(item.poster) && item.poster) || (!isBadTmdbHash(item.thumbnail) && item.thumbnail) || (!isBadTmdbHash(item.backdrop) && item.backdrop) || '';
+                return h('img', {
+                  src: proxyPosterUrl(rawHImg, histMeta),
+                  alt: item.title || '',
+                  loading: 'lazy',
+                  onerror: (e) => healPosterError(e.currentTarget || e.target, histMeta),
+                });
+              })(),
               prov?.logo ? h('span', { class: 'wl-continue-prov' }, h('img', { src: prov.logo, alt: '' })) : null,
               h('span', { class: 'wl-continue-play-ico' }, '▶')),
             h('button', {
@@ -1243,7 +1273,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       h('div', { class: 'wl-continue-strip' },
         ...latestEpsItems.slice(0, 14).map((epItem) => {
           const isMovie = epItem.mediaType === 'movie';
-          const sNum = Number(epItem.season || 1);
+          const sNum = _parseSeasonNum(epItem.season, 1);
           const eNum = Number(epItem.episode || 1);
           const epBadge = epItem.episodeLabel || (isMovie ? `🎬 ${epItem.year || 'YENİ'}` : `S${sNum}:B${eNum}`);
           const subLabel = isMovie
@@ -1283,31 +1313,16 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             },
           },
             h('div', { class: 'wl-continue-thumb' },
-              h('img', {
-                src: (epItem.poster && !isBadTmdbHash(epItem.poster))
-                  ? epItem.poster
-                  : ((epItem.still && !isBadTmdbHash(epItem.still))
-                    ? epItem.still
-                    : ((epItem.backdrop && !isBadTmdbHash(epItem.backdrop))
-                      ? epItem.backdrop
-                      : `/api/rave/poster?${qs({ tid: epItem.tmdbId || '', t: epItem.title || '', mt: posterMt })}`)),
-                alt: epItem.title || '',
-                loading: 'lazy',
-                onerror: (e) => {
-                  const el = e.currentTarget || e.target;
-                  const step = Number(el.dataset.fbStep || 0);
-                  if (step === 0 && epItem.backdrop && !isBadTmdbHash(epItem.backdrop) && el.src !== epItem.backdrop) {
-                    el.dataset.fbStep = '1';
-                    el.src = epItem.backdrop;
-                  } else if (step < 2 && epItem.title) {
-                    el.dataset.fbStep = '2';
-                    el.src = `/api/rave/poster?${qs({ tid: epItem.tmdbId || '', t: epItem.title || '', mt: posterMt })}`;
-                  } else {
-                    el.onerror = null;
-                    el.src = '/static/watchlivo-poster.svg';
-                  }
-                },
-              }),
+              (() => {
+                const epMeta = { ...epItem, mediaType: posterMt };
+                const rawEpImg = (!isBadTmdbHash(epItem.poster) && epItem.poster) || (!isBadTmdbHash(epItem.still) && epItem.still) || (!isBadTmdbHash(epItem.backdrop) && epItem.backdrop) || '';
+                return h('img', {
+                  src: proxyPosterUrl(rawEpImg, epMeta),
+                  alt: epItem.title || '',
+                  loading: 'lazy',
+                  onerror: (e) => healPosterError(e.currentTarget || e.target, epMeta),
+                });
+              })(),
               h('span', { class: 'wl-ep-badge' }, epBadge),
               h('span', { class: 'wl-continue-play-ico' }, '▶')),
             h('div', { class: 'wl-continue-body' },
@@ -1398,10 +1413,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           },
         },
           h('img', {
-            src: item.poster || item.backdrop || '/static/watchlivo-poster.svg',
+            src: proxyPosterUrl(item.poster || item.backdrop || '', item),
             alt: item.title,
             loading: 'lazy',
-            onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; },
+            onerror: (e) => healPosterError(e.currentTarget || e.target, item),
           }),
           h('div', { class: 'hero-mini-body' },
             h('div', { class: 'hero-mini-title' }, item.title),
@@ -1446,7 +1461,9 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             h('span', { class: 'tag-badge' }, heroItem.mediaType === 'tv' ? '📺 Popüler Dizi' : '🎬 Sinema Filmi'),
             h('span', { class: 'tag-badge' }, `⭐ IMDb ${heroItem.rating || '8.3'}`),
             h('span', { class: 'tag-badge' }, '4K HDR'),
-            h('span', { class: 'tag-badge' }, '🇹🇷 Türkçe Dublaj & Altyazı')),
+            (heroItem.origLang === 'tr' || heroItem.hasTrDub)
+              ? h('span', { class: 'tag-badge' }, heroItem.origLang === 'tr' ? '🇹🇷 Yerli Yapım' : '🇹🇷 Türkçe Dublaj')
+              : null),
           h('h1', { class: 'hero-main-title' }, `${heroItem.title}${heroItem.year && !String(heroItem.title).includes(heroItem.year) ? ` (${heroItem.year})` : ''}`),
           h('p', { class: 'hero-synopsis' }, heroItem.overview || 'Arkadaşlarınızla aynı anda, tek kare gecikmesiz 1080p/4K film, dizi ve anime izleyin.'),
           h('div', { class: 'hero-btn-row' },
@@ -1523,13 +1540,13 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         h('div', { class: 'hero-art-stage' },
           h('img', {
             class: 'hero-main-img',
-            src: heroItem.backdrop || heroItem.poster || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop',
+            src: proxyPosterUrl(heroItem.backdrop || heroItem.poster || '', heroItem),
             alt: heroItem.title,
             width: '780',
             height: '439',
             fetchpriority: 'high',
             decoding: 'async',
-            onerror: (e) => { e.target.src = 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop'; },
+            onerror: (e) => healPosterError(e.currentTarget || e.target, heroItem),
           }))),
       h('div', { class: 'hero-showcase-strip' },
         h('div', { class: 'hero-showcase-head' },
@@ -1654,18 +1671,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const card = h('div', { class: 'poster catalog-card', role: 'button', tabindex: '0' },
       h('div', { class: 'poster-thumb-wrap' },
         h('img', {
-          src: t.poster || (t.title ? `/api/rave/poster?${qs({ tid: t.tmdbId || t.id || '', t: t.title || '', ot: t.originalTitle || '', y: t.year || '', mt: isTv ? 'tv' : 'movie' })}` : '/static/watchlivo-poster.svg'),
+          src: proxyPosterUrl(t.poster || '', { ...t, mediaType: isTv ? 'tv' : 'movie' }),
           alt: t.title || '',
           loading: 'lazy',
-          onerror: (e) => {
-            const el = e.currentTarget || e.target;
-            if (!el.dataset.healed && (t.title || t.tmdbId)) {
-              el.dataset.healed = '1';
-              el.src = `/api/rave/poster?${qs({ tid: t.tmdbId || t.id || '', t: t.title || '', ot: t.originalTitle || '', y: t.year || '', mt: isTv ? 'tv' : 'movie' })}`;
-            } else {
-              el.src = '/static/watchlivo-poster.svg';
-            }
-          },
+          onerror: (e) => healPosterError(e.currentTarget || e.target, { ...t, mediaType: isTv ? 'tv' : 'movie' }),
         }),
         defProv?.logo ? h('span', { class: 'poster-prov-badge' }, h('img', { src: defProv.logo, alt: defProv.name })) : null),
       h('div', { class: 'pt' }, `${t.title}${t.year ? ` (${t.year})` : ''}`),
@@ -1718,7 +1727,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         p.logo ? h('img', { src: p.logo, alt: p.name }) : null,
         h('h3', {}, p.name),
         p.badge ? h('span', { class: 'sel-provider-tag' }, p.badge) : null),
-      !compact ? h('button', {
+      (!compact && p.kind === 'catalog') ? h('button', {
         type: 'button',
         id: 'btn-random-movie',
         class: 'provider-cat-pill random-pill',
@@ -1784,6 +1793,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     try { _unsubHomeYt?.(); } catch (_) {}
     try { _unsubCloudMedia?.(); } catch (_) {}
     document.removeEventListener('pointerdown', _onDocPointerDown, true);
+    document.removeEventListener('keydown', _onDocKeyDown);
   };
   return root;
 }
@@ -1802,7 +1812,38 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
     return resolveMusicItem({ url, videoId: provider === 'ytmusic' ? id : '', title: fallbackTitle || `${p?.name || 'Müzik'} Parçası` }, p);
   }
   if (provider === 'youtube') return { provider, videoId: id, url: `https://www.youtube.com/watch?v=${id}`, title: fallbackTitle || 'YouTube videosu', thumbnail: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, channel: 'YouTube' };
-  if (provider === 'twitch') return { provider, videoId: id, url: `https://www.twitch.tv/${id.startsWith('v') ? 'videos/' + id.slice(1) : (/^\d+$/.test(id) ? 'videos/' + id : id)}`, embedUrl: id.startsWith('v') ? 'https://player.twitch.tv/?video=' + id.slice(1) + '&parent=' + location.hostname : 'https://player.twitch.tv/?channel=' + id + '&parent=' + location.hostname, title: fallbackTitle || `Twitch · ${id}`, channel: 'Twitch', thumbnail: (id.startsWith('v') || /^\d+$/.test(id)) ? '' : `https://static-cdn.jtvnw.net/previews-ttv/live_user_${id.toLowerCase()}-640x360.jpg` };
+  if (provider === 'twitch') {
+    const urlStr = String(url || '');
+    const clipQueryM = urlStr.match(/[?&]clip=([A-Za-z0-9_-]+)/i);
+    const clipPathM = urlStr.match(/(?:clips\.twitch\.tv\/|(?:[a-z0-9-]+\.)?twitch\.tv\/(?:[^/?#]+\/)?clip\/)([A-Za-z0-9_-]+)/i);
+    const clipFromUrl = (clipQueryM && clipQueryM[1]) || ((clipPathM && clipPathM[1] && clipPathM[1].toLowerCase() !== 'embed') ? clipPathM[1] : '');
+    const clipSlug = clipFromUrl || (String(id || '').startsWith('clip:') ? String(id).slice(5) : '');
+    if (clipSlug) {
+      return {
+        provider,
+        clip: clipSlug,
+        videoId: clipSlug,
+        url: url || `https://clips.twitch.tv/${clipSlug}`,
+        embedUrl: `https://clips.twitch.tv/embed?clip=${encodeURIComponent(clipSlug)}&parent=${encodeURIComponent(location.hostname)}`,
+        title: fallbackTitle || `Twitch Klip · ${clipSlug}`,
+        channel: 'Twitch',
+        thumbnail: '',
+      };
+    }
+    const isVod = String(id).startsWith('v') || /^\d+$/.test(String(id));
+    const cleanVod = String(id).replace(/^v/i, '');
+    return {
+      provider,
+      videoId: cleanVod,
+      url: `https://www.twitch.tv/${isVod ? 'videos/' + cleanVod : cleanVod}`,
+      embedUrl: isVod
+        ? `https://player.twitch.tv/?video=v${cleanVod}&parent=${encodeURIComponent(location.hostname)}`
+        : `https://player.twitch.tv/?channel=${encodeURIComponent(cleanVod)}&parent=${encodeURIComponent(location.hostname)}`,
+      title: fallbackTitle || `Twitch · ${cleanVod}`,
+      channel: 'Twitch',
+      thumbnail: isVod ? '' : `https://static-cdn.jtvnw.net/previews-ttv/live_user_${cleanVod.toLowerCase()}-640x360.jpg`,
+    };
+  }
   if (provider === 'kick') return { provider, videoId: id, url: `https://kick.com/${id}`, embedUrl: `https://player.kick.com/${encodeURIComponent(id)}?autoplay=true`, title: fallbackTitle || `Kick · ${id}`, channel: 'Kick', live: true };
   if (provider === 'dailymotion') return { provider, videoId: id, url: `https://www.dailymotion.com/video/${id}`, embedUrl: `https://www.dailymotion.com/embed/video/${id}`, title: fallbackTitle || `Dailymotion · ${id}`, thumbnail: `https://www.dailymotion.com/thumbnail/video/${id}`, channel: 'Dailymotion' };
   if (provider === 'tiktok') return { provider, videoId: id, url, embedUrl: `https://www.tiktok.com/embed/v2/${id}`, title: fallbackTitle || `TikTok · #${id}`, channel: 'TikTok' };
@@ -1851,7 +1892,19 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
   if (provider === 'web') {
     try {
       const r = await api(`/api/rave/extract-video?${qs({ url, title: fallbackTitle })}`, { timeout: 15000 });
-      if (r.provider === 'youtube') return { ...r, channel: 'YouTube' };
+      if (r.provider === 'youtube') return { ...r, channel: r.channel || 'YouTube' };
+      if (r.embedUrl) {
+        return {
+          ...r,
+          provider: r.provider || 'web',
+          videoId: r.videoId || r.video || r.clip || r.fileId || '',
+          url: r.url || url,
+          embedUrl: r.embedUrl,
+          title: r.title || fallbackTitle || 'Web videosu',
+          thumbnail: r.thumbnail || '',
+          channel: r.channel || new URL(url).hostname,
+        };
+      }
       if (r.url) return { provider: r.provider === 'hls' ? 'hls' : 'direct', url: r.url, title: r.title || fallbackTitle || 'Web videosu', thumbnail: r.thumbnail || '', channel: new URL(url).hostname };
     } catch (e) {
       toast(e.data?.error || 'Bu sayfada oynatılabilir video bulunamadı');
@@ -1878,7 +1931,7 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
           name: media?.title || 'Sinema Odası',
           privacy: 'friends',
           voipMode: 'all',
-          playMode: 'all',
+          playMode: 'leader',
           creator: state.self?.name || 'Misafir',
           creatorId: state.self?.uid || state.self?.id || cid,
           clientId: cid,
@@ -1952,7 +2005,7 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
     if (!item.isMusic) {
       try {
         resolved = await Promise.race([
-          resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1, '', { silentErrors: true }),
+          resolveCatalogItem(resolvePayload, targetProv, _parseSeasonNum(item.season, 1), item.episode || 1, '', { silentErrors: true }),
           new Promise((r) => setTimeout(() => r(null), 12000)),
         ]);
       } catch (err) {
@@ -1966,7 +2019,7 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
       return;
     }
     if (resolvedMediaType === 'tv' && (resolvePayload.tmdbId || resolvePayload.title)) {
-      toast(`⚠️ S${item.season || 1}:B${item.episode || 1} kaynağı henüz bulunamadı — mevcut bölümler açılıyor...`);
+      toast(`⚠️ S${_parseSeasonNum(item.season, 1)}:B${item.episode || 1} kaynağı henüz bulunamadı — mevcut bölümler açılıyor...`);
       openTvSeriesModal(resolvePayload, targetProv);
       return;
     }
@@ -2012,30 +2065,20 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
             const durSec = Math.max(0, Math.floor(Number(item.duration || 0)));
             const isDone = Boolean(item.completed || Number(item.percent || 0) >= 95);
             const pct = isDone ? 100 : (durSec > 30 ? Math.max(4, Math.min(99, Math.round((resumeSec / durSec) * 100))) : Math.max(6, Math.min(94, Math.round(Number(item.percent || 10)))));
-            const epTag = item.mediaType === 'tv' ? `S${item.season || 1}:B${item.episode || 1} · ` : '';
+            const epTag = item.mediaType === 'tv' ? `S${_parseSeasonNum(item.season, 1)}:B${item.episode || 1} · ` : '';
             const itemKey = item.historyId || item.key || item.tmdbId || item.title;
             const rowCleanTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim();
             const rowHistYear = item.year || (String(item.title || '').match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
             const rowMt = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(String(item.title || '')) ? 'tv' : 'movie');
-            const rowPoster = (item.poster && !item.poster.includes('watchlivo-poster.svg') && !isBadTmdbHash(item.poster))
-              ? item.poster
-              : ((item.thumbnail && !item.thumbnail.includes('watchlivo-poster.svg') && !isBadTmdbHash(item.thumbnail))
-                ? item.thumbnail
-                : ((item.backdrop && !item.backdrop.includes('watchlivo-poster.svg') && !isBadTmdbHash(item.backdrop))
-                  ? item.backdrop
-                  : `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: rowCleanTitle || item.title, ot: item.originalTitle || '', y: rowHistYear, mt: rowMt })}`));
+            const rowHistMeta = { provider: item.provider || '', tmdbId: item.tmdbId || item.id || '', title: rowCleanTitle || item.title, originalTitle: item.originalTitle || '', year: rowHistYear, mediaType: rowMt };
+            const rawRowPoster = (!isBadTmdbHash(item.poster) && item.poster) || (!isBadTmdbHash(item.thumbnail) && item.thumbnail) || (!isBadTmdbHash(item.backdrop) && item.backdrop) || '';
+            const rowPoster = proxyPosterUrl(rawRowPoster, rowHistMeta);
             return h('div', { class: 'wl-history-row' },
               h('img', {
                 class: 'wl-history-poster',
                 src: rowPoster,
                 alt: item.title || '',
-                onerror: (e) => {
-                  if (!e.target.src.includes('/api/rave/poster') && (rowCleanTitle || item.title)) {
-                    e.target.src = `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: rowCleanTitle || item.title, ot: item.originalTitle || '', y: rowHistYear, mt: rowMt })}`;
-                  } else {
-                    e.target.src = '/static/watchlivo-poster.svg';
-                  }
-                },
+                onerror: (e) => healPosterError(e.currentTarget || e.target, rowHistMeta),
               }),
               h('div', { class: 'wl-history-meta' },
                 h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' } },
@@ -2065,7 +2108,7 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
           h('span', {}, 'Beğendiğin film ve dizilerde 🔖 butonuna basarak kişisel listene ekleyebilirsin.')));
       } else {
         body.append(...favList.map((fav) => h('div', { class: 'wl-history-row' },
-          h('img', { class: 'wl-history-poster', src: fav.poster || fav.backdrop || '/static/watchlivo-poster.svg', alt: fav.title || '', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+          h('img', { class: 'wl-history-poster', src: proxyPosterUrl(fav.poster || fav.backdrop || '', fav), alt: fav.title || '', onerror: (e) => healPosterError(e.currentTarget || e.target, fav) }),
           h('div', { class: 'wl-history-meta' },
             h('strong', { class: 'wl-history-title' }, fav.title || 'Yapım'),
             h('div', { class: 'wl-history-sub' }, `${fav.year || '2025'} · ${fav.mediaType === 'tv' ? '📺 Dizi' : '🎬 Film'}`)),

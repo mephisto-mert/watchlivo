@@ -1,17 +1,17 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261122_v238';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp, isIosBrowser } from '../ui.js?v=20261124_v239';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
-  getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261122_v238';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261122_v238';
-import { api } from '../api.js?v=20261122_v238';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261122_v238';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261122_v238';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261122_v238';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261122_v238';
+  getRecentRoomsKey,
+} from '../store.js?v=20261124_v239';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261124_v239';
+import { api } from '../api.js?v=20261124_v239';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261124_v239';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261124_v239';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261124_v239';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261124_v239';
 
 let refreshTimer = null;
 let homeDrawTimer = null;
@@ -48,7 +48,7 @@ function attachTubelight(container, itemSel, activeCls) {
 export function navIcon(name, tip, onClick, { selected = false, disabled = false, badge = 0, red = false, id } = {}) {
   return h('button', { class: `nav-icon ${selected ? 'selected' : ''} ${disabled ? 'disabled' : ''}`, 'data-tip': tip, 'aria-label': tip, id, onclick: onClick },
     h('span', { html: icons[name], style: { display: 'flex' } }),
-    badge > 0 ? h('span', { class: `badge ${red ? 'red' : ''}` }, badge > 9999 ? '9.9B+' : badge) : null);
+    badge > 0 ? h('span', { class: `badge ${red ? 'red' : ''}` }, badge > 9999 ? '9.9K+' : badge) : null);
 }
 
 export function logo() {
@@ -62,7 +62,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261122_v238', alt: 'Watchlivo', width: '28', height: '28' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261124_v239', alt: 'Watchlivo', width: '28', height: '28' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -72,7 +72,104 @@ export function openRoom(room) {
   window.vortexNavigate(`/mesh/${encodeURIComponent(room.id)}`);
 }
 
-export async function createRoomWithMedia(media) {
+export function openCreateRoomModal(media = null, defaults = {}) {
+  const self = state.self || { id: 'guest_user', name: 'İzleyici', isGuest: true };
+  const resumePos = Number.isFinite(Number(media?.currentTime)) && Number(media.currentTime) > 5 ? Math.floor(Number(media.currentTime)) : 0;
+  const cleanMedia = media ? { ...media, currentTime: resumePos } : null;
+  const defaultName = (cleanMedia?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(cleanMedia.title))
+    ? String(cleanMedia.title).trim().slice(0, 64)
+    : `${self.name || 'İzleyici'} odası`;
+  let selectedPrivacy = ['public', 'friends', 'private'].includes(defaults?.privacy) ? defaults.privacy : 'private';
+
+  const nameInp = h('input', {
+    class: 'input',
+    id: 'wl-create-room-name',
+    maxlength: '64',
+    value: String(defaults?.name || defaultName).slice(0, 64),
+    placeholder: 'Örn: Gece Sineması',
+  });
+  const pwdInp = h('input', {
+    class: 'input',
+    id: 'wl-create-room-password',
+    type: 'password',
+    autocomplete: 'new-password',
+    maxlength: '64',
+    value: String(defaults?.password || ''),
+    placeholder: 'Şifre belirle (boşsa şifresiz)',
+  });
+  const errEl = h('div', { class: 'wl-auth-err', style: { display: 'none', color: '#f87171', fontSize: '.82rem', marginTop: '4px' } });
+
+  const privBtns = [];
+  const privOpts = [
+    ['private', '🔒 Gizli Oda', 'Yalnızca kod & davet linki'],
+    ['friends', '👥 Arkadaşlar', 'Sadece onaylı arkadaşların'],
+    ['public', '🌐 Herkese Açık', 'Canlı odalar lobisinde görünür'],
+  ];
+  const privSeg = h('div', { class: 'seg', id: 'wl-create-room-privacy' }, privOpts.map(([val, lbl, dsc]) => {
+    const b = h('button', {
+      type: 'button',
+      class: selectedPrivacy === val ? 'on' : '',
+      'data-privacy': val,
+      onclick: () => {
+        selectedPrivacy = val;
+        privBtns.forEach((btn) => btn.classList.toggle('on', btn.dataset.privacy === val));
+      },
+    }, lbl, h('small', {}, dsc));
+    privBtns.push(b);
+    return b;
+  }));
+
+  const content = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+    cleanMedia?.title ? h('div', { class: 'dim', style: { fontSize: '.82rem' } }, `🎬 Seçilen içerik: ${cleanMedia.title}`) : null,
+    h('label', { for: 'wl-create-room-name', style: { fontSize: '.8rem', fontWeight: '700' } }, 'Oda Adı'),
+    nameInp,
+    h('label', { style: { fontSize: '.8rem', fontWeight: '700' } }, 'Oda Gizliliği'),
+    privSeg,
+    h('label', { for: 'wl-create-room-password', style: { fontSize: '.8rem', fontWeight: '700' } }, 'Oda Şifresi (İsteğe Bağlı)'),
+    pwdInp,
+    errEl
+  );
+
+  return popup({
+    title: '🎬 Yeni İzleme Odası Oluştur',
+    kind: 'create-room',
+    dismissable: true,
+    content,
+    options: [
+      {
+        label: '🚀 Odayı Oluştur',
+        primary: true,
+        onClick: async () => {
+          errEl.style.display = 'none';
+          errEl.textContent = '';
+          const typedName = nameInp.value.trim().slice(0, 64);
+          const finalName = typedName || defaultName;
+          const customName = Boolean(defaults?.customName || (typedName && typedName !== defaultName));
+          const password = pwdInp.value.trim().slice(0, 64);
+          try {
+            await createRoomWithMedia(cleanMedia, {
+              ...defaults,
+              name: finalName,
+              rawName: finalName,
+              customName,
+              privacy: selectedPrivacy,
+              password,
+              confirmed: true,
+            });
+            return false;
+          } catch (e) {
+            errEl.textContent = e?.data?.error || e?.message || 'Oda oluşturulamadı, lütfen tekrar deneyin.';
+            errEl.style.display = 'block';
+            return true;
+          }
+        },
+      },
+      { label: 'Vazgeç' },
+    ],
+  });
+}
+
+export async function createRoomWithMedia(media, roomOpts = {}) {
   const self = state.self || { id: 'guest_user', name: 'İzleyici', isGuest: true };
   const resumePos = Number.isFinite(Number(media?.currentTime)) && Number(media.currentTime) > 5 ? Math.floor(Number(media.currentTime)) : 0;
   const cleanMedia = media ? { ...media, currentTime: resumePos } : media;
@@ -82,22 +179,45 @@ export async function createRoomWithMedia(media) {
     window.vortexActions.pickMedia(cleanMedia);
     return;
   }
+  if (!roomOpts?.confirmed && !roomOpts?.privacy) {
+    openCreateRoomModal(cleanMedia, roomOpts);
+    return;
+  }
   let cid = '';
   try {
     cid = sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
     sessionStorage.setItem('vortex_cid', cid);
   } catch (e) { /* ignore */ }
-  const initialRoomName = (cleanMedia?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(cleanMedia.title))
-    ? String(cleanMedia.title).trim().slice(0, 80)
+  const defaultName = (cleanMedia?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(cleanMedia.title))
+    ? String(cleanMedia.title).trim().slice(0, 64)
     : `${self.name || 'İzleyici'} odası`;
+  const roomName = String(roomOpts?.name || '').trim().slice(0, 64) || defaultName;
+  const customName = Boolean(roomOpts?.customName || (roomOpts?.name && String(roomOpts.name).trim() !== defaultName));
+  const privacy = ['public', 'friends', 'private'].includes(roomOpts?.privacy) ? roomOpts.privacy : 'private';
+  const password = String(roomOpts?.password || '').trim().slice(0, 64);
+  const playMode = ['leader', 'cohost', 'autoplay', 'quickplay', 'vote'].includes(roomOpts?.playMode) ? roomOpts.playMode : 'leader';
+  const voipMode = ['all', 'stage', 'leader', 'off'].includes(roomOpts?.voipMode) ? roomOpts.voipMode : 'all';
+  const hideLoc = roomOpts?.hideLocation !== undefined
+    ? Boolean(roomOpts.hideLocation)
+    : (self.hideLocation === true || self.hideLocation === 1 || self.hideLocation === '1');
+  const hideWatch = roomOpts?.hideWatching !== undefined
+    ? Boolean(roomOpts.hideWatching)
+    : (self.hideWatching === true || self.hideWatching === 1 || self.hideWatching === '1');
+  const hideFr = roomOpts?.hideFriends !== undefined
+    ? Boolean(roomOpts.hideFriends)
+    : (self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1');
   const res = await api('/api/rooms/create', {
     method: 'POST',
     body: {
-      name: initialRoomName,
-      privacy: 'public',
-      playMode: 'leader',
+      name: roomName,
+      rawName: String(roomOpts?.rawName || roomName),
+      customName,
+      privacy,
+      password,
+      playMode,
+      voipMode,
       creator: self.name || 'İzleyici',
-      creatorId: self.id || '',
+      creatorId: self.id || self.uid || '',
       clientId: cid,
       color: self.color || '#27DCC8',
       handle: self.handle || '',
@@ -107,10 +227,12 @@ export async function createRoomWithMedia(media) {
       statusEmoji: self.statusEmoji || '🍿',
       medal: self.medal || '',
       watchMinutes: self.watchMinutes || 0,
-      hideLocation: self.hideLocation === true || self.hideLocation === 1 || self.hideLocation === '1',
-      hideWatching: self.hideWatching === true || self.hideWatching === 1 || self.hideWatching === '1',
-      hideFriends: self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1',
-      friendsPreview: (self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1') ? [] : (getFriends() || []).slice(0, 10),
+      hideLocation: hideLoc,
+      hideWatching: hideWatch,
+      hideFriends: hideFr,
+      friendsPreview: Array.isArray(roomOpts?.friendsPreview)
+        ? roomOpts.friendsPreview
+        : (hideFr ? [] : (getFriends() || []).slice(0, 10)),
       device: (() => {
         const ua = navigator.userAgent || '';
         if (/WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua))) return 'Mobil Uygulama';
@@ -129,6 +251,9 @@ export async function createRoomWithMedia(media) {
         forgetRoom(oldId);
       }
     }
+    if (password) {
+      sessionStorage.setItem(`vortex_pwd_${res.room.id}`, password);
+    }
     if (res.clientId) {
       sessionStorage.setItem('vortex_cid', res.clientId);
       sessionStorage.setItem(`vortex_creator_${res.room.id}`, res.clientId);
@@ -143,6 +268,7 @@ export async function createRoomWithMedia(media) {
   } catch (e) { /* ignore */ }
   rememberRoom(res.room);
   window.vortexNavigate(`/mesh/${encodeURIComponent(res.room.id)}?new=1&cid=${encodeURIComponent(res.clientId || cid)}`);
+  return res.room;
 }
 
 export function renderHome(app) {
@@ -206,29 +332,18 @@ export function renderHome(app) {
       navIcon('settings', 'Ayarlar & Tema', () => openAppSettings(), { id: 'nav-theme-btn' })),
     h('div', { class: 'nav-center navbar-center' }, logo()),
     h('div', { class: 'nav-right navbar-right' },
-      !isNativeWatchlivoApp() ? h('a', {
+      (!isNativeWatchlivoApp() && !isIosBrowser()) ? h('a', {
         class: 'apk-badge wl-btn-apk',
         id: 'nav-btn-apk',
         href: '/download/Watchlivo-v2.0.apk',
         download: 'Watchlivo-v2.0.apk',
-        title: 'Watchlivo Native Android APK İndir (v2.0.2 Otomatik Güncellemeli)',
-        onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000),
+        title: 'Watchlivo Native Android APK İndir (v2.0 Otomatik Güncellemeli)',
+        onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000),
       },
       h('span', { html: icons.android, style: { display: 'flex' } }),
-      h('span', { class: 'wl-btn-apk-text' }, 'APK İndir (v2.0.2)')) : null,
-      h('button', { type: 'button', class: 'btn-create-room btn primary', id: 'btn-create-room', onclick: async (ev) => {
-        const btnEl = ev?.currentTarget;
-        if (btnEl?.dataset?.busy === '1') return;
-        if (btnEl) { btnEl.dataset.busy = '1'; btnEl.disabled = true; }
-        try {
-          await createRoomWithMedia(null);
-        } catch (e) {
-          toast(e?.message || 'Oda oluşturulamadı, lütfen tekrar deneyin.');
-          document.getElementById('home-selection')?.scrollIntoView({ behavior: 'smooth' });
-          setTimeout(() => document.querySelector('#home-selection .home-search input')?.focus(), 80);
-        } finally {
-          if (btnEl) { delete btnEl.dataset.busy; btnEl.disabled = false; }
-        }
+      h('span', { class: 'wl-btn-apk-text' }, 'APK İndir (v2.0)')) : null,
+      h('button', { type: 'button', class: 'btn-create-room btn primary', id: 'btn-create-room', onclick: () => {
+        openCreateRoomModal(null);
       } }, h('span', { html: icons.plus, style: { display: 'flex' } }), h('span', { class: 'create-room-lbl' }, 'Oda Oluştur')),
       navIcon('download', 'Tüm Uygulamaları İndir (APK & Windows)', () => openDownloadModal(), { id: 'nav-download-btn' }),
       navIcon('link', 'Kodla katıl', () => joinByCode())));
@@ -262,10 +377,11 @@ export function renderHome(app) {
       b.setAttribute('aria-selected', isOn ? 'true' : 'false');
     });
   };
-  const tabs = h('div', { class: 'lobby-tabs', role: 'tablist', 'aria-label': 'Oda Filtreleri' }, [['all', 'Tümü'], ['friends', 'Arkadaşlar'], ['public', 'Herkese Açık']].map(([k, label]) =>
+  const tabs = h('div', { class: 'lobby-tabs', role: 'tablist', 'aria-label': 'Oda Filtreleri' }, [['all', 'Tümü'], ['friends', 'Arkadaşlar'], ['public', 'Herkese Açık'], ['tv', '7/24 TV']].map(([k, label]) =>
     h('button', {
       type: 'button',
       role: 'tab',
+      'data-tab': k,
       'aria-selected': k === filter ? 'true' : 'false',
       class: `lobby-tab ${k === filter ? 'on' : ''}`,
       onclick: (e) => {
@@ -292,11 +408,60 @@ export function renderHome(app) {
   };
   lobbySearch.addEventListener('input', () => { query = lobbySearch.value; draw(true); });
 
+  let tvScrollObs = null;
+  let tvScrollTimer = null;
+  const scrollToSectionWhenReady = (targetId, fallbackId = 'lobby-anchor') => {
+    if (tvScrollObs) { tvScrollObs.disconnect(); tvScrollObs = null; }
+    clearTimeout(tvScrollTimer);
+    const tryScroll = () => {
+      const target = document.getElementById(targetId);
+      if (target) {
+        requestAnimationFrame(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        return true;
+      }
+      return false;
+    };
+    if (tryScroll()) return;
+    const anchor = document.getElementById(fallbackId);
+    if (anchor) requestAnimationFrame(() => anchor.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    if (typeof MutationObserver !== 'undefined') {
+      tvScrollObs = new MutationObserver(() => {
+        if (tryScroll()) {
+          tvScrollObs?.disconnect();
+          tvScrollObs = null;
+          clearTimeout(tvScrollTimer);
+        }
+      });
+      tvScrollObs.observe(lobbyBox, { childList: true, subtree: true });
+      tvScrollTimer = setTimeout(() => {
+        tvScrollObs?.disconnect();
+        tvScrollObs = null;
+        const el = document.getElementById(targetId) || document.getElementById(fallbackId);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 3000);
+      tubelightCleanups.push(() => {
+        tvScrollObs?.disconnect();
+        tvScrollObs = null;
+        clearTimeout(tvScrollTimer);
+      });
+    }
+  };
+
+  const openLiveTvView = () => {
+    selection.setProvider(null);
+    filter = 'tv';
+    const tvTabBtn = tabs.querySelector('[data-tab="tv"]');
+    syncLobbyTabsA11y(tvTabBtn);
+    tabs._syncTubelight?.();
+    draw(true);
+    scrollToSectionWhenReady('lobby-sec-tv', 'lobby-anchor');
+  };
+
   const appBanner = h('div', { class: 'wl-app-banner', id: 'home-app-banner' },
     h('div', { class: 'wl-app-banner-icon' }, h('span', { html: icons.android, style: { display: 'flex' } })),
     h('div', { class: 'wl-app-banner-text' },
       h('div', { class: 'wl-app-banner-title' },
-        h('span', { class: 'wl-app-banner-badge' }, 'NATIVE v2.0.2'),
+        h('span', { class: 'wl-app-banner-badge' }, 'NATIVE v2.0'),
         h('b', { class: 'wl-app-banner-name' }, 'Watchlivo Android', h('span', { class: 'wl-app-banner-extra' }, ' Uygulaması (Otomatik Güncellemeli)'))),
       h('span', { class: 'wl-app-banner-sub' }, 'Gerçek donanım oynatıcı, otomatik PiP ve Rave.io tarzı otomatik güncellemeli yeni sürüm.')),
     h('div', { class: 'wl-app-banner-actions' },
@@ -304,7 +469,7 @@ export function renderHome(app) {
         class: 'btn primary sm wl-banner-apk-btn',
         href: '/download/Watchlivo-v2.0.apk',
         download: 'Watchlivo-v2.0.apk',
-        onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
+        onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000)
       }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir'),
       h('button', {
         class: 'btn sm wl-banner-info-btn',
@@ -360,15 +525,7 @@ export function renderHome(app) {
       }, 40);
     }),
     makeDockBtn('tv', '7/24 Canlı TV & Radyolar', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>', false, () => {
-      selection.setProvider(null);
-      filter = 'all';
-      syncLobbyTabsA11y();
-      tabs._syncTubelight?.();
-      draw(true);
-      setTimeout(() => {
-        const el = document.getElementById('lobby-sec-tv') || document.getElementById('lobby-anchor');
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 40);
+      openLiveTvView();
     }),
     makeDockBtn('profile', 'Profilim & Ayarlar', icons.friends, false, () => {
       const openProfile = document.querySelector('.popup-backdrop[data-popup-kind="profile"]:not(.is-closing)');
@@ -451,15 +608,7 @@ export function renderHome(app) {
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     },
     onScrollToTv: () => {
-      selection.setProvider(null);
-      filter = 'all';
-      syncLobbyTabsA11y();
-      tabs._syncTubelight?.();
-      draw(true);
-      setTimeout(() => {
-        const el = document.getElementById('lobby-sec-tv') || document.getElementById('lobby-anchor');
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 40);
+      openLiveTvView();
     },
     onRandomMovie: () => {
       if (typeof selection.pickRandom === 'function') selection.pickRandom();
@@ -468,7 +617,7 @@ export function renderHome(app) {
   });
 
   const glassWindow = h('div', { class: 'glass-main-window' },
-    !isNativeWatchlivoApp() ? appBanner : null,
+    (!isNativeWatchlivoApp() && !isIosBrowser()) ? appBanner : null,
     selection,
     friendsStripEl,
     h('div', { id: 'lobby-anchor', class: 'lobby-toolbar' },
@@ -502,7 +651,7 @@ export function renderHome(app) {
       btn.append(b);
     }
     b.className = `badge ${isRed ? 'red' : ''}`;
-    b.textContent = n > 9999 ? '9.9B+' : String(n);
+    b.textContent = n > 9999 ? '9.9K+' : String(n);
   };
 
   let lastSelfSig = getSelfSig(state.self);
@@ -571,7 +720,6 @@ export function renderHome(app) {
       window.__wlSyncViewport?.();
     });
   } catch (_) {}
-  updateMiniPip();
   initCookieConsentBanner();
   let emptyStreak = 0;
   const load = async () => {
@@ -584,7 +732,6 @@ export function renderHome(app) {
       emptyStreak = 0;
       rooms = next;
       draw();
-      updateMiniPip();
     } catch (e) { if (!rooms.length) lobbyBox.replaceChildren(h('div', { class: 'lobby-empty' }, 'Odalar yüklenemedi.')); }
   };
   lobbyBox.append(h('div', { style: { display: 'flex', justifyContent: 'center', padding: '1.5em' } }, h('div', { class: 'spinner' })));
@@ -612,70 +759,72 @@ export function destroyHome() {
 }
 
 function joinByCode() {
-  const input = h('input', { class: 'input', placeholder: 'Oda kodu veya davet bağlantısı' });
-  popup({ title: 'Odaya Katıl', content: input, options: [{ label: 'Katıl', primary: true, onClick: () => {
-    const v = input.value.trim();
-    const m = v.match(/\/(?:r|join)\/([^/?#]+)/i) || v.match(/mesh\/([^/?#]+)/i) || v.match(/[?&]room=([^&#]+)/i);
-    const id = m ? decodeURIComponent(m[1]) : v.replace(/[^a-z0-9-]/gi, '').toLowerCase();
-    if (!id) {
-      toast('Lütfen geçerli bir oda kodu veya davet bağlantısı girin');
-      input.focus();
-      return true;
-    }
-    openRoom({ id });
-  } }, { label: 'Vazgeç' }] });
+  const input = h('input', { class: 'input', id: 'wl-join-code-input', placeholder: 'Oda kodu (#417a99be43) veya davet bağlantısı' });
+  const errEl = h('div', { class: 'wl-auth-err', id: 'wl-join-err', style: { display: 'none', color: '#f87171', fontSize: '.82rem', marginTop: '6px' } });
+  const box = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } }, input, errEl);
+  popup({
+    title: 'Odaya Katıl',
+    content: box,
+    options: [
+      {
+        label: 'Katıl',
+        primary: true,
+        onClick: async () => {
+          errEl.style.display = 'none';
+          errEl.textContent = '';
+          const v = input.value.trim();
+          const m = v.match(/\/(?:r|join)\/([^/?#]+)/i) || v.match(/mesh\/([^/?#]+)/i) || v.match(/[?&]room=([^&#]+)/i);
+          const pwdMatch = v.match(/[?&]pwd=([^&#]+)/i);
+          const parsedPwd = pwdMatch ? decodeURIComponent(pwdMatch[1]) : '';
+          let id = m ? decodeURIComponent(m[1]) : v.replace(/^#/, '').replace(/[^a-z0-9-]/gi, '').toLowerCase();
+          if (!m && id && !id.includes('-') && (/^#/.test(v) || /^[a-f0-9]{8,16}$/i.test(id))) {
+            id = `wl-${id}`;
+          }
+          if (!id) {
+            errEl.textContent = 'Lütfen geçerli bir oda kodu veya davet bağlantısı girin.';
+            errEl.style.display = 'block';
+            input.focus();
+            return true;
+          }
+          let infoRes = null;
+          let infoErr = null;
+          try {
+            infoRes = await api(`/api/rooms/${encodeURIComponent(id)}/info`);
+          } catch (e) {
+            infoErr = e;
+            if (Number(e?.status) === 404 && !id.startsWith('wl-') && !id.startsWith('tv-') && !id.startsWith('radyo-') && !id.includes('-')) {
+              try {
+                const wlId = `wl-${id}`;
+                infoRes = await api(`/api/rooms/${encodeURIComponent(wlId)}/info`);
+                id = wlId;
+                infoErr = null;
+              } catch (e2) {
+                infoErr = e2;
+              }
+            }
+          }
+          if (infoErr || !infoRes?.ok || !infoRes?.room) {
+            errEl.textContent = infoErr?.data?.error || 'Bu kodla aktif bir oda bulunamadı veya oda kapatılmış.';
+            errEl.style.display = 'block';
+            input.focus();
+            return true;
+          }
+          if (parsedPwd) {
+            try { sessionStorage.setItem(`vortex_pwd_${infoRes.room.id}`, parsedPwd); } catch (_) {}
+            rememberRoom(infoRes.room);
+            window.vortexNavigate(`/mesh/${encodeURIComponent(infoRes.room.id)}?pwd=${encodeURIComponent(parsedPwd)}`);
+            return false;
+          }
+          openRoom(infoRes.room);
+          return false;
+        },
+      },
+      { label: 'Vazgeç' },
+    ],
+  });
   setTimeout(() => input.focus(), 30);
 }
 
 function openAppSettings() {
   openThemeModal();
-}
-
-function updateMiniPip() {
-  const pipEl = document.getElementById('mini-pip');
-  if (!pipEl) return;
-  let activeId = '';
-  let activeTitle = 'Watchlivo Odası';
-  try {
-    const rec = JSON.parse(localStorage.getItem(getRecentRoomsKey()) || '[]')[0];
-    if (rec) {
-      activeId = rec;
-      const saved = JSON.parse(localStorage.getItem(getRoomSnapshotsKey()) || '{}')[rec];
-      if (saved?.media?.title) activeTitle = saved.media.title;
-      else if (saved?.name) activeTitle = saved.name;
-    }
-  } catch (e) { /* ignore */ }
-  const dismissed = sessionStorage.getItem('vortex_pip_dismissed');
-  if (!activeId || dismissed === activeId) {
-    pipEl.classList.remove('active');
-    return;
-  }
-  const titleEl = document.getElementById('pip-room-title');
-  if (titleEl) titleEl.textContent = activeTitle;
-  pipEl.classList.add('active');
-  const expandBtn = document.getElementById('pip-expand-btn');
-  const closeBtn = document.getElementById('pip-close-btn');
-  if (expandBtn) {
-    expandBtn.onclick = (e) => {
-      e.stopPropagation();
-      pipEl.classList.remove('active');
-      openRoom({ id: activeId });
-    };
-  }
-  if (closeBtn) {
-    closeBtn.onclick = (e) => {
-      e.stopPropagation();
-      try {
-        sessionStorage.setItem('vortex_pip_dismissed', activeId);
-        if (!String(activeId).startsWith('tv-') && !String(activeId).startsWith('radyo-')) {
-          forgetRoom(activeId);
-        }
-      } catch (err) { /* ignore */ }
-      pipEl.classList.remove('active');
-    };
-  }
-  pipEl.onclick = () => {
-    pipEl.classList.remove('active');
-    openRoom({ id: activeId });
-  };
 }

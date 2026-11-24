@@ -1,11 +1,12 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261122_v238';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261122_v238';
-import { navIcon, logo } from './home.js?v=20261122_v238';
-import { createSelection } from './selection.js?v=20261122_v238';
-import { buildControls } from './controls.js?v=20261122_v238';
-import { buildChat } from './chat.js?v=20261122_v238';
-import { PANELS } from './panels.js?v=20261122_v238';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261124_v239';
+import { state, set, subscribe, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261124_v239';
+import { profileSetup } from '../profile.js?v=20261124_v239';
+import { navIcon, logo } from './home.js?v=20261124_v239';
+import { createSelection } from './selection.js?v=20261124_v239';
+import { buildControls } from './controls.js?v=20261124_v239';
+import { buildChat } from './chat.js?v=20261124_v239';
+import { PANELS } from './panels.js?v=20261124_v239';
 
 const PRIVACY_META = {
   public: ['🌐', 'Herkese Açık'],
@@ -35,6 +36,7 @@ export function buildLayout(app, ctx) {
     theaterMode = typeof force === 'boolean' ? force : !theaterMode;
     videoChat.classList.toggle('no-chat', theaterMode);
     document.body.classList.toggle('theater-mode', theaterMode);
+    set({ chatVisible: !theaterMode, ...(!theaterMode ? { unseenChat: 0 } : {}) });
     lastNavSig = '';
     renderNav();
     controls?.update?.();
@@ -97,7 +99,7 @@ export function buildLayout(app, ctx) {
     },
       h('span', { class: 'room-nav-ico', html: icons[iconName], style: { display: 'inline-flex' } }),
       labelText ? h('span', { class: 'room-nav-lbl' }, labelText) : null,
-      badge > 0 ? h('span', { class: 'badge' }, badge > 9999 ? '9.9B+' : badge) : null);
+      badge > 0 ? h('span', { class: 'badge' }, badge > 9999 ? '9.9K+' : badge) : null);
   }
 
   let lastNavSig = '';
@@ -109,7 +111,8 @@ export function buildLayout(app, ctx) {
     const selDisabled = !canSelectVideo();
     const isCreatorOrHost = Boolean(m && !m.curated && isHostOnly());
     const mediaTitle = m?.media?.title || '';
-    const navSig = `${L}|${R}|${voteCount}|${people}|${selDisabled}|${isCreatorOrHost}|${m?.name || ''}|${m?.privacy || ''}|${state.connection}|${theaterMode}|${mediaTitle}`;
+    const unseenChat = theaterMode ? Math.max(0, Number(state.unseenChat || 0)) : 0;
+    const navSig = `${L}|${R}|${voteCount}|${people}|${selDisabled}|${isCreatorOrHost}|${m?.name || ''}|${m?.privacy || ''}|${state.connection}|${theaterMode}|${unseenChat}|${mediaTitle}`;
     if (navSig === lastNavSig) return;
     lastNavSig = navSig;
     const openSide = (side, tab) => {
@@ -183,9 +186,12 @@ export function buildLayout(app, ctx) {
         roomActionBtn('vote', 'Sıra', 'Sıra ve Oylama', () => openSide('right', 'Vote'), { selected: R === 'Vote', badge: voteCount, id: 'nav-vote' }),
         roomActionBtn('addUser', 'Davet Et', 'Arkadaş Davet Et', () => openSide('right', 'Friends'), { selected: R === 'Friends', variant: 'invite-pill', id: 'nav-invite' }),
         roomActionBtn('users', 'Kişiler', 'Katılımcılar', () => openSide('right', 'Participants'), { selected: R === 'Participants', badge: people, id: 'nav-participants' }),
+        roomActionBtn('friends', 'Profil', 'Profilim & Gizlilik Ayarları', () => {
+          profileSetup({ current: state.self, initialTab: 'account', dismissable: true, onDone: (p) => { if (p) set({ self: p }); } });
+        }, { id: 'nav-profile-btn' }),
         theaterMode
-          ? roomActionBtn('panelRightOpen', 'Sohbeti Aç', 'Sohbet Panelini Aç (T)', () => toggleTheaterMode(), { selected: true, id: 'nav-toggle-chat' })
-          : roomActionBtn('panelRightClose', 'Sinema', 'Sohbeti Gizle / Sinema Modu (T)', () => toggleTheaterMode(), { selected: false, id: 'nav-toggle-chat' })));
+          ? roomActionBtn('panelRightOpen', 'Sohbeti Aç', 'Sohbet Panelini Aç (T)', () => toggleTheaterMode(false), { selected: true, badge: unseenChat, id: 'nav-toggle-chat' })
+          : roomActionBtn('panelRightClose', 'Sinema', 'Sohbeti Gizle / Sinema Modu (T)', () => toggleTheaterMode(true), { selected: false, id: 'nav-toggle-chat' })));
   }
 
   function update() {
@@ -205,6 +211,24 @@ export function buildLayout(app, ctx) {
   renderNav();
   controls.update();
 
+  let prevUnseen = Number(state.unseenChat || 0);
+  let prevViewSig = `${state.view?.left || 'Collapsed'}|${state.view?.right || 'Collapsed'}`;
+  const unsubLayout = subscribe((st) => {
+    if (!layout.isConnected) return;
+    const nextUnseen = Number(st.unseenChat || 0);
+    const nextViewSig = `${st.view?.left || 'Collapsed'}|${st.view?.right || 'Collapsed'}`;
+    if (nextViewSig !== prevViewSig) {
+      prevViewSig = nextViewSig;
+      prevUnseen = nextUnseen;
+      update();
+      return;
+    }
+    if (nextUnseen !== prevUnseen) {
+      prevUnseen = nextUnseen;
+      renderNav();
+    }
+  });
+
   return {
     update,
     toggleTheaterMode,
@@ -223,6 +247,7 @@ export function buildLayout(app, ctx) {
     showUnmute: (b) => controls.showUnmute(b),
     destroy: () => {
       document.body.classList.remove('theater-mode');
+      try { unsubLayout?.(); } catch (_) {}
       try { cleanupResize?.(); } catch (_) {}
       try { controls.destroy?.(); } catch (_) {}
       try { chat.destroy?.(); } catch (_) {}

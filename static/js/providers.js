@@ -375,9 +375,15 @@ const INTERNAL_FALLBACK_PROVIDERS = [
     placeholder: 'Vimeo video bağlantısı yapıştır...',
     idParser: (u) => (u.match(/vimeo\.com\/(?:video\/)?(\d+)/i) || [])[1] || null },
   { id: 'twitch', name: 'Twitch', logo: LOGOS.twitch, bg: '#10121a', accent: '#9146ff', web: true, kind: 'link', freeNoAuth: true,
-    placeholder: 'Twitch kanal adı veya video bağlantısı yapıştır...',
+    placeholder: 'Twitch kanal adı, video veya klip bağlantısı yapıştır...',
     idParser: (u) => {
-      const m = u.match(/twitch\.tv\/(?:videos\/(\d+)|([a-zA-Z0-9_]+))/i);
+      const s = String(u || '').trim();
+      if (!/^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*twitch\.tv(?:[/:?#]|$)/i.test(s)) return null;
+      const queryClipM = s.match(/[?&]clip=([A-Za-z0-9_-]+)/i);
+      if (queryClipM && queryClipM[1]) return `clip:${queryClipM[1]}`;
+      const pathClipM = s.match(/(?:clips\.twitch\.tv\/|(?:[a-z0-9-]+\.)?twitch\.tv\/(?:[^/?#]+\/)?clip\/)([A-Za-z0-9_-]+)/i);
+      if (pathClipM && pathClipM[1] && pathClipM[1].toLowerCase() !== 'embed') return `clip:${pathClipM[1]}`;
+      const m = s.match(/twitch\.tv\/(?:videos\/(\d+)|([a-zA-Z0-9_]+))/i);
       return m ? (m[1] || m[2] || null) : null;
     } },
   { id: 'kick', name: 'Kick', logo: LOGOS.kick, bg: '#10121a', accent: '#53fc18', web: true, kind: 'link', freeNoAuth: true,
@@ -402,8 +408,10 @@ const INTERNAL_FALLBACK_PROVIDERS = [
 
 const _WEB_URL_RE = /^https?:\/\/(?:localhost(?::\d+)?|(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?|[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?)(?:\/|$)/i;
 const CINEMA_ALIASES = ['cinema', 'hdfilmcehennemi', 'dizibox', 'dizilife', 'fullhdfilm', 'yabancidizi'];
+const PROVIDER_ALIASES = { direct: 'web', hls: 'web', hbomax: 'max', appletv: 'apple', 'apple-tv': 'apple' };
 export const getProvider = (id) => {
-  const norm = CINEMA_ALIASES.includes(id) ? 'cinema' : (id === 'direct' || id === 'hls' ? 'web' : id);
+  const key = String(id || '').trim().toLowerCase();
+  const norm = CINEMA_ALIASES.includes(key) ? 'cinema' : (PROVIDER_ALIASES[key] || key || id);
   return PROVIDERS.find((p) => p.id === norm) || INTERNAL_FALLBACK_PROVIDERS.find((p) => p.id === norm) || null;
 };
 

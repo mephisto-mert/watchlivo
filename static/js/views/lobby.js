@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261122_v238';
-import { avatar, openDmModal } from '../profile.js?v=20261122_v238';
-import { getProvider } from '../providers.js?v=20261122_v238';
-import { api, qs } from '../api.js?v=20261122_v238';
+import { h, icons, popup, toast, proxyPosterUrl, healPosterError } from '../ui.js?v=20261124_v239';
+import { avatar, openDmModal } from '../profile.js?v=20261124_v239';
+import { getProvider } from '../providers.js?v=20261124_v239';
+import { api, qs } from '../api.js?v=20261124_v239';
 import {
-  state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
+  state, set, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261122_v238';
-import { expectedPosition } from '../sync.js?v=20261122_v238';
+} from '../store.js?v=20261124_v239';
+import { expectedPosition } from '../sync.js?v=20261124_v239';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -51,10 +51,19 @@ export function thumbFor(roomOrMedia, roomId = '') {
   if (brandSpec && (!primaryImg || primaryImg.includes('watchlivo-poster.svg'))) {
     return makeLiveBrandSvg(brandSpec);
   }
-  if (primaryImg) return primaryImg;
+  const meta = {
+    provider: m.provider || '',
+    tid: m.tmdbId || m.tid || m.id || '',
+    t: m.seriesTitle || m.title || '',
+    ot: m.originalTitle || '',
+    y: m.year || '',
+    mt: m.mediaType === 'tv' ? 'tv' : 'movie',
+  };
+  if (primaryImg) return proxyPosterUrl(primaryImg, meta);
   if (brandSpec) return makeLiveBrandSvg(brandSpec);
   if (m.provider === 'youtube' && m.videoId) return `https://i.ytimg.com/vi/${m.videoId}/hqdefault.jpg`;
-  return m.thumbnail || '/static/watchlivo-poster.svg';
+  if (meta.tid || meta.t || meta.ot) return proxyPosterUrl('', meta);
+  return '/static/watchlivo-poster.svg';
 }
 
 function fmtRoomClock(sec) {
@@ -147,7 +156,18 @@ export function meshThumb(room, onOpen) {
     },
   },
     h('div', { class: 'meshthumb-img' },
-      thumb ? h('img', { src: thumb, alt: displayTitle, decoding: 'async', onerror: (e) => { e.target.style.display = 'none'; } }) : null,
+      h('img', {
+        src: thumb || '/static/watchlivo-poster.svg',
+        alt: displayTitle,
+        decoding: 'async',
+        onerror: (e) => healPosterError(e.currentTarget || e.target, {
+          provider: media.provider || '',
+          tid: media.tmdbId || media.tid || '',
+          t: media.seriesTitle || displayTitle,
+          ot: media.originalTitle || '',
+          mt: media.mediaType === 'tv' ? 'tv' : 'movie',
+        }),
+      }),
       h('span', { class: `meshthumb-live-badge ${room.curated ? 'is-247' : ''} ${room.privacy === 'friends' ? 'is-friends' : ''}` }, liveLabel),
       (!room.curated && prov?.logo) ? h('img', { class: 'meshthumb-prov', src: prov.logo, alt: prov.name }) : null,
       dur > 0 ? h('span', { class: 'meshthumb-time' }, `${fmtRoomClock(pos)} / ${fmtRoomClock(dur)}`) : null,
@@ -569,6 +589,31 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
                 : h('button', { type: 'button', class: 'btn sm primary', onclick: () => triggerSendReq(uCard.handle || uCard.name, { targetUid: uCard.uid }) }, '+ Arkadaş Ekle'));
           })) : (searchQuery.length >= 2 && !searching ? h('div', { class: 'dim', style: { fontSize: '.8rem', padding: '8px 2px' } }, searchResults?._error || `"${searchQuery}" ile eşleşen kayıtlı kullanıcı bulunamadı.`) : null));
     } else {
+      const selfObj = state.self || {};
+      const hideWatchingVal = Boolean(priv.hideWatching ?? selfObj.hideWatching);
+      const allowInvitesVal = ['everyone', 'friends', 'nobody'].includes(priv.allowInvites) ? priv.allowInvites : 'friends';
+      const hideLocationVal = Boolean(priv.hideLocation ?? selfObj.hideLocation);
+      const hideFriendsVal = Boolean(priv.hideFriends ?? selfObj.hideFriends);
+      const syncSelfPrivacyFlag = (patch) => {
+        const nextSelf = { ...(state.self || {}), ...patch };
+        set({ self: nextSelf });
+        try {
+          if (nextSelf.isGuest) {
+            const cur = JSON.parse(sessionStorage.getItem('vortex_temp_guest_v1') || 'null');
+            if (cur && typeof cur === 'object') sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify({ ...cur, ...patch }));
+          } else {
+            const cur = JSON.parse(localStorage.getItem('vortex_profile_v2') || 'null');
+            if (cur && typeof cur === 'object') localStorage.setItem('vortex_profile_v2', JSON.stringify({ ...cur, ...patch }));
+          }
+        } catch (_) {}
+        if (nextSelf.authToken && !nextSelf.isGuest) {
+          api('/api/auth/profile', {
+            method: 'POST',
+            body: { ...patch, authToken: nextSelf.authToken },
+          }).catch(() => {});
+        }
+        try { window.vortexSyncRoomProfile?.(); } catch (_) {}
+      };
       bodyNode = h('div', { class: 'wl-social-pane' },
         h('div', { class: 'wl-friends-sec-head' }, '🟢 ÇEVRİMİÇİ DURUM GÖRÜNÜRLÜĞÜ'),
         h('div', { class: 'seg' }, [
@@ -584,23 +629,61 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
             renderModalContent();
           },
         }, lbl, h('small', {}, dsc)))),
+        h('div', { class: 'wl-friends-sec-head', style: { marginTop: '6px' } }, '📩 ODA DAVETİ İZİNLERİ'),
+        h('div', { class: 'seg' }, [
+          ['everyone', 'Herkes', 'Herkes davet atabilir'],
+          ['friends', 'Arkadaşlar', 'Sadece onaylı arkadaşların'],
+          ['nobody', 'Kimse', 'Oda davetlerini kapat'],
+        ].map(([k, lbl, dsc]) => h('button', {
+          type: 'button', class: allowInvitesVal === k ? 'on' : '',
+          onclick: async () => {
+            const r = await updateFriendAction('privacy', { allowInvites: k });
+            if (!r?.ok) { toast(r?.error || 'Davet izni güncellenemedi.'); return; }
+            renderModalContent();
+          },
+        }, lbl, h('small', {}, dsc)))),
         h('div', { class: 'wl-privacy-toggle-row' },
           h('span', {}, '🎬 Ne İzlediğimi ve Hangi Odada Olduğumu Gizle'),
           h('button', {
-            type: 'button', class: `btn sm ${priv.hideWatching ? 'primary' : ''}`,
+            type: 'button', class: `btn sm ${hideWatchingVal ? 'primary' : ''}`,
             onclick: async () => {
-              const next = !priv.hideWatching;
+              const next = !hideWatchingVal;
               const r = await updateFriendAction('privacy', { hideWatching: next });
               if (!r?.ok) { toast(r?.error || 'Gizlilik ayarı güncellenemedi.'); return; }
+              syncSelfPrivacyFlag({ hideWatching: next });
               await pushPresenceHeartbeat({ hideWatching: next });
               renderModalContent();
             },
-          }, priv.hideWatching ? 'Gizli ✓' : 'Açık (Arkadaşlar Görür)')),
-        blocked.length ? h('div', { class: 'wl-friends-sec' },
+          }, hideWatchingVal ? 'Gizli ✓' : 'Açık (Arkadaşlar Görür)')),
+        h('div', { class: 'wl-privacy-toggle-row' },
+          h('span', {}, '🕵️ Dünya Haritasında Konumumu Gizle'),
+          h('button', {
+            type: 'button', class: `btn sm ${hideLocationVal ? 'primary' : ''}`,
+            onclick: async () => {
+              const next = !hideLocationVal;
+              syncSelfPrivacyFlag({ hideLocation: next });
+              await updateFriendAction('privacy', { hideLocation: next }).catch(() => null);
+              renderModalContent();
+            },
+          }, hideLocationVal ? 'Gizli ✓' : 'Açık')),
+        h('div', { class: 'wl-privacy-toggle-row' },
+          h('span', {}, '👥 Arkadaş Listemi Profilimde Gizle'),
+          h('button', {
+            type: 'button', class: `btn sm ${hideFriendsVal ? 'primary' : ''}`,
+            onclick: async () => {
+              const next = !hideFriendsVal;
+              syncSelfPrivacyFlag({ hideFriends: next });
+              await updateFriendAction('privacy', { hideFriends: next }).catch(() => null);
+              renderModalContent();
+            },
+          }, hideFriendsVal ? 'Gizli ✓' : 'Açık')),
+        h('div', { class: 'wl-friends-sec' },
           h('div', { class: 'wl-friends-sec-head' }, `🚫 ENGELLENENLER (${blocked.length})`),
-          ...blocked.map((b) => h('div', { class: 'wl-friend-row' },
-            h('span', {}, b.name || b.uid),
-            h('button', { type: 'button', class: 'btn sm', onclick: async () => { const r = await updateFriendAction('unblock', { targetUid: b.uid }); if (!r?.ok) { toast(r?.error || 'Engel kaldırılamadı.'); return; } renderModalContent(); } }, 'Engeli Kaldır')))) : null);
+          blocked.length
+            ? blocked.map((b) => h('div', { class: 'wl-friend-row' },
+                h('span', {}, b.name || b.uid),
+                h('button', { type: 'button', class: 'btn sm', onclick: async () => { const r = await updateFriendAction('unblock', { targetUid: b.uid }); if (!r?.ok) { toast(r?.error || 'Engel kaldırılamadı.'); return; } renderModalContent(); } }, 'Engeli Kaldır')))
+            : h('div', { class: 'dim', style: { fontSize: '.8rem', padding: '6px 2px' } }, 'Henüz engellediğin bir kullanıcı yok.')));
     }
 
     const wasInpFocused = typeof document !== 'undefined' && document.activeElement?.id === 'friend-name-input';
@@ -767,7 +850,7 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
     { key: 'friends', title: '👥 Arkadaş Odaları', list: friendRooms, empty: 'Henüz aktif bir arkadaş odası yok. "+ Arkadaş Ekle" butonuyla arkadaşlarını ekleyebilirsin.' },
     { key: 'tv', title: '📺 Canlı TV Kanalları · 7/24', list: sortByBrandOrder(visible.filter(isTvRoom)) },
     { key: 'radio', title: '📻 Canlı Radyolar · 7/24', list: sortByBrandOrder(visible.filter(isRadioRoom)) },
-  ].filter((s) => filter === 'all' || s.key === filter || (filter === 'public' && (s.key === 'tv' || s.key === 'radio')));
+  ].filter((s) => filter === 'all' || s.key === filter || ((filter === 'public' || filter === 'tv') && (s.key === 'tv' || s.key === 'radio')));
 
   const layoutSig = `${filter}|${q}|${friends.map((f) => f.name).join(',')}|${sections.map((s) => `${s.key}:${s.list.map((r) => `${r.id}:${r.privacy}:${r.media?.title || r.name}`).join(',')}`).join(';')}`;
   if (container.dataset.layoutSig === layoutSig && container.querySelector('.meshthumb')) {

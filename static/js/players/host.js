@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261122_v238';
-import { Html5Adapter } from './html5.js?v=20261122_v238';
-import { VimeoAdapter } from './vimeo.js?v=20261122_v238';
-import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261122_v238';
-import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261122_v238';
-import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261122_v238';
+import { YouTubeAdapter } from './youtube.js?v=20261124_v239';
+import { Html5Adapter } from './html5.js?v=20261124_v239';
+import { VimeoAdapter } from './vimeo.js?v=20261124_v239';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261124_v239';
+import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261124_v239';
+import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261124_v239';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -167,8 +167,12 @@ export class PlayerHost {
   }
 
   isAutoDuckEnabled() {
-    const v = localStorage.getItem('vortex_voice_duck');
-    return v !== 'off' && v !== '0' && v !== 'false';
+    try {
+      const v = typeof localStorage !== 'undefined' ? String(localStorage.getItem('vortex_voice_duck') || '').trim().toLowerCase() : '';
+      return v !== 'off' && v !== '0' && v !== 'false';
+    } catch (_) {
+      return true;
+    }
   }
 
   getVolume() {
@@ -237,7 +241,9 @@ export class PlayerHost {
   }
 
   setAutoDuckEnabled(enabled) {
-    try { localStorage.setItem('vortex_voice_duck', enabled ? 'on' : 'off'); } catch (e) { /* ignore */ }
+    const on = Boolean(enabled);
+    try { localStorage.setItem('vortex_voice_duck', on ? '1' : '0'); } catch (e) { /* ignore */ }
+    if (typeof window !== 'undefined') window.__kinoxVoiceDuckEnabled = on;
     this._syncDuckRamp();
   }
 

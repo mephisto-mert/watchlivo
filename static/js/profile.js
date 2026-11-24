@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261122_v238';
-import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261122_v238';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261122_v238';
+import { h, icons, popup, confirmPopup, toast } from './ui.js?v=20261124_v239';
+import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261124_v239';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261124_v239';
 import {
-  state, set, getFriends, isFriend, getWatchHistory,
+  state, set, setUiPref, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261122_v238';
+} from './store.js?v=20261124_v239';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -142,6 +142,66 @@ export function loadProfile() {
   return null;
 }
 
+export async function provisionGuestWithRecovery(guestProfile, { storage = 'local' } = {}) {
+  if (!guestProfile || typeof fetch !== 'function') return null;
+  const persistGuest = (prof) => {
+    try {
+      if (storage === 'session') {
+        sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(prof));
+      } else {
+        localStorage.setItem(KEY, JSON.stringify(prof));
+        sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(prof));
+      }
+    } catch (_) {}
+  };
+  const postGuest = async (payload) => {
+    const gHdrs = { 'Content-Type': 'application/json' };
+    const edgeTok = getEdgeToken();
+    if (edgeTok) gHdrs['X-Watchlivo-Token'] = edgeTok;
+    if (guestProfile.guestToken) gHdrs.Authorization = `Bearer ${guestProfile.guestToken}`;
+    const r = await fetch('/api/rave/social/guest', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: gHdrs,
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json().catch(() => null);
+    return { status: r.status, ok: r.ok, data: d };
+  };
+  const basePayload = {
+    uid: guestProfile.uid || guestProfile.id,
+    name: guestProfile.name || '',
+    handle: guestProfile.handle || '',
+    color: guestProfile.color || '#27DCC8',
+    avatarUrl: guestProfile.avatarUrl || '',
+    bio: guestProfile.bio || '',
+    statusText: guestProfile.statusText || '',
+    statusEmoji: guestProfile.statusEmoji || '🍿',
+  };
+  let res = await postGuest(basePayload).catch(() => null);
+  if (res && res.status === 409) {
+    const uidTail = String(basePayload.uid || '').replace(/[^a-z0-9]/gi, '').slice(-4) || 'g';
+    const rand3 = Math.random().toString(36).slice(2, 5);
+    res = await postGuest({ ...basePayload, handle: `misafir_${uidTail}_${rand3}` }).catch(() => null);
+  }
+  if (res && res.status === 409) {
+    const freshUid = 'guest_' + Math.random().toString(36).slice(2, 10);
+    const freshHandle = `misafir_${freshUid.slice(-6)}_${Math.floor(100 + Math.random() * 899)}`;
+    res = await postGuest({ ...basePayload, uid: freshUid, handle: freshHandle }).catch(() => null);
+  }
+  const d = res?.ok ? res.data : null;
+  if (!d) return null;
+  if (d.uid) { guestProfile.uid = String(d.uid); guestProfile.id = String(d.uid); }
+  if (d.handle) guestProfile.handle = String(d.handle);
+  if (d.guestToken) guestProfile.guestToken = String(d.guestToken);
+  persistGuest(guestProfile);
+  if (state.self?.isGuest) {
+    const nextSelf = { ...state.self, ...guestProfile, uid: guestProfile.uid, id: guestProfile.id, handle: guestProfile.handle, guestToken: guestProfile.guestToken || state.self.guestToken };
+    try { set({ self: nextSelf }); } catch (_) {}
+  }
+  return guestProfile;
+}
+
 export function saveGuestProfile(data = {}) {
   const prev = (() => {
     try { return JSON.parse(localStorage.getItem(KEY) || 'null') || {}; } catch (e) { return {}; }
@@ -184,34 +244,8 @@ export function saveGuestProfile(data = {}) {
   if (!data._skipProvision && typeof fetch === 'function') {
     setTimeout(() => {
       if (state.self && !state.self.isGuest) return;
-      const gHdrs = { 'Content-Type': 'application/json' };
-      const edgeTok = getEdgeToken();
-      if (edgeTok) gHdrs['X-Watchlivo-Token'] = edgeTok;
-      if (p.guestToken) gHdrs.Authorization = `Bearer ${p.guestToken}`;
-      fetch('/api/rave/social/guest', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: gHdrs,
-        body: JSON.stringify({
-          uid: p.uid,
-          name: p.name,
-          handle: p.handle,
-          color: p.color,
-          avatarUrl: p.avatarUrl,
-          bio: p.bio,
-          statusText: p.statusText,
-          statusEmoji: p.statusEmoji,
-        }),
-      }).then((r) => (r.ok ? r.json() : null)).then((d) => {
-        if (!d || !state.self?.isGuest) return;
-        if (d.uid) { p.uid = String(d.uid); p.id = String(d.uid); }
-        if (d.handle) p.handle = String(d.handle);
-        if (d.guestToken) p.guestToken = String(d.guestToken);
-        try {
-          localStorage.setItem(KEY, JSON.stringify(p));
-          sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(p));
-          set({ self: { ...p } });
-        } catch (_) {}
+      provisionGuestWithRecovery(p, { storage: 'local' }).then((updated) => {
+        if (!updated || !state.self?.isGuest) return;
         syncSocialState(true).catch(() => {});
         pushPresenceHeartbeat().catch(() => {});
       }).catch(() => {});
@@ -240,6 +274,10 @@ export function saveProfile(data = {}) {
   const bio = String(data.bio ?? (sameAccount ? prev.bio : '') ?? '').trim().slice(0, 160);
   const statusText = String(data.statusText ?? (sameAccount ? prev.statusText : '') ?? '').trim().slice(0, 60);
   const statusEmoji = String(data.statusEmoji ?? (sameAccount ? prev.statusEmoji : '🍿') ?? '🍿').trim().slice(0, 12) || '🍿';
+  const authProv = data.authProvider || (sameAccount ? prev.authProvider : '') || 'email';
+  const passwordSet = data.passwordSet !== undefined
+    ? Boolean(data.passwordSet)
+    : (sameAccount && prev.passwordSet !== undefined ? Boolean(prev.passwordSet) : (authProv === 'google' ? false : true));
   const p = {
     id: resolvedId,
     uid: resolvedId,
@@ -257,8 +295,9 @@ export function saveProfile(data = {}) {
     hideFriends,
     watchMinutes,
     medal: computedMedal,
-    authProvider: data.authProvider || (sameAccount ? prev.authProvider : '') || 'email',
+    authProvider: authProv,
     authToken: data.authToken ?? (sameAccount ? prev.authToken : '') ?? '',
+    passwordSet,
     verified: true,
     isGuest: false,
   };
@@ -898,7 +937,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         },
         h('span', { html: BRAND_SVGS.google || '', style: { display: 'inline-flex', alignItems: 'center' } }),
         h('span', {}, 'Google ile Giriş Yap'),
-        lastProvider === 'google' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null),
+        lastProvider === 'google' ? h('span', { class: 'wl-last-used-badge', style: { marginLeft: '6px' } }, 'Son') : null),
         !hideGuestBtn ? h('button', {
           type: 'button',
           id: 'wl-instant-guest-btn',
@@ -912,11 +951,16 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           onclick: () => { activeTab = 'guest'; draw(); },
         },
         h('span', {}, '👤 Misafir Sekmesine Geç'),
-        lastProvider === 'guest' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null) : null),
+        lastProvider === 'guest' ? ' ' : null,
+        lastProvider === 'guest' ? h('span', { class: 'wl-last-used-badge', style: { marginLeft: '6px' } }, 'Son') : null) : null),
       h('div', { class: 'wl-security-footer' }, '🔒 256-bit SSL · Resmi Google Hesabınız ile Tek Tıkla Güvenli Giriş'));
   };
 
   const draw = () => {
+    if (modalRef?.card) {
+      const h3 = modalRef.card.querySelector('h3');
+      if (h3) h3.textContent = isLoggedMember && activeTab === 'account' ? 'Watchlivo Hesabım' : "Watchlivo'ya Giriş Yap";
+    }
     root.replaceChildren();
     const topNavTabs = isLoggedMember
       ? [
@@ -963,9 +1007,10 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       });
       const avatarInp = h('input', { class: 'input', id: 'wl-profile-avatar-input', placeholder: 'Fotoğraf URL veya GIF bağlantısı (isteğe bağlı)', value: (profObj.avatarUrl || profObj.avatar || '').startsWith('data:image/') ? '' : (profObj.avatarUrl || profObj.avatar || '') });
       let selectedAvatarUrl = profObj.avatarUrl || profObj.avatar || '';
-      let hideWatchingState = asBool(profObj.hideWatching);
-      let hideFriendsState = asBool(profObj.hideFriends);
-      let hideLocState = asBool(profObj.hideLocation);
+      let hideWatchingState = asBool(profObj.hideWatching ?? state.social?.privacy?.hideWatching);
+      let hideFriendsState = asBool(profObj.hideFriends ?? state.social?.privacy?.hideFriends);
+      let hideLocState = asBool(profObj.hideLocation ?? state.social?.privacy?.hideLocation);
+      let allowInvitesState = ['everyone', 'friends', 'nobody'].includes(state.social?.privacy?.allowInvites) ? state.social.privacy.allowInvites : 'friends';
       const userMins = Math.max(0, Number(profObj.watchMinutes || 0));
       const userMedal = profObj.medal || (userMins >= 300 ? '🥇 Altın İzleyici' : userMins >= 120 ? '🥈 Gümüş İzleyici' : userMins >= 30 ? '🥉 Bronz İzleyici' : '⚡ Yeni İzleyici');
       const errBox = h('div', { class: 'wl-auth-err' });
@@ -1211,10 +1256,18 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
             method: 'POST',
             body: { ...autoPayload, authToken: saved.authToken },
           }).then((res) => {
+            if (res?.ok === false) {
+              toast(res.error || '⚠️ Profil fotoğrafı sunucuya kaydedilemedi.');
+              return;
+            }
             if (res?.authToken) {
               saveProfile({ ...saved, authToken: res.authToken, isGuest: false });
             }
-          }).catch(() => {});
+          }).catch((err) => {
+            toast(isEdgeUnavailable(err)
+              ? '⚠️ Sunucu yanıt vermiyor; avatar bu cihaza kaydedildi.'
+              : humanApiError(err, '⚠️ Profil fotoğrafı sunucuya kaydedilemedi.'));
+          });
         }
         onDone?.(saved);
       };
@@ -1280,7 +1333,13 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       bioInp.addEventListener('input', refreshLiveCard);
       statusInp.addEventListener('input', refreshLiveCard);
       avatarInp.addEventListener('input', () => {
-        const cleanVal = sanitizeAvatarUrl(avatarInp.value.trim());
+        const rawVal = avatarInp.value.trim();
+        if (!rawVal) {
+          selectedAvatarUrl = '';
+          refreshLiveCard();
+          return;
+        }
+        const cleanVal = sanitizeAvatarUrl(rawVal);
         if (cleanVal) {
           selectedAvatarUrl = cleanVal;
           refreshLiveCard();
@@ -1397,7 +1456,80 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
               checked: hideLocState ? 'checked' : null,
               onchange: (e) => { hideLocState = e.target.checked; },
             }),
-            h('span', {}, '🕵️ Dünya Haritasında Konumumu Gizle'))),
+            h('span', {}, '🕵️ Dünya Haritasında Konumumu Gizle')),
+          h('div', { style: { marginTop: '4px' } },
+            h('div', { style: { fontSize: '.74rem', fontWeight: '700', color: '#cbd5e1', marginBottom: '5px' } }, '📩 Oda Daveti İzinleri'),
+            (() => {
+              const invBtns = [];
+              return h('div', { class: 'seg', id: 'wl-allow-invites-seg' }, [
+                ['everyone', 'Herkes', 'Herkes davet edebilir'],
+                ['friends', 'Arkadaşlar', 'Sadece onaylı arkadaşlar'],
+                ['nobody', 'Kimse', 'Davetleri kapat'],
+              ].map(([k, lbl, dsc]) => {
+                const b = h('button', {
+                  type: 'button',
+                  class: allowInvitesState === k ? 'on' : '',
+                  'data-invite': k,
+                  onclick: () => {
+                    allowInvitesState = k;
+                    invBtns.forEach((btn) => btn.classList.toggle('on', btn.dataset.invite === k));
+                  },
+                }, lbl, h('small', {}, dsc));
+                invBtns.push(b);
+                return b;
+              }));
+            })())),
+
+        h('label', { class: 'wl-field-label', style: { marginTop: '8px' } }, '🔔 Bildirim & Ses Tercihleri'),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '9px 11px' } },
+          h('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '.8rem', color: '#f8fafc' } },
+            h('input', {
+              type: 'checkbox',
+              id: 'wl-notif-chime-chk',
+              checked: (state.uiPrefs?.notifChime !== false && !['0', 'off', 'false'].includes(String(localStorage.getItem('vortex_notif_chime') || '').toLowerCase())) ? 'checked' : null,
+              onchange: (e) => {
+                const on = e.target.checked;
+                try { localStorage.setItem('vortex_notif_chime', on ? '1' : '0'); } catch (_) {}
+                setUiPref({ notifChime: on });
+                toast(on ? '🔔 Bildirim sesi açıldı' : '🔕 Bildirim sesi kapatıldı');
+              },
+            }),
+            h('span', {}, '🔔 Bildirim Sesini (Chime) Aç')),
+          (() => {
+            const getPushState = () => {
+              const perm = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
+              const off = (() => { try { return localStorage.getItem('vortex_push_enabled') === 'off'; } catch (_) { return false; } })();
+              if (perm === 'unsupported') return { label: '🔕 Bu Tarayıcı Masaüstü Bildirimini Desteklemiyor', disabled: true, active: false };
+              if (perm === 'denied') return { label: '🚫 Bildirim İzni Tarayıcıdan Engelli', disabled: true, active: false };
+              if (perm === 'granted' && !off) return { label: '🔔 Masaüstü & Arka Plan Bildirimleri: Açık (Kapatmak için tıkla)', disabled: false, active: true };
+              return { label: '🔔 Masaüstü & Arka Plan Bildirimlerini Aç', disabled: false, active: false };
+            };
+            const st = getPushState();
+            const pushBtn = h('button', {
+              type: 'button',
+              id: 'wl-push-perm-btn',
+              class: `btn sm ${st.active ? 'primary' : ''}`,
+              disabled: st.disabled ? 'disabled' : null,
+              onclick: async () => {
+                const perm = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
+                const off = (() => { try { return localStorage.getItem('vortex_push_enabled') === 'off'; } catch (_) { return false; } })();
+                if (perm === 'granted' && !off) {
+                  try { localStorage.setItem('vortex_push_enabled', 'off'); } catch (_) {}
+                  toast('🔕 Masaüstü bildirimleri duraklatıldı');
+                } else if (perm === 'granted' && off) {
+                  try { localStorage.setItem('vortex_push_enabled', 'on'); } catch (_) {}
+                  toast('🔔 Masaüstü bildirimleri yeniden açıldı');
+                } else {
+                  await window.vortexRequestPushPermission?.();
+                }
+                const ns = getPushState();
+                pushBtn.textContent = ns.label;
+                pushBtn.className = `btn sm ${ns.active ? 'primary' : ''}`;
+                pushBtn.disabled = Boolean(ns.disabled);
+              },
+            }, st.label);
+            return pushBtn;
+          })()),
 
         h('label', { class: 'wl-field-label' }, '🎨 Profil Neon Rengi'),
         renderColorPicker(),
@@ -1452,6 +1584,13 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                     authToken: res?.authToken || profObj.authToken,
                     isGuest: false,
                   });
+                  await updateFriendAction('privacy', {
+                    hideWatching: hideWatchingState,
+                    hideFriends: hideFriendsState,
+                    hideLocation: hideLocState,
+                    allowInvites: allowInvitesState,
+                  }).catch(() => {});
+                  pushPresenceHeartbeat({ hideWatching: hideWatchingState }).catch(() => {});
                   finish(updated, `✓ Profilin kaydedildi (@${updated.handle})!`);
                   return;
                 } catch (e) {
@@ -1487,8 +1626,14 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                     guestToken: gRes?.guestToken || profObj.guestToken || '',
                     _skipProvision: true,
                   });
+                  await updateFriendAction('privacy', {
+                    hideWatching: hideWatchingState,
+                    hideFriends: hideFriendsState,
+                    hideLocation: hideLocState,
+                    allowInvites: allowInvitesState,
+                  }).catch(() => {});
                   syncSocialState(true).catch(() => {});
-                  pushPresenceHeartbeat().catch(() => {});
+                  pushPresenceHeartbeat({ hideWatching: hideWatchingState }).catch(() => {});
                   finish(updated, `✓ Profil kartın kaydedildi (@${updated.handle})!`);
                   return;
                 } catch (e) {
@@ -1504,10 +1649,11 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
             },
           }, '💾 Profili & Gizlilik Ayarlarını Kaydet'),
           isLoggedMember ? (() => {
-            const curPwInp = h('input', { class: 'input', type: 'password', id: 'wl-cur-password-input', autocomplete: 'current-password', placeholder: 'Mevcut şifreniz' });
-            const newPwInp = h('input', { class: 'input', type: 'password', id: 'wl-new-password-input', autocomplete: 'new-password', placeholder: 'Yeni şifre (en az 6 karakter)' });
+            const isPasswordless = profObj.passwordSet === false;
+            const curPwInp = isPasswordless ? null : h('input', { class: 'input', type: 'password', id: 'wl-cur-password-input', autocomplete: 'current-password', placeholder: 'Mevcut şifreniz' });
+            const newPwInp = h('input', { class: 'input', type: 'password', id: 'wl-new-password-input', autocomplete: 'new-password', placeholder: isPasswordless ? 'Yeni şifre belirle (en az 6 karakter)' : 'Yeni şifre (en az 6 karakter)' });
             return h('details', { class: 'wl-account-sec-details', style: { width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: '11px', padding: '8px 10px' } },
-              h('summary', { style: { cursor: 'pointer', fontSize: '.78rem', fontWeight: '700', color: '#cbd5e1' } }, '🔐 Şifre Değiştir & Hesap Yönetimi'),
+              h('summary', { style: { cursor: 'pointer', fontSize: '.78rem', fontWeight: '700', color: '#cbd5e1' } }, isPasswordless ? '🔐 İlk Şifre Belirle & Hesap Yönetimi' : '🔐 Şifre Değiştir & Hesap Yönetimi'),
               h('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px', marginTop: '8px' } },
                 curPwInp,
                 newPwInp,
@@ -1517,21 +1663,25 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                     id: 'wl-change-password-btn',
                     class: 'btn sm primary',
                     onclick: async () => {
-                      const cp = curPwInp.value;
+                      const cp = curPwInp ? curPwInp.value : '';
                       const np = newPwInp.value;
-                      if (!cp || np.length < 6) {
-                        errBox.textContent = 'Mevcut şifrenizi ve en az 6 karakterli yeni şifrenizi girin.';
+                      if ((!isPasswordless && !cp) || np.length < 6) {
+                        errBox.textContent = isPasswordless
+                          ? 'En az 6 karakterli yeni şifrenizi girin.'
+                          : 'Mevcut şifrenizi ve en az 6 karakterli yeni şifrenizi girin.';
                         return;
                       }
                       try {
-                        const r = await api('/api/auth/password', { method: 'POST', body: { currentPassword: cp, newPassword: np } });
+                        const pwBody = isPasswordless ? { newPassword: np } : { currentPassword: cp, newPassword: np };
+                        const r = await api('/api/auth/password', { method: 'POST', body: pwBody });
                         if (r?.ok) {
-                          const saved = saveProfile({ ...profObj, ...(r.user || {}), authToken: r.authToken || profObj.authToken, isGuest: false });
+                          const saved = saveProfile({ ...profObj, ...(r.user || {}), passwordSet: true, authToken: r.authToken || profObj.authToken, isGuest: false });
                           Object.assign(profObj, saved);
-                          curPwInp.value = '';
+                          if (curPwInp) curPwInp.value = '';
                           newPwInp.value = '';
                           errBox.textContent = '';
-                          toast('✓ Şifreniz güncellendi ve diğer oturumlar sonlandırıldı!');
+                          toast(isPasswordless ? '✓ İlk şifreniz belirlendi!' : '✓ Şifreniz güncellendi ve diğer oturumlar sonlandırıldı!');
+                          draw();
                         } else {
                           errBox.textContent = humanApiError({ status: 200, data: r }, 'Şifre güncellenemedi.', 'Şifre değiştirme servisi şu an kenar sunucuda kullanılamıyor.');
                         }
@@ -1541,20 +1691,23 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                           : humanApiError(e, 'Şifre güncellenemedi.', 'Şifre değiştirme servisi şu an kenar sunucuda kullanılamıyor.');
                       }
                     },
-                  }, '🔑 Şifreyi Güncelle'),
+                  }, isPasswordless ? '🔑 İlk Şifreni Belirle' : '🔑 Şifreyi Güncelle'),
                   h('button', {
                     type: 'button',
                     id: 'wl-delete-account-btn',
                     class: 'btn sm danger',
                     onclick: async () => {
-                      const cp = curPwInp.value;
-                      if (!cp) {
+                      const cp = curPwInp ? curPwInp.value : '';
+                      if (!isPasswordless && !cp) {
                         errBox.textContent = 'Hesabı silmek için mevcut şifrenizi kutuya girin.';
-                        curPwInp.focus();
+                        curPwInp?.focus();
                         return;
                       }
+                      const okConfirm = await confirmPopup('Hesabınız ve tüm verileriniz kalıcı olarak silinecek. Onaylıyor musunuz?', 'Evet, Hesabı Sil', 'Vazgeç');
+                      if (!okConfirm) return;
                       try {
-                        const r = await api('/api/auth/delete', { method: 'POST', body: { password: cp } });
+                        const delBody = isPasswordless ? { confirmDelete: true } : { password: cp, confirmDelete: true };
+                        const r = await api('/api/auth/delete', { method: 'POST', body: delBody });
                         if (r?.ok) {
                           const guestProf = logoutProfile();
                           onDone?.(guestProf);
@@ -1583,12 +1736,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
               toast('Oturum kapatıldı. Misafir olarak devam edebilir veya giriş yapabilirsiniz.');
               draw();
             },
-          }, '🚪 Çıkış Yap (Başka Hesaba Geç)') : null,
-          h('button', {
-            type: 'button',
-            class: 'btn wl-btn-full',
-            onclick: () => (modalRef?.close ? modalRef.close() : document.querySelector('.popup-backdrop')?.remove()),
-          }, 'Kapat')));
+          }, '🚪 Çıkış Yap (Başka Hesaba Geç)') : null));
       return;
     }
 
@@ -1826,6 +1974,31 @@ export async function openDmModal(initialPeerId = null) {
   }, '➕ İstek Gönder');
   addInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') addBtn.click(); });
 
+  let dmSearchQuery = '';
+  const getMutedDmPeers = () => {
+    try { return new Set(JSON.parse(localStorage.getItem('vortex_dm_muted_v1') || '[]')); } catch (_) { return new Set(); }
+  };
+  const toggleMuteDmPeer = (peerUid) => {
+    const s = getMutedDmPeers();
+    const k = String(peerUid || '');
+    if (!k) return false;
+    let muted = false;
+    if (s.has(k)) { s.delete(k); muted = false; } else { s.add(k); muted = true; }
+    try { localStorage.setItem('vortex_dm_muted_v1', JSON.stringify(Array.from(s))); } catch (_) {}
+    return muted;
+  };
+  const dmSearchInp = h('input', {
+    class: 'input',
+    placeholder: '🔍 Mesajlarda ara...',
+    style: { width: '150px', height: '36px', fontSize: '.8rem' },
+    oninput: () => {
+      dmSearchQuery = dmSearchInp.value.trim().toLowerCase();
+      msgListEl.querySelectorAll('.wl-dm-bubble-row, .wl-dm-msg').forEach((rowEl) => {
+        const txt = String(rowEl.textContent || '').toLowerCase();
+        rowEl.style.display = (!dmSearchQuery || txt.includes(dmSearchQuery)) ? '' : 'none';
+      });
+    },
+  });
   const openHubBtn = h('button', {
     type: 'button',
     class: 'btn sm',
@@ -1834,7 +2007,7 @@ export async function openDmModal(initialPeerId = null) {
       window.vortexOpenFriendsModal?.(null, 'search');
     },
   }, '🔎 Rehber');
-  topBarWrap.append(addInp, addBtn, openHubBtn);
+  topBarWrap.append(addInp, addBtn, dmSearchInp, openHubBtn);
 
   const dmInp = h('input', {
     class: 'input',
@@ -2011,6 +2184,19 @@ export async function openDmModal(initialPeerId = null) {
               ? `🎬 ${activePeer.mediaTitle} izliyor`
               : (pState === 'online' ? '🟢 Şu an çevrimiçi' : (pState === 'idle' ? '🌙 Uzakta' : `⚫ Çevrimdışı · ${activePeer.lastSeenLabel || 'Son görülme yakın zamanda'}`))))),
       h('div', { style: { display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' } },
+        (() => {
+          const isMutedPeer = getMutedDmPeers().has(String(activePeer.uid || activePeer.id || ''));
+          return h('button', {
+            type: 'button',
+            class: 'btn sm',
+            title: isMutedPeer ? 'DM Bildirimlerini Aç' : 'Bu Kişinin DM Bildirimlerini Sustur',
+            onclick: (ev) => {
+              const nowMuted = toggleMuteDmPeer(activePeer.uid || activePeer.id);
+              ev.currentTarget.textContent = nowMuted ? '🔕 Susturuldu' : '🔔 Sustur';
+              toast(nowMuted ? `🔕 ${activePeer.name} susturuldu` : `🔔 ${activePeer.name} bildirimleri açıldı`);
+            },
+          }, isMutedPeer ? '🔕 Susturuldu' : '🔔 Sustur');
+        })(),
         pState === 'watching' && activePeer.roomId ? h('button', {
           type: 'button',
           class: 'btn primary sm',
@@ -2739,7 +2925,16 @@ export function openUserProfileModal(targetUser) {
           toast(`🚫 ${uName} engellendi`);
           userModal?.close?.();
         },
-      }, '🚫 Engelle')));
+      }, '🚫 Engelle'),
+      h('button', {
+        type: 'button',
+        class: 'btn ghost',
+        style: { flex: '1', justifyContent: 'center' },
+        onclick: () => {
+          userModal?.close?.();
+          openReportModal({ targetType: 'user', targetId: safeSocialUid || targetUser.id || uHandle, targetLabel: `${uName} (@${uHandle})` });
+        },
+      }, '🚩 Bildir')));
 
   const userModal = popup({
     title: `${uName} (@${uHandle})`,

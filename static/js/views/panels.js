@@ -1,17 +1,17 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal, handleWindowsAppDownload } from '../ui.js?v=20261122_v238';
+import { h, icons, toast, confirmPopup, fill, openThemeModal, handleWindowsAppDownload } from '../ui.js?v=20261124_v239';
 import {
   state, setUiPref, subscribe, isLeader, isHostOnly, isFriend,
   getWatchHistory, getMusicHistory,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite,
-} from '../store.js?v=20261122_v238';
-import { avatar } from '../profile.js?v=20261122_v238';
-import { clock } from '../sync.js?v=20261122_v238';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261122_v238';
-import { copyInvite, inviteUrl } from './chat.js?v=20261122_v238';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261122_v238';
-import { resolveMedia } from './selection.js?v=20261122_v238';
-import { resolveMusicItem, resolveCatalogItem } from './selection-kinds.js?v=20261122_v238';
+} from '../store.js?v=20261124_v239';
+import { avatar } from '../profile.js?v=20261124_v239';
+import { clock } from '../sync.js?v=20261124_v239';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261124_v239';
+import { copyInvite, inviteUrl } from './chat.js?v=20261124_v239';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261124_v239';
+import { resolveMedia } from './selection.js?v=20261124_v239';
+import { resolveMusicItem, resolveCatalogItem } from './selection-kinds.js?v=20261124_v239';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -133,7 +133,7 @@ function Settings(ctx) {
       h('h4', {}, 'Watchlivo Uygulamaları'),
       h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
         h('a', { href: '/download/ipa', onclick: (ev) => safeBinaryDownload(ev, '/download/ipa', 'Watchlivo.ipa', 'iOS IPA'), class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(244,63,94,.18), rgba(251,146,60,.18))', border: '1px solid rgba(244,63,94,.4)', color: '#fda4af', fontWeight: '700' } }, '🍎 iPhone / iOS IPA İndir (.ipa)'),
-        h('a', { href: '/download/Watchlivo-v2.0.apk', onclick: (ev) => safeBinaryDownload(ev, '/download/Watchlivo-v2.0.apk', 'Watchlivo-v2.0.apk', 'Android APK'), class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(99, 102, 241,.18), rgba(56,189,248,.18))', border: '1px solid rgba(99, 102, 241,.4)', color: '#6366f1', fontWeight: '700' } }, '📱 Android Native APK İndir (v2.0.2)'),
+        h('a', { href: '/download/Watchlivo-v2.0.apk', onclick: (ev) => safeBinaryDownload(ev, '/download/Watchlivo-v2.0.apk', 'Watchlivo-v2.0.apk', 'Android APK'), class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(99, 102, 241,.18), rgba(56,189,248,.18))', border: '1px solid rgba(99, 102, 241,.4)', color: '#6366f1', fontWeight: '700' } }, '📱 Android Native APK İndir (v2.0)'),
         h('a', { href: '/download/windows', onclick: handleWindowsAppDownload, class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(168,85,247,.18), rgba(59,130,246,.18))', border: '1px solid rgba(168,85,247,.4)', color: '#c084fc', fontWeight: '700' } }, '💻 Windows Masaüstü Kur')
       )
     );
@@ -238,8 +238,10 @@ function Vote(ctx) {
     h('div', { style: { display: 'flex', gap: '6px' } },
       h('button', { type: 'button', class: 'btn sm ghost', style: { flex: '1', justifyContent: 'center' }, onclick: () => ctx?.layout?.openSearch?.() }, '🔍 Katalog & YouTube Ara')));
 
+  const voteBody = h('div');
+  fill(el, quickAddBox, voteBody);
+
   const update = () => {
-    if (el.contains(document.activeElement) && document.activeElement === urlInput) return;
     const m = state.mesh;
     const q = m?.queue || [];
     const mode = m?.playMode;
@@ -265,6 +267,11 @@ function Vote(ctx) {
         pie.textContent = Math.ceil(rem / 1000);
       }, 200);
     }
+    const _parseSeasonNum = (val, fallback = 1) => {
+      if (val === undefined || val === null || val === '' || typeof val === 'boolean') return fallback;
+      const n = Number(val);
+      return (Number.isFinite(n) && n >= 0) ? Math.floor(n) : fallback;
+    };
     const resolveHistoryEntry = async (item) => {
       if (!item) return null;
       const isMus = Boolean(item.isMusic || item.mediaType === 'music' || item.provider === 'music' || item.artist);
@@ -275,7 +282,7 @@ function Vote(ctx) {
       if (item.provider === 'youtube' && item.videoId) return item;
       if (item.tmdbId || item.catalogProvider || /cinema|anime|turkish/i.test(String(item.provider || ''))) {
         const prov = getProvider(item.catalogProvider || item.provider || 'cinema') || { id: 'cinema', name: 'Sinema & Dizi' };
-        const resolved = await resolveCatalogItem(item, prov, Number(item.season || 1), Number(item.episode || 1), '', { applySavedResume: false }).catch(() => null);
+        const resolved = await resolveCatalogItem(item, prov, _parseSeasonNum(item.season, 1), Number(item.episode || 1), '', { applySavedResume: false }).catch(() => null);
         if (resolved) return resolved;
       }
       return (item.url || item.videoId || item.embedUrl) ? item : null;
@@ -284,7 +291,7 @@ function Vote(ctx) {
     const historyBox = recentHistory.length ? h('div', { style: { padding: '8px 10px', borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: '6px' } },
       h('div', { style: { fontSize: '.74rem', fontWeight: '700', color: '#A0A9B8', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '.04em' } }, '🕘 Oda & İzleme Geçmişi'),
       h('div', { class: 'vote-list' }, recentHistory.map((item) => h('div', { class: 'vote-card', style: { cursor: 'default' } },
-        h('img', { src: item.thumbnail || item.poster || '/static/watchlivo-poster.svg', alt: '', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+        h('img', { src: thumbFor(item) || '/static/watchlivo-poster.svg', alt: '', onerror: (e) => { e.target.onerror = null; e.target.src = '/static/watchlivo-poster.svg'; } }),
         h('div', { class: 'vi' },
           h('div', { class: 'vt' }, item.songTitle || item.title || 'Video'),
           h('div', { style: { display: 'flex', gap: '4px', marginTop: '4px' } },
@@ -315,9 +322,8 @@ function Vote(ctx) {
     const skipNeeded = state.mesh?.skipNeeded || Math.max(1, Math.floor(humanCount / 2) + 1);
     const skipVotes = state.mesh?.skipVotes || state.mesh?.skip_votes || [];
 
-    fill(el,
-      quickAddBox,
-      h('div', { class: 'sel-note' }, mode === 'vote' ? 'Oylayalım: en çok oy alan video sıradaki olur.' : mode === 'autoplay' ? 'Otomatik Oynat: sıradaki video bitince otomatik başlar.' : mode === 'leader' ? "Liderin Seçimi: herkes sıraya video önerebilir, lider başlatır." : 'Hemen Oynat: seçilen video hemen oynar.'),
+    fill(voteBody,
+      h('div', { class: 'sel-note' }, mode === 'vote' ? 'Oylayalım: en çok oy alan video sıradaki olur.' : mode === 'autoplay' ? 'Otomatik Oynat: sıradaki video bitince otomatik başlar.' : mode === 'leader' ? "Liderin Seçimi: herkes sıraya video önerebilir, lider başlatır." : mode === 'cohost' ? 'Ortak Kontrol: herkes videoyu oynatıp sarabilir ve sıraya ekleyebilir.' : 'Hemen Oynat: seçilen video hemen oynar.'),
       m?.voteEndsAt && m.voteEndsAt * 1000 > nowMs() ? h('div', { style: { display: 'flex', justifyContent: 'center' } }, pie) : null,
       q.length ? h('div', { class: 'vote-list' }, q.map((it, i) => {
         const votes = (it.votes || []).length;
@@ -325,7 +331,7 @@ function Vote(ctx) {
         const canPlayItem = lead || ['quickplay', 'free', 'cohost'].includes(mode || '');
         const canRemoveItem = lead || Boolean(it.addedByCid && state.clientId && it.addedByCid === state.clientId);
         return h('div', { class: `vote-card ${votes && votes === maxVotes ? 'winning' : ''} ${voted ? 'voted' : ''}`, onclick: () => voteVideo(i, it.id) },
-          h('img', { src: thumbFor(it) || '/static/watchlivo-logo.svg', alt: '', onerror: (e) => { e.target.onerror = null; e.target.src = '/static/watchlivo-poster.svg'; } }),
+          h('img', { src: thumbFor(it) || '/static/watchlivo-poster.svg', alt: '', onerror: (e) => { e.target.onerror = null; e.target.src = '/static/watchlivo-poster.svg'; } }),
           h('div', { class: 'vi' }, h('div', { class: 'vt' }, it.title || 'Video'), h('div', { class: 'vs' }, `${it.addedBy || ''} ekledi`),
             (canPlayItem || canRemoveItem) ? h('div', { style: { display: 'flex', gap: '.3em', marginTop: '.35em' } },
               canPlayItem ? h('button', { class: 'btn', style: { padding: '.3em .7em', fontSize: '.75em' }, onclick: (e) => { e.stopPropagation(); playQueueIndex(i, it.id); } }, 'Şimdi Oynat') : null,
@@ -360,6 +366,7 @@ function Friends() {
     try {
       const cleanQr = new URL(shareUrl);
       cleanQr.searchParams.delete('r_tok');
+      cleanQr.searchParams.delete('pwd');
       qrDataUrl = cleanQr.toString();
     } catch (_) {}
     const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=1&data=${encodeURIComponent(qrDataUrl)}`;
@@ -562,7 +569,7 @@ function Participants(ctx) {
         class: `btn sm ${duckOn ? 'primary' : ''}`,
         onclick: () => {
           const next = !duckOn;
-          try { localStorage.setItem('vortex_voice_duck', next ? 'on' : 'off'); } catch (e) { /* ignore */ }
+          try { localStorage.setItem('vortex_voice_duck', next ? '1' : '0'); } catch (e) { /* ignore */ }
           setUiPref({ voiceDucking: next });
           window.vortexSetAutoDuck?.(next);
           window.__kinoxSyncDuckVolume?.();
@@ -655,7 +662,8 @@ function Participants(ctx) {
                 canStageCtrl && m?.voipMode === 'stage' ? h('button', { type: 'button', 'aria-label': p.isStageSpeaker ? 'Sahneden dinleyiciye al' : 'Sahneye konuşmacı al', 'data-tip': p.isStageSpeaker ? 'Sahneden dinleyiciye al' : 'Sahneye konuşmacı al (Söz Ver)', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isStageSpeaker ? 'rgba(39, 220, 200,.24)' : '' }, onclick: () => ctx.actions.toggleStageSpeaker?.(p.id) }, p.isStageSpeaker ? '🎤✓' : '✋🎤') : null,
                 hostOnly ? h('button', { type: 'button', 'aria-label': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider yap', 'data-tip': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider (Co-Host) yap', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isCoHost ? 'rgba(99, 102, 241,.22)' : '' }, onclick: () => ctx.actions.hostAction('toggle_cohost', { targetId: p.id }) }, '🤝') : null,
                 hostOnly ? h('button', { type: 'button', 'aria-label': `${p.name} kişisini lider yap`, 'data-tip': 'Lider yap', onclick: () => ctx.actions.hostAction('transfer_host', { targetId: p.id }), html: icons.crown }) : null,
-                hostOnly ? h('button', { type: 'button', 'aria-label': `${p.name} kişisini odadan çıkar`, 'data-tip': 'Odadan çıkar', onclick: async () => { if (await confirmPopup(`${p.name} odadan çıkarılsın mı?`, 'Çıkar', 'Vazgeç')) ctx.actions.hostAction('kick', { targetId: p.id }); }, html: icons.kick }) : null);
+                hostOnly ? h('button', { type: 'button', 'aria-label': `${p.name} kişisini odadan çıkar`, 'data-tip': 'Odadan çıkar', onclick: async () => { if (await confirmPopup(`${p.name} odadan çıkarılsın mı?`, 'Çıkar', 'Vazgeç')) ctx.actions.hostAction('kick', { targetId: p.id, targetUid: p.uid || '' }); }, html: icons.kick }) : null,
+                hostOnly ? h('button', { type: 'button', class: 'danger', 'aria-label': `${p.name} kişisini odadan yasakla`, 'data-tip': 'Odadan kalıcı yasakla', onclick: async () => { if (await confirmPopup(`${p.name} odadan kalıcı olarak yasaklansın mı?`, 'Yasakla', 'Vazgeç')) ctx.actions.hostAction('ban', { targetId: p.id, targetUid: p.uid || '' }); } }, '🚫') : null);
             }
             return null;
           })());

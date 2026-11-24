@@ -1,22 +1,26 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261122_v238';
-import { api } from '../api.js?v=20261122_v238';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261122_v238';
-import { resolveMusicItem } from './selection-kinds.js?v=20261122_v238';
-import { MeshConnection } from '../realtime.js?v=20261122_v238';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261122_v238';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261122_v238';
-import { buildLayout } from './mesh-layout.js?v=20261122_v238';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261122_v238';
-import { Voice } from '../voice.js?v=20261122_v238';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261122_v238';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261122_v238';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261122_v238';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261124_v239';
+import { api } from '../api.js?v=20261124_v239';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261124_v239';
+import { resolveMusicItem } from './selection-kinds.js?v=20261124_v239';
+import { MeshConnection } from '../realtime.js?v=20261124_v239';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261124_v239';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261124_v239';
+import { buildLayout } from './mesh-layout.js?v=20261124_v239';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261124_v239';
+import { Voice } from '../voice.js?v=20261124_v239';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261124_v239';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261124_v239';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261124_v239';
 
 let ctx = null;
 
 // Sohbet yenilemede ve uygulama geçişlerinde korunur (sessionStorage + localStorage).
 const chatKey = (id) => `vortex_chat_${id}`;
+const toSec = (v) => {
+  const n = Number(v || 0);
+  return n > 1e11 ? n / 1000 : n;
+};
 export function loadSavedChat(id) {
   if (!id) return [];
   try {
@@ -26,7 +30,7 @@ export function loadSavedChat(id) {
     const byId = new Map();
     for (const m of [...(Array.isArray(rawL) ? rawL : []), ...(Array.isArray(rawS) ? rawS : [])]) {
       if (m && m.id && !m.system) {
-        const ts = Number(m.ts || nowSec);
+        const ts = toSec(m.ts || nowSec);
         if (nowSec - ts < 86400) {
           byId.set(m.id, { ...m, ts });
         }
@@ -34,6 +38,18 @@ export function loadSavedChat(id) {
     }
     return Array.from(byId.values()).sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0)).slice(-80);
   } catch (e) { return []; }
+}
+function removeSavedChatMsg(id, msgId) {
+  try {
+    if (!id || !msgId) return;
+    const filtered = loadSavedChat(id).filter((m) => m && m.id !== msgId);
+    const serialized = JSON.stringify(filtered);
+    try { sessionStorage.setItem(chatKey(id), serialized); } catch (_) {}
+    const localSafe = serialized.length > 160000
+      ? JSON.stringify(filtered.map(({ audioNote, ...rest }) => rest))
+      : serialized;
+    try { localStorage.setItem(chatKey(id), localSafe); } catch (_) {}
+  } catch (_) {}
 }
 const _saveChatTimers = new Map();
 const _pendingChatRooms = new Map();
@@ -44,14 +60,16 @@ function flushSavedChat(room) {
     const t = _saveChatTimers.get(room.id);
     if (t) { clearTimeout(t); _saveChatTimers.delete(room.id); }
     _pendingChatRooms.delete(room.id);
-    if (ctx?.chatClearedAt && Date.now() - ctx.chatClearedAt < 10000) return;
+    const effectiveClearedSec = Math.max(toSec(room.chatClearedAt), toSec(ctx?.chatClearedAt));
+    const deletedSet = ctx?.deletedMsgIds;
     const nowSec = Date.now() / 1000;
-    const existing = loadSavedChat(room.id);
-    const incoming = (room.chat || []).filter((m) => m && m.id && !m.system);
+    const existing = loadSavedChat(room.id).filter((m) => (!deletedSet || !deletedSet.has(m.id)) && (effectiveClearedSec <= 0 || toSec(m.ts) > effectiveClearedSec));
+    const incoming = (room.chat || []).filter((m) => m && m.id && !m.system && (!deletedSet || !deletedSet.has(m.id)) && (effectiveClearedSec <= 0 || toSec(m.ts) > effectiveClearedSec));
+    if (effectiveClearedSec > 0 && !existing.length && !incoming.length) return;
     const byId = new Map();
     for (const m of [...existing, ...incoming]) {
       if (m && m.id && !m.system) {
-        const ts = Number(m.ts || nowSec);
+        const ts = toSec(m.ts || nowSec);
         if (nowSec - ts < 86400) {
           const { snapshot, ...lite } = m;
           byId.set(m.id, { ...lite, ts });
@@ -264,11 +282,33 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
       }
     }
   }
-  if (!room.curated && !(ctx?.chatClearedAt && Date.now() - ctx.chatClearedAt < 10000)) {
+  if (!room.curated) {
+    const srvClearedSec = toSec(room.chatClearedAt);
+    if (ctx && srvClearedSec > (ctx.lastSrvClearedSec || 0)) {
+      ctx.lastSrvClearedSec = srvClearedSec;
+      ctx.chatClearedAt = Math.max(Number(ctx.chatClearedAt || 0), srvClearedSec * 1000);
+      clearSavedChat(room.id);
+      ctx.seenChatIds?.clear();
+      ctx.layout?.clearChatDom?.();
+    }
+    const effectiveClearedSec = Math.max(srvClearedSec, toSec(ctx?.chatClearedAt));
+    const deletedSet = ctx?.deletedMsgIds;
     const nowSec = Date.now() / 1000;
-    const saved = loadSavedChat(room.id);
-    const localCur = (Array.isArray(curRoom?.chat) ? curRoom.chat : []).filter((m) => m && (!m.system || (nowSec - Number(m.ts || 0) <= 1800)));
-    const srvChat = (Array.isArray(room.chat) ? room.chat : []).filter((m) => m && (!m.system || (nowSec - Number(m.ts || 0) <= 1800)));
+    const saved = loadSavedChat(room.id).filter((m) =>
+      (!deletedSet || !deletedSet.has(m.id)) &&
+      (effectiveClearedSec <= 0 || toSec(m.ts) > effectiveClearedSec)
+    );
+    const localCur = (Array.isArray(curRoom?.chat) ? curRoom.chat : []).filter((m) =>
+      m &&
+      (!m.system || (nowSec - toSec(m.ts) <= 1800)) &&
+      (!deletedSet || !deletedSet.has(m.id)) &&
+      (effectiveClearedSec <= 0 || toSec(m.ts) > effectiveClearedSec)
+    );
+    const srvChat = (Array.isArray(room.chat) ? room.chat : []).filter((m) =>
+      m &&
+      (!m.system || (nowSec - toSec(m.ts) <= 1800)) &&
+      (!deletedSet || !deletedSet.has(m.id))
+    );
     const mergedMap = new Map();
     for (const m of [...saved, ...localCur, ...srvChat]) {
       if (m && m.id) {
@@ -810,12 +850,65 @@ function onMessage(data) {
       break;
     case 'chat_cleared':
       if (room) {
-        if (ctx) ctx.chatClearedAt = Date.now();
+        if (ctx) {
+          ctx.chatClearedAt = Number(data.chatClearedAt || Date.now());
+          if (data.chatClearedAt) ctx.lastSrvClearedSec = toSec(data.chatClearedAt);
+        }
         clearSavedChat(room.id);
         ctx.seenChatIds?.clear();
         ctx.layout?.clearChatDom?.();
-        set({ mesh: { ...room, chat: [], polls: [] } });
+        const clearedRoom = {
+          ...room,
+          chat: [],
+          ...(Array.isArray(data.polls) ? { polls: data.polls } : {}),
+          chatClearedAt: data.chatClearedAt || ctx?.chatClearedAt || Date.now(),
+        };
+        set({ mesh: clearedRoom });
+        if (ctx?.conn) ctx.conn.lastRoom = clearedRoom;
         ctx.layout.update();
+      }
+      break;
+    case 'msg_deleted':
+      if (room) {
+        const msgId = String(data.msgId || data.id || '');
+        if (msgId) {
+          ctx?.deletedMsgIds?.add(msgId);
+          ctx?.seenChatIds?.delete(msgId);
+          removeSavedChatMsg(room.id, msgId);
+          const updatedChat = (room.chat || []).filter((m) => m && m.id !== msgId);
+          const updatedRoom = { ...room, chat: updatedChat };
+          set({ mesh: updatedRoom });
+          if (ctx?.conn) ctx.conn.lastRoom = updatedRoom;
+          ctx?.layout?.msgDeleted?.(msgId);
+          ctx?.layout?.update?.();
+        }
+      }
+      break;
+    case 'profile_updated':
+      if (room && data.cid) {
+        const patch = data.profile && typeof data.profile === 'object' ? data.profile : data;
+        const nextParts = (room.participants || []).map((p) => {
+          if (!p || p.id !== data.cid) return p;
+          return {
+            ...p,
+            name: patch.username || patch.name || p.name,
+            handle: patch.handle !== undefined ? patch.handle : p.handle,
+            color: patch.color || p.color,
+            avatarUrl: patch.avatarUrl !== undefined ? patch.avatarUrl : p.avatarUrl,
+            bio: patch.bio !== undefined ? patch.bio : p.bio,
+            statusText: patch.statusText !== undefined ? patch.statusText : p.statusText,
+            statusEmoji: patch.statusEmoji !== undefined ? patch.statusEmoji : p.statusEmoji,
+            medal: patch.medal !== undefined ? patch.medal : p.medal,
+            hideWatching: patch.hideWatching !== undefined ? Boolean(patch.hideWatching) : p.hideWatching,
+            hideFriends: patch.hideFriends !== undefined ? Boolean(patch.hideFriends) : p.hideFriends,
+            hideLocation: patch.hideLocation !== undefined ? Boolean(patch.hideLocation) : p.hideLocation,
+          };
+        });
+        const nextRoom = { ...room, participants: nextParts };
+        set({ mesh: nextRoom });
+        if (ctx?.conn) ctx.conn.lastRoom = nextRoom;
+        ctx?.layout?.update?.();
+        ctx?.voice?.syncPeers?.(nextParts);
       }
       break;
     case 'poll_updated':
@@ -1192,8 +1285,11 @@ const actions = {
     const self = state.self || { name: 'İzleyici', color: '#27DCC8' };
     const optimisticMsg = {
       id: msgId,
+      cid: state.clientId || ctx?.conn?.clientId || '',
       user: self.name || 'İzleyici',
-      uid: self.id || '',
+      uid: self.uid || self.id || '',
+      handle: self.handle || '',
+      avatarUrl: self.avatarUrl || self.avatar || '',
       color: self.color || '#27DCC8',
       text: cleanText,
       gif: extra.gif || '',
@@ -1215,18 +1311,50 @@ const actions = {
       ctx?.layout?.chatAppended?.(optimisticMsg);
       ctx?.layout?.danmaku?.(optimisticMsg);
     }
-    const recentChat = (state.mesh?.chat || []).slice(-20).map((c) => {
-      if (!c || typeof c !== 'object') return c;
-      const { audioNote, snapshot, ...lite } = c;
-      return lite;
-    });
-    ctx.conn.send('chat', { id: msgId, clientMsgId: msgId, text: cleanText, ...extra, recentChat });
+    ctx.conn.send('chat', { id: msgId, clientMsgId: msgId, text: cleanText, ...extra });
+  },
+  deleteMsg(msgId) {
+    if (!ctx || !msgId) return;
+    const room = state.mesh;
+    const targetId = String(msgId);
+    ctx.deletedMsgIds?.add(targetId);
+    ctx.seenChatIds?.delete(targetId);
+    if (room) {
+      removeSavedChatMsg(room.id, targetId);
+      const updatedChat = (room.chat || []).filter((m) => m && m.id !== targetId);
+      const updatedRoom = { ...room, chat: updatedChat };
+      set({ mesh: updatedRoom });
+      if (ctx.conn) ctx.conn.lastRoom = updatedRoom;
+      ctx.layout?.msgDeleted?.(targetId);
+      ctx.layout?.update?.();
+    }
+    ctx.conn?.send('delete_msg', { msgId: targetId });
+  },
+  updateProfile(patch = {}) {
+    if (!ctx?.conn || !patch || typeof patch !== 'object') return;
+    const p = state.self || {};
+    const payload = {
+      username: patch.username ?? patch.name ?? p.name ?? '',
+      handle: patch.handle ?? p.handle ?? '',
+      color: patch.color ?? p.color ?? '#27DCC8',
+      avatarUrl: patch.avatarUrl ?? p.avatarUrl ?? p.avatar ?? '',
+      bio: patch.bio ?? p.bio ?? '',
+      statusText: patch.statusText ?? p.statusText ?? '',
+      statusEmoji: patch.statusEmoji ?? p.statusEmoji ?? '🍿',
+      medal: patch.medal ?? p.medal ?? '',
+      hideWatching: patch.hideWatching ?? Boolean(p.hideWatching),
+      hideFriends: patch.hideFriends ?? Boolean(p.hideFriends),
+      hideLocation: patch.hideLocation ?? Boolean(p.hideLocation),
+    };
+    ctx.conn.profile = { ...(ctx.conn.profile || {}), ...payload, name: payload.username || ctx.conn.profile?.name };
+    ctx.conn.send('profile_update', payload);
   },
   clearChat() {
     if (!ctx) return;
     const coHosts = state.mesh?.co_hosts || state.mesh?.coHosts || [];
     const meP = (state.mesh?.participants || []).find((p) => p && p.id === state.clientId);
-    if (!isHostOnly() && !coHosts.includes(state.clientId) && !meP?.isCoHost) {
+    const myUid = state.self?.uid || state.self?.id;
+    if (!isHostOnly() && !coHosts.includes(state.clientId) && !meP?.isCoHost && !(myUid && state.mesh?.creatorId === myUid)) {
       toast('Sohbeti yalnızca oda lideri temizleyebilir');
       return;
     }
@@ -1234,7 +1362,11 @@ const actions = {
     clearSavedChat(state.mesh?.id);
     ctx.seenChatIds?.clear();
     ctx.layout?.clearChatDom?.();
-    if (state.mesh) set({ mesh: { ...state.mesh, chat: [], polls: [] } });
+    if (state.mesh) {
+      const clearedRoom = { ...state.mesh, chat: [], chatClearedAt: ctx.chatClearedAt };
+      set({ mesh: clearedRoom });
+      if (ctx.conn) ctx.conn.lastRoom = clearedRoom;
+    }
     ctx.conn.send('clear_chat');
   },
   createPoll(question, options) {
@@ -1531,7 +1663,7 @@ export async function enterMesh(app, params) {
       || null;
     if (initialCid) sessionStorage.setItem('vortex_cid', initialCid);
   } catch (e) { /* ignore */ }
-  set({ mesh: null, clientId: initialCid, view: { left: 'Collapsed', right: 'Collapsed' }, connection: 'connecting' });
+  set({ mesh: null, clientId: initialCid, view: { left: 'Collapsed', right: 'Collapsed' }, connection: 'connecting', unseenChat: 0, chatVisible: true });
   const host = new PlayerHost(h('div'), { onEvent: (ev, arg) => onPlayerEvent(ev, arg) });
   const sync = new SyncEngine({
     getMedia: () => state.mesh?.media,
@@ -1541,12 +1673,14 @@ export async function enterMesh(app, params) {
     onLeaderSync: (t) => actions.heartbeat(t, false),
     onStatus: (s) => ctx?.layout.syncStatus(s),
   });
-  ctx = { host, sync, actions, conn: null, layout: null, voice: null, isNew: params.new === '1' };
+  ctx = { host, sync, actions, conn: null, layout: null, voice: null, isNew: params.new === '1', deletedMsgIds: new Set(), lastSrvClearedSec: 0 };
   ctx.voice = new Voice({
     send: (type, payload) => ctx.conn?.send(type, payload),
     getSelfId: () => state.clientId,
     getRoomId: () => state.mesh?.id || params.id,
     getSelfProfile: () => state.self,
+    getRoom: () => state.mesh,
+    isLeader: () => isLeader(),
     onDuckChange: (ducked) => host.setDucked(ducked),
     onMicLevel: (lvl) => ctx?.layout?.setMicLevel?.(lvl),
     onP2pData: (pkt) => ctx?.conn?.onP2pPacket?.(pkt),
@@ -1775,6 +1909,6 @@ export function leaveMeshView(explicitLeave = false) {
     window.vortexDebug = null;
   }
   ctx = null;
-  set({ mesh: null, clientId: null });
+  set({ mesh: null, clientId: null, unseenChat: 0, chatVisible: true });
   setTimeout(() => pushPresenceHeartbeat({ state: 'online', roomId: '', roomName: '', mediaTitle: '' }).catch(() => {}), 40);
 }

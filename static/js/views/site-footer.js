@@ -1,9 +1,36 @@
 // Watchlivo Institutional Footer, On-Page SEO Hub, FAQ Accordion, Legal Modals & Contact/DMCA Engine (v125)
-import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261122_v238';
-import { api, isEdgeUnavailable, humanApiError } from '../api.js?v=20261122_v238';
-import { state } from '../store.js?v=20261122_v238';
+import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261124_v239';
+import { api, isEdgeUnavailable, humanApiError } from '../api.js?v=20261124_v239';
+import { state } from '../store.js?v=20261124_v239';
 
 export const OFFICIAL_CONTACT_EMAIL = 'jokallame0@gmail.com';
+
+async function copyTextWithFallback(txt) {
+  const val = String(txt || '');
+  if (!val) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(val);
+      return true;
+    }
+  } catch (_) {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = val;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    ta.style.top = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return Boolean(ok);
+  } catch (_) {
+    return false;
+  }
+}
 
 export const FAQ_ITEMS = [
   {
@@ -24,7 +51,7 @@ export const FAQ_ITEMS = [
   },
   {
     q: 'Telefonda (iPhone / Android) ve bilgisayarda uygulama olarak nasıl kullanılır?',
-    a: 'Watchlivo kurulum gerektirmeden tüm mobil ve masaüstü tarayıcılarda çalışır. Ayrıca üst menüdeki "APK İndir (v2.0.2)" butonuyla Android yerel uygulamasını indirebilir, iPhone (Safari) veya bilgisayarında "Ana Ekrana Ekle / Uygulamayı Yükle" seçeneğiyle tam ekran PWA olarak kullanabilirsin.',
+    a: 'Watchlivo kurulum gerektirmeden tüm mobil ve masaüstü tarayıcılarda çalışır. Ayrıca üst menüdeki "APK İndir (v2.0)" butonuyla Android yerel uygulamasını indirebilir, iPhone (Safari) veya bilgisayarında "Ana Ekrana Ekle / Uygulamayı Yükle" seçeneğiyle tam ekran PWA olarak kullanabilirsin.',
   },
   {
     q: 'Telif hakkı (DMCA), içerik kaldırma ve hata bildirimleri nereye yapılır?',
@@ -43,7 +70,7 @@ const LEGAL_SECTIONS = {
         <li><b>Milisaniyelik Senkronizasyon Motoru:</b> Odadaki herkes videonun tam olarak aynı saniyesini görür. Duraklatma, sarma ve bölüm geçişleri anında eşitlenir.</li>
         <li><b>Kristal Netliğinde WebRTC Sesli Sohbet:</b> Harici bir uygulamaya ihtiyaç duymadan oda içinde mikrofonla konuşabilir, sesli not ve canlı tepkiler gönderebilirsiniz.</li>
         <li><b>Zengin Türkçe Dublaj & Altyazı Seçenekleri:</b> Binlerce film, dizi ve anime içeriğinde Türkçe dublaj, Türkçe altyazı ve orijinal dil alternatifleri tek tıkla değiştirilebilir.</li>
-        <li><b>Her Cihazda Kesintisiz Deneyim:</b> Web tarayıcısı, Android Native APK (v2.0.2), iOS Tam Ekran Web Uygulaması (PWA) ve Windows masaüstü desteğiyle her ekranda yanınızdadır.</li>
+        <li><b>Her Cihazda Kesintisiz Deneyim:</b> Web tarayıcısı, Android Native APK (v2.0), iOS Tam Ekran Web Uygulaması (PWA) ve Windows masaüstü desteğiyle her ekranda yanınızdadır.</li>
       </ul>
       <p>Resmi İletişim & İşbirliği: <a href="mailto:${OFFICIAL_CONTACT_EMAIL}" style="color:#27dcc8;font-weight:700;">${OFFICIAL_CONTACT_EMAIL}</a></p>
     `,
@@ -170,9 +197,18 @@ export function openLegalModal(initialTab = 'about') {
       }, '✉️ Bize Yazın / Başvuru Yapın'))
   );
 
+  const clearModalRouteUrl = () => {
+    try {
+      if (/^\/(?:about|privacy|terms|dmca|cookies|contact|stats)\/?$/i.test(location.pathname)) {
+        history.replaceState({}, '', '/');
+      }
+    } catch (_) {}
+  };
+
   legalModalRef = popup({
     title: 'Watchlivo — Kurumsal & Yasal Bilgiler',
     content: wrap,
+    onClose: clearModalRouteUrl,
     options: [{ label: 'Kapat', primary: true }],
   });
 }
@@ -219,9 +255,10 @@ export function openContactModal(initialType = 'request') {
       h('button', {
         type: 'button',
         class: 'btn sm',
-        onclick: () => {
-          navigator.clipboard?.writeText(OFFICIAL_CONTACT_EMAIL).catch(() => {});
-          toast(`📋 E-posta kopyalandı: ${OFFICIAL_CONTACT_EMAIL}`);
+        onclick: async () => {
+          const ok = await copyTextWithFallback(OFFICIAL_CONTACT_EMAIL);
+          if (ok) toast(`📋 E-posta kopyalandı: ${OFFICIAL_CONTACT_EMAIL}`);
+          else toast(`⚠️ Kopyalama izni reddedildi. E-posta: ${OFFICIAL_CONTACT_EMAIL}`);
         },
       }, '📋 Kopyala')),
     h('label', { class: 'wl-contact-lbl', for: 'wl-contact-type' }, 'Konu Kategorisi'),
@@ -239,6 +276,13 @@ export function openContactModal(initialType = 'request') {
   popup({
     title: '✉️ Bize Ulaşın · Film/Dizi İste & Hata Bildir',
     content: formWrap,
+    onClose: () => {
+      try {
+        if (/^\/(?:about|privacy|terms|dmca|cookies|contact|stats)\/?$/i.test(location.pathname)) {
+          history.replaceState({}, '', '/');
+        }
+      } catch (_) {}
+    },
     options: [
       {
         label: '🚀 Hemen Gönder',
@@ -299,6 +343,63 @@ export function openContactModal(initialType = 'request') {
   });
 }
 
+export function openStatsModal() {
+  const box = h('div', { class: 'wl-stats-modal-body', style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+    h('div', { class: 'dim', style: { fontSize: '.85rem' } }, '⏳ Canlı platform verileri yükleniyor...'));
+  popup({
+    title: '📈 Watchlivo — Canlı Platform İstatistikleri',
+    kind: 'stats',
+    wide: true,
+    content: box,
+    onClose: () => {
+      try {
+        if (/^\/(?:about|privacy|terms|dmca|cookies|contact|stats)\/?$/i.test(location.pathname)) {
+          history.replaceState({}, '', '/');
+        }
+      } catch (_) {}
+    },
+    options: [{ label: 'Kapat', primary: true }],
+  });
+  Promise.allSettled([
+    api('/api/health', { timeout: 6000 }),
+    api('/api/rooms', { timeout: 6000 }),
+  ]).then(([healthRes, roomsRes]) => {
+    if (!box.isConnected) return;
+    const hData = healthRes.status === 'fulfilled' ? healthRes.value : null;
+    const rList = roomsRes.status === 'fulfilled' && Array.isArray(roomsRes.value?.rooms) ? roomsRes.value.rooms : [];
+    const curatedCnt = rList.filter((r) => r.curated).length;
+    const publicCnt = rList.filter((r) => !r.curated).length;
+    const viewerCnt = rList.reduce((acc, r) => acc + Math.max(0, Number(r.count || 0)), 0);
+    const ver = hData?.version || 'v239';
+    const ok = hData?.ok !== false;
+    box.replaceChildren(
+      h('div', { class: 'wl-trust-grid' },
+        h('div', { class: 'wl-trust-card' },
+          h('div', { class: 'wl-trust-ico' }, ok ? '🟢' : '🟡'),
+          h('div', { class: 'wl-trust-meta' },
+            h('h3', { class: 'wl-trust-title' }, ok ? 'Sistem Aktif' : 'Sınırlı Bağlantı'),
+            h('p', { class: 'wl-trust-desc' }, `Motor Sürümü: ${ver}`))),
+        h('div', { class: 'wl-trust-card' },
+          h('div', { class: 'wl-trust-ico' }, '🎬'),
+          h('div', { class: 'wl-trust-meta' },
+            h('h3', { class: 'wl-trust-title' }, `${publicCnt} Açık Oda`),
+            h('p', { class: 'wl-trust-desc' }, 'Aktif herkese açık izleme odası'))),
+        h('div', { class: 'wl-trust-card' },
+          h('div', { class: 'wl-trust-ico' }, '📡'),
+          h('div', { class: 'wl-trust-meta' },
+            h('h3', { class: 'wl-trust-title' }, `${curatedCnt} Canlı Kanal`),
+            h('p', { class: 'wl-trust-desc' }, '7/24 kesintisiz TV & Radyo yayını'))),
+        h('div', { class: 'wl-trust-card' },
+          h('div', { class: 'wl-trust-ico' }, '👥'),
+          h('div', { class: 'wl-trust-meta' },
+            h('h3', { class: 'wl-trust-title' }, `${viewerCnt} Aktif İzleyici`),
+            h('p', { class: 'wl-trust-desc' }, 'Anlık senkronize katılımcı')))),
+      h('div', { class: 'dim', style: { fontSize: '.8rem' } },
+        `Resmi İletişim & Destek: ${OFFICIAL_CONTACT_EMAIL} · Tüm sunucular düşük gecikmeli WebRTC ve saliselik senkronizasyon ile çalışmaktadır.`)
+    );
+  });
+}
+
 export function initCookieConsentBanner() {
   try {
     if (localStorage.getItem('wl_cookie_consent_v1') === '1') return;
@@ -322,12 +423,7 @@ export function initCookieConsentBanner() {
           },
         }, 'Anladım'))
     );
-    const footerEl = document.getElementById('wl-institutional-footer') || document.getElementById('wl-site-footer-wrap');
-    if (footerEl) {
-      footerEl.insertBefore(banner, footerEl.firstChild);
-    } else {
-      document.body.appendChild(banner);
-    }
+    document.body.appendChild(banner);
   } catch (_) {}
 }
 
@@ -336,7 +432,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
     ['⚡', 'Saliselik Senkronizasyon', 'Arkadaşlarınla aynı karede durdur, sar ve sıfır gecikmeyle birlikte izle.'],
     ['🎙️', 'Kristal Netliğinde Sesli Sohbet', 'Oda içi WebRTC düşük gecikmeli mikrofon, sesli not ve anlık emoji tepkileri.'],
     ['🇹🇷', '4K Türkçe Dublaj & Altyazı', 'Vizyon filmleri, popüler diziler, animeler, 7/24 canlı TV ve YouTube akışları.'],
-    ['📱', 'Kurulumsuz Web, iOS & Android', 'Tarayıcıdan anında katıl veya PWA / Native APK v2.0.2 ile tam ekran izle.'],
+    ['📱', 'Kurulumsuz Web, iOS & Android', 'Tarayıcıdan anında katıl veya PWA / Native APK v2.0 ile tam ekran izle.'],
   ];
 
   const faqBox = h('div', { class: 'wl-faq-list' },
@@ -397,7 +493,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
           type: 'button',
           class: 'btn sm primary',
           style: { fontSize: '0.78rem', padding: '5px 10px' },
-          onclick: () => {
+          onclick: async () => {
             if (navigator.share) {
               navigator.share({
                 title: 'Watchlivo — Birlikte Sinema, Dizi & Anime Odaları',
@@ -405,8 +501,9 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
                 url: 'https://watchlivo.online',
               }).catch(() => {});
             } else {
-              navigator.clipboard?.writeText('https://watchlivo.online').catch(() => {});
-              toast('📋 Bağlantı kopyalandı: https://watchlivo.online');
+              const ok = await copyTextWithFallback('https://watchlivo.online');
+              if (ok) toast('📋 Bağlantı kopyalandı: https://watchlivo.online');
+              else toast('⚠️ Bağlantı kopyalanamadı.');
             }
           },
         }, '🔗 Davet Linkini Kopyala'))),
@@ -415,7 +512,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
       h('div', { class: 'wl-footer-cols' },
         h('div', { class: 'wl-footer-col brand-col' },
           h('div', { class: 'wl-footer-brand' },
-            h('img', { src: '/static/watchlivo-logo.svg?v=20261122_v238', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
+            h('img', { src: '/static/watchlivo-logo.svg?v=20261124_v239', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
             h('span', { class: 'wl-footer-wordmark' }, 'WATCHLIVO')),
           h('p', { class: 'wl-footer-brand-desc' },
             'Arkadaşlarınla aynı anda, tek kare gecikmesiz birlikte sinema, dizi, anime, canlı TV ve müzik odaları.'),
@@ -430,9 +527,10 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
                 type: 'button',
                 class: 'wl-footer-copy-btn',
                 title: 'E-posta adresini kopyala',
-                onclick: () => {
-                  navigator.clipboard?.writeText(OFFICIAL_CONTACT_EMAIL).catch(() => {});
-                  toast(`📋 Kopyalandı: ${OFFICIAL_CONTACT_EMAIL}`);
+                onclick: async () => {
+                  const ok = await copyTextWithFallback(OFFICIAL_CONTACT_EMAIL);
+                  if (ok) toast(`📋 Kopyalandı: ${OFFICIAL_CONTACT_EMAIL}`);
+                  else toast(`⚠️ Kopyalama izni reddedildi. E-posta: ${OFFICIAL_CONTACT_EMAIL}`);
                 },
               }, 'Kopyala')))),
 
@@ -479,20 +577,24 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
             h('a', {
               href: '/stats',
               class: 'wl-footer-stats-link',
+              onclick: (e) => {
+                e.preventDefault();
+                openStatsModal();
+              },
             }, '📈 Canlı Platform & SEO İstatistikleri')))),
 
       h('div', { class: 'wl-footer-bottom' },
         h('div', { class: 'wl-footer-copy' },
           '© 2026 Watchlivo (watchlivo.online) · Tüm hakları saklıdır. Watchlivo kendi sunucularında hiçbir medya dosyası barındırmaz (5651 & DMCA Uyumlu Yer Sağlayıcı / Senkronize Oynatıcı).'),
         h('div', { class: 'wl-footer-bottom-links' },
-          h('a', { href: '/about' }, 'Hakkımızda'),
+          h('a', { href: '/about', onclick: (e) => { e.preventDefault(); openLegalModal('about'); } }, 'Hakkımızda'),
           h('span', {}, '·'),
-          h('a', { href: '/privacy' }, 'Gizlilik & KVKK'),
+          h('a', { href: '/privacy', onclick: (e) => { e.preventDefault(); openLegalModal('privacy'); } }, 'Gizlilik & KVKK'),
           h('span', {}, '·'),
-          h('a', { href: '/terms' }, 'Kullanım Şartları'),
+          h('a', { href: '/terms', onclick: (e) => { e.preventDefault(); openLegalModal('terms'); } }, 'Kullanım Şartları'),
           h('span', {}, '·'),
-          h('a', { href: '/dmca' }, 'DMCA'),
+          h('a', { href: '/dmca', onclick: (e) => { e.preventDefault(); openLegalModal('dmca'); } }, 'DMCA'),
           h('span', {}, '·'),
-          h('a', { href: '/contact' }, 'İletişim'))))
+          h('a', { href: '/contact', onclick: (e) => { e.preventDefault(); openContactModal('contact'); } }, 'İletişim'))))
   );
 }

@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261122_v238';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261124_v239';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -30,7 +30,7 @@ function parseTimeSec(h, m, s, ms) {
   return (Number(h || 0) * 3600) + (Number(m || 0) * 60) + Number(s || 0) + (Number(ms || 0) / 1000);
 }
 
-export function parseVtt(vttText) {
+export function parseVtt(vttText, opts = {}) {
   if (!vttText || typeof vttText !== 'string') return [];
   const lines = vttText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   let tsMap = null;
@@ -46,6 +46,9 @@ export function parseVtt(vttText) {
       break;
     }
   }
+  const normSubLine = (s) => String(s || '').toLocaleLowerCase('tr').replace(/\u0307/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const subSpamRe = /(?:opensubtitles|osdb\.link|advertise your product|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|subscene\.com|turkcealtyazi\.org|altyazi\.org|yutukluklar|çeviri\s*:|senkron\s*:|iyi seyirler dileriz|para\s+yat[ıi]rma\s+bonusu|forumiptv\.org|\b1xbet\b|ho[şs]geldin\s+bonusu|canl[ıi]\s+bahis)/i;
+  const sdhNoiseRe = /^(?:müzik|şarkı|music|song|alkış|applause|gülüşmeler|kahkaha|laughter|sessizlik|silence|iç çeker|sighs|inler|groans|nefes alır|gasps)$/i;
   const rawCues = [];
   if (vttText.includes('[Events]') || /^Dialogue:\s*\d+,/m.test(vttText)) {
     const assRe = /^Dialogue:\s*[^,]*,(\d+:\d{2}:\d{2}[.,]\d{2,3}),(\d+:\d{2}:\d{2}[.,]\d{2,3}),([^,]*),(?:[^,]*,){5}(.+)$/;
@@ -82,6 +85,60 @@ export function parseVtt(vttText) {
         if (body && end > start) rawCues.push({ start, end, text: body, norm: String(body).toLowerCase().replace(/[^a-z0-9çğıöşüа-яё]+/gi, ' ').trim() });
       }
     }
+  } else if (!/-->/.test(vttText) && /^\s*\{\d+\}\{\d+\}/m.test(vttText)) {
+    let fps = (Number(opts?.fps) >= 10 && Number(opts?.fps) <= 120) ? Number(opts.fps) : 23.976;
+    const microRe = /^\s*\{(\d+)\}\{(\d+)\}(.*)$/;
+    for (const rawLn of lines) {
+      const mm = microRe.exec(rawLn.trim());
+      if (!mm) continue;
+      const startFrame = Number(mm[1]);
+      const endFrame = Number(mm[2]);
+      const bodyRaw = String(mm[3] || '');
+      if (!Number.isFinite(startFrame) || !Number.isFinite(endFrame)) continue;
+      if (startFrame <= 1 && endFrame <= 1) {
+        const fpsM = bodyRaw.match(/^\s*(\d{2}(?:[.,]\d{1,4})?)\s*$/);
+        if (fpsM) {
+          const candFps = Number(fpsM[1].replace(',', '.'));
+          if (Number.isFinite(candFps) && candFps >= 10 && candFps <= 120) fps = candFps;
+          continue;
+        }
+      }
+      if (endFrame <= startFrame) continue;
+      const start = startFrame / fps;
+      const end = Math.min(endFrame / fps, start + 22.0);
+      const joinedBlock = bodyRaw.replace(/\|/g, '\n').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+      const rawLines = joinedBlock.split('\n')
+        .map((l) => l
+          .replace(/\{[a-zA-Z]:[^}]*\}/g, '')
+          .replace(/\{[ibuIBU]\}/g, '')
+          .replace(/\{\\[^}]*\}/g, '')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;|&#x27;/gi, "'")
+          .replace(/&nbsp;/g, ' ')
+          .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace(/<[^>]*>/g, '')
+          .replace(/[<>]/g, '')
+          .replace(/[♪♫♬♩]+/g, ' ')
+          .replace(/^\s*(?:\[[^\]]*\]|\([^)]*\))\s*$/g, '')
+          .replace(/[ \t]{2,}/g, ' ')
+          .trim())
+        .filter((l) => l && !sdhNoiseRe.test(l));
+      const dedupLines = [];
+      const seenLineNorms = new Set();
+      for (const rl of rawLines) {
+        const nl = normSubLine(rl) || rl.trim();
+        if (!nl || seenLineNorms.has(nl)) continue;
+        seenLineNorms.add(nl);
+        dedupLines.push(rl);
+      }
+      const clean = dedupLines.join('\n').trim();
+      if (clean && end > start && !subSpamRe.test(clean)) {
+        rawCues.push({ start, end, text: clean, norm: normSubLine(clean) || clean });
+      }
+    }
   } else {
   const timeRe = /(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{1,3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{1,3})/;
   let i = 0;
@@ -116,8 +173,7 @@ export function parseVtt(vttText) {
           .replace(/^\s*(?:\[[^\]]*\]|\([^)]*\))\s*$/g, '')
           .replace(/[ \t]{2,}/g, ' ')
           .trim())
-        .filter((l) => l && !/^(?:müzik|şarkı|music|song|alkış|applause|gülüşmeler|kahkaha|laughter|sessizlik|silence|iç çeker|sighs|inler|groans|nefes alır|gasps)$/i.test(l));
-      const normSubLine = (s) => String(s || '').toLocaleLowerCase('tr').replace(/\u0307/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+        .filter((l) => l && !sdhNoiseRe.test(l));
       const dedupLines = [];
       const seenLineNorms = new Set();
       for (const rl of rawLines) {
@@ -127,7 +183,7 @@ export function parseVtt(vttText) {
         dedupLines.push(rl);
       }
       const clean = dedupLines.join('\n').trim();
-      if (clean && end > start && !/(?:opensubtitles|osdb\.link|advertise your product|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|subscene\.com|turkcealtyazi\.org|altyazi\.org|yutukluklar|çeviri\s*:|senkron\s*:|iyi seyirler dileriz|para\s+yat[ıi]rma\s+bonusu|forumiptv\.org|\b1xbet\b|ho[şs]geldin\s+bonusu|canl[ıi]\s+bahis)/i.test(clean)) {
+      if (clean && end > start && !subSpamRe.test(clean)) {
         rawCues.push({ start, end, text: clean, norm: normSubLine(clean) || clean });
       }
     } else {
@@ -348,6 +404,14 @@ export class SubtitleDubController {
         this.syncVideoVolume();
       };
     }
+  }
+
+  _isTrSubId(subId) {
+    const raw = String(subId || '').trim().toLowerCase();
+    if (!raw || raw === 'off') return false;
+    if (raw.startsWith('tr') || /^(?:stream|os|yt|local)-tr\b/.test(raw)) return true;
+    const trk = (this.subtitleTracks || []).find((t) => t && t.id === subId);
+    return Boolean(trk && normalizeClientSubLang(trk.lang, trk.label) === 'tr');
   }
 
   _syncStorageKey(media = this.media, trackId = this.selectedSubId) {
@@ -619,8 +683,10 @@ export class SubtitleDubController {
       }
       this.selectedAudioId = matchedTrack.id;
       const nowOrig = matchedTrack.id === 'orig' || String(matchedTrack.id || '').startsWith('orig-') || (matchedTrack.audioLang && matchedTrack.audioLang !== 'tr');
-      if (wasTrStudio && nowOrig && this.media?.origLang !== 'tr' && (!this.selectedSubId || this.selectedSubId === 'off')) {
-        const trSub = this.subtitleTracks.find((t) => String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
+      let savedSub = '';
+      try { savedSub = typeof localStorage !== 'undefined' ? (localStorage.getItem('vortex_sub_lang') || '') : ''; } catch (_) {}
+      if (wasTrStudio && nowOrig && savedSub !== 'off' && this.media?.origLang !== 'tr' && (!this.selectedSubId || this.selectedSubId === 'off')) {
+        const trSub = this.subtitleTracks.find((t) => normalizeClientSubLang(t.lang, t.label) === 'tr' || String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
         if (trSub) this.setSubtitleTrack(trSub.id, true).catch(() => {});
       }
       this.adapter?.events?.onTracksChanged?.();
@@ -630,8 +696,10 @@ export class SubtitleDubController {
       const trT = this.audioTracks.find((t) => t.id === 'tr-dub' || String(t.id || '').startsWith('tr-dub-') || (t.mode === 'stream' && (t.audioLang === 'tr' || t.lang === 'tr')));
       if (trT) {
         this.selectedAudioId = trT.id;
-        if (!localStorage.getItem('vortex_sub_lang') && String(this.selectedSubId || '').toLowerCase().startsWith('tr')) {
-          this._prevSubBeforeDub = this.selectedSubId;
+        let savedSub = '';
+        try { savedSub = typeof localStorage !== 'undefined' ? (localStorage.getItem('vortex_sub_lang') || '') : ''; } catch (_) {}
+        if ((!savedSub || savedSub === 'tr') && this._isTrSubId(this.selectedSubId)) {
+          if (!savedSub) this._prevSubBeforeDub = this.selectedSubId;
           this.setSubtitleTrack('off', true).catch(() => {});
         }
         this.adapter?.events?.onTracksChanged?.();
@@ -641,8 +709,10 @@ export class SubtitleDubController {
     if (wasTrStudio && !/[?&]aud=tr\b/i.test(uClean) && (/[?&]aud=orig\b/i.test(uClean) || /hakunaymatata\.com|dragonballzfans\.xyz|vidy\.st|lightspeed\.st/i.test(uClean))) {
       const origT = this.audioTracks.find((t) => t.id === 'orig' || String(t.id || '').startsWith('orig-'));
       if (origT) this.selectedAudioId = origT.id;
-      if (this.media?.origLang !== 'tr' && (!this.selectedSubId || this.selectedSubId === 'off')) {
-        const trSub = this.subtitleTracks.find((t) => String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
+      let savedSub = '';
+      try { savedSub = typeof localStorage !== 'undefined' ? (localStorage.getItem('vortex_sub_lang') || '') : ''; } catch (_) {}
+      if (savedSub !== 'off' && this.media?.origLang !== 'tr' && (!this.selectedSubId || this.selectedSubId === 'off')) {
+        const trSub = this.subtitleTracks.find((t) => normalizeClientSubLang(t.lang, t.label) === 'tr' || String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
         if (trSub) this.setSubtitleTrack(trSub.id, true).catch(() => {});
       }
       this.adapter?.events?.onTracksChanged?.();
@@ -843,7 +913,7 @@ export class SubtitleDubController {
         season: String(effSeason),
         episode: String(effEpisode),
         duration: String(Math.round(Number(this.adapter?.getDuration?.() || media.duration || 0)) || ''),
-        _v: '20261122v238',
+        _v: '20261124v239',
       };
       if (!rawTidExtracted && baseUrl) queryParams.url = baseUrl;
       const qs = new URLSearchParams(queryParams);
@@ -903,12 +973,14 @@ export class SubtitleDubController {
       )
     );
     let savedExplicitSub = '';
-    try { savedExplicitSub = localStorage.getItem('vortex_sub_lang') || ''; } catch (e) { /* ignore */ }
-    if (hasVerifiedTrStream && !savedExplicitSub && String(this.selectedSubId || '').startsWith('tr')) {
-      this._prevSubBeforeDub = this.selectedSubId;
+    try { savedExplicitSub = typeof localStorage !== 'undefined' ? (localStorage.getItem('vortex_sub_lang') || '') : ''; } catch (e) { /* ignore */ }
+    if (savedExplicitSub === 'off') {
+      this.selectedSubId = 'off';
+    } else if (hasVerifiedTrStream && (!savedExplicitSub || savedExplicitSub === 'tr') && this._isTrSubId(this.selectedSubId)) {
+      if (!savedExplicitSub) this._prevSubBeforeDub = this.selectedSubId;
       this.selectedSubId = 'off';
     } else if (!hasVerifiedTrStream && savedExplicitSub !== 'off' && media?.origLang !== 'tr' && (!this.selectedSubId || this.selectedSubId === 'off')) {
-      const autoTrSub = this.subtitleTracks.find((t) => String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
+      const autoTrSub = this.subtitleTracks.find((t) => normalizeClientSubLang(t.lang, t.label) === 'tr' || String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
       if (autoTrSub) this.selectedSubId = autoTrSub.id;
     }
     await this.setSubtitleTrack(this.selectedSubId, true);
@@ -1034,9 +1106,9 @@ export class SubtitleDubController {
       this.resolveInitialAudioTrack({ ...(this.media || {}), audioTracks: this.audioTracks });
       if (prevAud !== this.selectedAudioId && this.selectedAudioId === 'tr-dub') {
         let savedSub = '';
-        try { savedSub = localStorage.getItem('vortex_sub_lang') || ''; } catch (_) {}
-        if (!savedSub && String(this.selectedSubId || '').startsWith('tr')) {
-          this._prevSubBeforeDub = this.selectedSubId;
+        try { savedSub = typeof localStorage !== 'undefined' ? (localStorage.getItem('vortex_sub_lang') || '') : ''; } catch (_) {}
+        if ((!savedSub || savedSub === 'tr') && this._isTrSubId(this.selectedSubId)) {
+          if (!savedSub) this._prevSubBeforeDub = this.selectedSubId;
           this.setSubtitleTrack('off', true).catch(() => {});
         }
       }
@@ -1534,16 +1606,8 @@ export class SubtitleDubController {
     this._lastFastCueEnd = 0;
     this.selectedSubId = cleanId;
     if (!isInit && cleanId === 'off') {
-      const curAudObj = this.audioTracks.find((t) => t.id === this.selectedAudioId);
-      const isActiveTrDub = Boolean(
-        this.selectedAudioId === 'tr-dub'
-        || String(this.selectedAudioId || '').startsWith('tr-dub-')
-        || this.selectedAudioId === 'tr-orig'
-        || (curAudObj && curAudObj.mode !== 'tts' && (curAudObj.audioLang === 'tr' || curAudObj.lang === 'tr'))
-      );
-      if (!isActiveTrDub) {
-        try { localStorage.setItem('vortex_sub_lang', 'off'); } catch (e) { /* ignore */ }
-      }
+      this._prevSubBeforeDub = null;
+      try { if (typeof localStorage !== 'undefined') localStorage.setItem('vortex_sub_lang', 'off'); } catch (e) { /* ignore */ }
     }
     if (cleanId === 'off' || !this.subtitleTracks.length) {
       this.subCues = [];
@@ -1759,15 +1823,40 @@ export class SubtitleDubController {
   }
 
   async _syncSecondaryDualTrack() {
-    this.secondaryCues = [];
+    if (!this.dualSubEnabled || !this.selectedSubId || this.selectedSubId === 'off') {
+      this.secondaryCues = [];
+      return;
+    }
+    const primary = this.subtitleTracks.find((t) => t && t.id === this.selectedSubId);
+    const primLang = String(primary?.lang || '').toLowerCase();
+    const wantLang = primLang === 'tr' ? 'en' : 'tr';
+    const secTrack = this.subtitleTracks.find((t) => t && t.id !== this.selectedSubId && t.url && String(t.lang || '').toLowerCase() === wantLang)
+      || this.subtitleTracks.find((t) => t && t.id !== this.selectedSubId && t.url && String(t.lang || '').toLowerCase() !== primLang);
+    if (!secTrack?.url) {
+      this.secondaryCues = [];
+      return;
+    }
+    try {
+      const r = await fetch(secTrack.url);
+      if (!r.ok) { this.secondaryCues = []; return; }
+      const txt = await r.text();
+      this.secondaryCues = parseVtt(txt) || [];
+    } catch (_) {
+      this.secondaryCues = [];
+    }
   }
 
-  async setDualSubtitle() {
-    this.dualSubEnabled = false;
-    this.secondaryCues = [];
+  async setDualSubtitle(enabled = !this.dualSubEnabled) {
+    this.dualSubEnabled = Boolean(enabled);
+    if (this.dualSubEnabled) {
+      await this._syncSecondaryDualTrack();
+      if (!this.secondaryCues.length) this.dualSubEnabled = false;
+    } else {
+      this.secondaryCues = [];
+    }
     this.onTimeUpdate(this.adapter.getTime(), true);
     this.adapter.events.onTracksChanged?.();
-    return false;
+    return this.dualSubEnabled;
   }
 
   async setAudioTrack(id, isInit = false) {
@@ -1805,13 +1894,17 @@ export class SubtitleDubController {
     this.stopDubAudio();
 
     if (!isInit && (track.id === 'tr-dub' || ((track.lang || track.audioLang) === 'tr' && track.mode !== 'tts' && /dublaj/i.test(track.label || '')))) {
-      if (this.selectedSubId && this.selectedSubId !== 'off' && String(this.selectedSubId).startsWith('tr')) {
+      let savedSub = '';
+      try { savedSub = typeof localStorage !== 'undefined' ? (localStorage.getItem('vortex_sub_lang') || '') : ''; } catch (_) {}
+      if (savedSub !== 'off' && this.selectedSubId && this.selectedSubId !== 'off' && this._isTrSubId(this.selectedSubId)) {
         this._prevSubBeforeDub = this.selectedSubId;
         await this.setSubtitleTrack('off', true);
       }
     } else if (!isInit && this.media?.origLang !== 'tr' && (track.id === 'orig' || (track.lang !== 'tr' && track.audioLang !== 'tr'))) {
-      if (!this.selectedSubId || this.selectedSubId === 'off') {
-        const trFallback = this.subtitleTracks.find((t) => String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
+      let savedSub = '';
+      try { savedSub = typeof localStorage !== 'undefined' ? (localStorage.getItem('vortex_sub_lang') || '') : ''; } catch (_) {}
+      if (savedSub !== 'off' && (!this.selectedSubId || this.selectedSubId === 'off')) {
+        const trFallback = this.subtitleTracks.find((t) => normalizeClientSubLang(t.lang, t.label) === 'tr' || String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
         const restoreId = this._prevSubBeforeDub || trFallback?.id || '';
         this._prevSubBeforeDub = null;
         if (restoreId) await this.setSubtitleTrack(restoreId, true);
@@ -2121,7 +2214,10 @@ export class SubtitleDubController {
 
   syncVideoVolume() {
     let duckOn = true;
-    try { duckOn = (typeof localStorage !== 'undefined' ? localStorage.getItem('vortex_voice_duck') : '') !== 'off'; } catch (_) {}
+    try {
+      const rawDuck = String((typeof localStorage !== 'undefined' ? localStorage.getItem('vortex_voice_duck') : '') || '').trim().toLowerCase();
+      duckOn = rawDuck !== 'off' && rawDuck !== '0' && rawDuck !== 'false';
+    } catch (_) {}
     const hostManagesDuck = typeof window !== 'undefined' && Boolean(window.__kinoxHost);
     const voiceDuck = (!hostManagesDuck && duckOn && typeof window !== 'undefined' && typeof window.__kinoxVoiceDuckFactor === 'number')
       ? window.__kinoxVoiceDuckFactor

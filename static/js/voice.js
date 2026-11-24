@@ -1,7 +1,8 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261122_v238';
-import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext, ensureIosPlaybackAudioSession } from './players/audio-gain.js?v=20261122_v238';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261122_v238';
+import { toast } from './ui.js?v=20261124_v239';
+import { state, isLeader } from './store.js?v=20261124_v239';
+import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext, ensureIosPlaybackAudioSession } from './players/audio-gain.js?v=20261124_v239';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261124_v239';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -14,11 +15,13 @@ const getIceServers = () => (typeof window !== 'undefined' && Array.isArray(wind
   : ICE;
 
 export class Voice {
-  constructor({ send, getSelfId, getRoomId, getSelfProfile, onDuckChange, onMicLevel, onP2pData }) {
+  constructor({ send, getSelfId, getRoomId, getSelfProfile, getRoom, isLeader: isLeaderFn, onDuckChange, onMicLevel, onP2pData }) {
     this.send = send;
     this.getSelfId = getSelfId;
     this.getRoomId = getRoomId || (() => '');
     this.getSelfProfile = getSelfProfile || (() => ({ name: 'Sen', color: '#6366f1' }));
+    this.getRoom = typeof getRoom === 'function' ? getRoom : (() => state.mesh);
+    this._isLeader = typeof isLeaderFn === 'function' ? isLeaderFn : (() => isLeader());
     this.onDuckChange = onDuckChange;
     this.onMicLevel = onMicLevel;
     this.onP2pData = onP2pData;
@@ -33,6 +36,7 @@ export class Voice {
     this.micOn = false;
     this.camOn = false;
     this.screenOn = false;
+    this.micPending = false;
     this.camPending = false;
     this.screenPending = false;
     this.inCall = false;
@@ -1129,6 +1133,37 @@ export class Voice {
     return c.captureStream ? c.captureStream(15) : null;
   }
 
+  _canActivateVoip(kind = 'mic') {
+    const room = this.getRoom?.();
+    if (!room) return true;
+    const voipMode = room.voipMode || 'all';
+    if (voipMode === 'off') {
+      toast('Bu odada sesli ve görüntülü sohbet kapalı');
+      return false;
+    }
+    const lead = Boolean(this._isLeader?.());
+    if (voipMode === 'leader' && !lead) {
+      toast('Sadece oda başkanı mikrofon/kamera açabilir');
+      return false;
+    }
+    const selfId = this.getSelfId?.();
+    const parts = Array.isArray(room.participants) ? room.participants : [];
+    const meP = parts.find((x) => x && x.id === selfId);
+    if (voipMode === 'stage' && !lead && !meP?.isHost && !meP?.isCoHost && !meP?.isStageSpeaker) {
+      toast("🎤 Sahne Modu açık — konuşmak için '✋ Söz İste' butonunu kullanın");
+      return false;
+    }
+    const alreadyActive = Boolean(this.micOn || this.camOn || this.screenOn);
+    if (!alreadyActive && !lead && !meP?.isHost && !meP?.isCoHost) {
+      const activeSpeakers = parts.filter((p) => p && p.id !== selfId && (!p.muted || p.cam || p.screen)).length;
+      if (activeSpeakers >= 8) {
+        toast('Odada aynı anda en fazla 8 aktif konuşmacı olabilir');
+        return false;
+      }
+    }
+    return true;
+  }
+
   async toggleCamera() {
     if (this.camPending) return this.camOn;
     this.camPending = true;
@@ -1146,6 +1181,7 @@ export class Voice {
         toast('📷 Kamera kapatıldı');
         return false;
       }
+      if (!this._canActivateVoip('cam')) return false;
       try {
         this._isAvatarCam = false;
         const freshCam = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' }, audio: false });
@@ -1198,6 +1234,7 @@ export class Voice {
         toast('🖥️ Ekran yansıtma durduruldu');
         return false;
       }
+      if (!this._canActivateVoip('screen')) return false;
       try {
         if (navigator.mediaDevices?.getDisplayMedia && !navigator.webdriver) {
           const freshScreen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 60 } }, audio: true });
@@ -1258,6 +1295,7 @@ export class Voice {
   }
 
   async toggleMic() {
+    if (this.micPending) return this.micOn;
     if (this.micOn) {
       const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '';
       const isIos = /iP(hone|ad|od)/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -1287,6 +1325,7 @@ export class Voice {
       toast('🔇 Mikrofon kapatıldı');
       return false;
     }
+    if (!this._canActivateVoip('mic')) return false;
     try {
       const hasLiveTrack = Boolean(this.stream?.getAudioTracks?.().some((t) => t.readyState === 'live'));
       let realMicAcquired = Boolean(this.stream && !this._usingSynthStream && hasLiveTrack);
@@ -1419,15 +1458,19 @@ export class Voice {
   }
 
   async joinCall({ withMic = true, withCam = false } = {}) {
+    if (this.getRoom?.()?.voipMode === 'off') {
+      toast('Bu odada sesli ve görüntülü sohbet kapalı');
+      return false;
+    }
     prepareAudioSessionForMic();
     this.inCall = true;
     this.onStateChange?.();
-    if (withMic && !this.micOn) {
+    if (withMic && !this.micOn && this._canActivateVoip('mic')) {
       await this.toggleMic();
     }
     this._playCallChime(true);
     this._activateCallAudio();
-    if (withCam && !this.camOn) {
+    if (withCam && !this.camOn && this._canActivateVoip('cam')) {
       await this.toggleCamera();
     }
     this._emitVoiceState(true);

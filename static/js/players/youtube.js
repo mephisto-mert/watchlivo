@@ -1,9 +1,36 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261122_v238';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261122_v238';
-import { ensureHlsJs } from './hls-loader.js?v=20261122_v238';
+import { SubtitleDubController } from './subtitles.js?v=20261124_v239';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261124_v239';
+import { ensureHlsJs } from './hls-loader.js?v=20261124_v239';
 
 let apiPromise = null;
+let _cfEdgePromise = null;
+
+async function _isCfEdgeRuntime() {
+  if (typeof window !== 'undefined' && typeof window.__wlEdgeMode === 'boolean') {
+    return window.__wlEdgeMode;
+  }
+  if (typeof document !== 'undefined' && document.querySelector?.('meta[name="wl-edge-token"]')) {
+    if (typeof window !== 'undefined') window.__wlEdgeMode = true;
+    return true;
+  }
+  if (typeof fetch !== 'function') return false;
+  if (!_cfEdgePromise) {
+    const opts = { cache: 'no-store' };
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      opts.signal = AbortSignal.timeout(1500);
+    }
+    _cfEdgePromise = fetch('/api/health', opts)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const isEdge = Boolean(d?.mode === 'cf-autonomous-edge');
+        if (typeof window !== 'undefined') window.__wlEdgeMode = isEdge;
+        return isEdge;
+      })
+      .catch(() => false);
+  }
+  return await _cfEdgePromise;
+}
 function loadYouTubeApi() {
   if (window.YT && window.YT.Player) return Promise.resolve();
   if (apiPromise) return apiPromise;
@@ -176,11 +203,15 @@ export class YouTubeAdapter {
         }
       } catch (_) {}
     }
-    const srvHls = `/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(videoId)}${this.media?.live ? '&live=1' : ''}`;
-    if (!this.media?.live) {
-      streamCandidates.push(`/api/rave/yt-music-stream?v=${encodeURIComponent(videoId)}&kind=muxed`);
+    const isEdge = await _isCfEdgeRuntime();
+    if (!isEdge) {
+      const srvHls = `/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(videoId)}${this.media?.live ? '&live=1' : ''}`;
+      if (!this.media?.live) {
+        streamCandidates.push(`/api/rave/yt-music-stream?v=${encodeURIComponent(videoId)}&kind=muxed`);
+      }
+      streamCandidates.push(srvHls);
     }
-    streamCandidates.push(srvHls);
+    if (streamCandidates.length === 0) return false;
 
     const v = document.createElement('video');
     v.className = 'yt-adfree-video';
@@ -625,9 +656,13 @@ export class YouTubeAdapter {
     if (this.audioEl) return;
     const a = document.createElement('audio');
     a.preload = 'auto';
+    const isEdge = Boolean(
+      (typeof window !== 'undefined' && window.__wlEdgeMode === true) ||
+      (typeof document !== 'undefined' && document.querySelector?.('meta[name="wl-edge-token"]'))
+    );
     const fbSrc = this.media?.audioPreviewUrl
       || (Array.isArray(this.media?.altUrls) && this.media.altUrls[0])
-      || (this.media?.videoId ? `/api/rave/yt-music-stream?v=${encodeURIComponent(this.media.videoId)}` : '');
+      || (!isEdge && this.media?.videoId ? `/api/rave/yt-music-stream?v=${encodeURIComponent(this.media.videoId)}` : '');
     if (String(fbSrc || '').startsWith('/api/rave/')) a.crossOrigin = 'anonymous';
     if (fbSrc) a.src = fbSrc;
     a.currentTime = Math.max(0, startAt);
@@ -765,7 +800,11 @@ export class YouTubeAdapter {
     } else if (this.container && pv.parentElement !== this.container) {
       this.container.appendChild(pv);
     }
-    const srvHls = `/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(videoId)}${this.media?.live ? '&live=1' : ''}`;
+    const isEdge = Boolean(
+      (typeof window !== 'undefined' && window.__wlEdgeMode === true) ||
+      (typeof document !== 'undefined' && document.querySelector?.('meta[name="wl-edge-token"]'))
+    );
+    const srvHls = isEdge ? '' : `/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(videoId)}${this.media?.live ? '&live=1' : ''}`;
     if (pv.getAttribute('data-yt-vid') !== videoId) {
       pv.setAttribute('data-yt-vid', videoId);
       const applyCandidate = (bestUrl) => {
@@ -776,7 +815,7 @@ export class YouTubeAdapter {
         if (this.wantPlaying && !this.isPaused()) this._syncPipBridgeState(true);
         return true;
       };
-      applyCandidate(srvHls);
+      if (srvHls) applyCandidate(srvHls);
       if (typeof window !== 'undefined' && typeof window.watchlivoResolveYouTube === 'function') {
         window.watchlivoResolveYouTube(videoId).then((sd) => {
           if (this._destroyed || this._pipActive || this.pipVideo !== pv || !sd) return;

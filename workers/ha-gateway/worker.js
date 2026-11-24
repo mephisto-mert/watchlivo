@@ -866,7 +866,15 @@ export default {
         safePath === "/api/auth/logout" ||
         safePath === "/api/auth/delete" ||
         safePath === "/api/auth/account/delete" ||
-        safePath === "/api/auth/account";
+        safePath === "/api/auth/account" ||
+        safePath === "/api/auth/export" ||
+        safePath === "/api/auth/sessions" ||
+        safePath === "/api/user/preferences" ||
+        safePath === "/api/user/watch-minutes" ||
+        safePath === "/api/rave/social/claim-guest" ||
+        safePath === "/api/app/version" ||
+        safePath === "/api/ios/version" ||
+        safePath === "/api/ios/manifest.plist";
       if (hasAutonomousEdge(env) && (edgeOnlyHttp || isDirectEdgeAuthRoute || Date.now() < tunnelOfflineUntil)) {
         return await runAutonomousFallback(request, url, safePath, bodyBuf, env, ctx);
       }

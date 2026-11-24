@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261122_v238';
-import { api, qs } from './api.js?v=20261122_v238';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261122_v238';
+import { h, toast, popup, proxyPosterUrl, healPosterError } from './ui.js?v=20261124_v239';
+import { api, qs } from './api.js?v=20261124_v239';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261124_v239';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -835,13 +835,14 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
         )
       );
 
+      const heroBillboardBg = proxyPosterUrl('https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg', { title: 'Organize İşler: Karun Hazinesi', mediaType: 'tv' });
       // Hero Spotlight Billboard (Organize İşler Karun Hazinesi - Screenshot 4 Parity)
       const heroBillboard = h('div', {
         style: {
           position: 'relative',
           width: '100%',
           minHeight: '280px',
-          backgroundImage: 'linear-gradient(to right, rgba(0,0,0,0.85) 30%, rgba(0,0,0,0.2) 70%), url("https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg"), url("/static/watchlivo-poster.svg")',
+          backgroundImage: `linear-gradient(to right, rgba(0,0,0,0.85) 30%, rgba(0,0,0,0.2) 70%), url("${heroBillboardBg}"), url("/static/watchlivo-poster.svg")`,
           backgroundSize: 'cover',
           backgroundPosition: 'center 20%',
           display: 'flex',
@@ -913,8 +914,8 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
                 originalTitle: 'Organize İşler: Karun Hazinesi',
                 url: 'https://www.netflix.com/watch/81682705',
                 officialUrl: 'https://www.netflix.com/title/81682705',
-                poster: 'https://image.tmdb.org/t/p/w500/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg',
-                backdrop: 'https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg',
+                poster: proxyPosterUrl('https://image.tmdb.org/t/p/w500/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg', { title: 'Organize İşler: Karun Hazinesi', mediaType: 'tv' }),
+                backdrop: proxyPosterUrl('https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg', { title: 'Organize İşler: Karun Hazinesi', mediaType: 'tv' }),
                 mediaType: 'tv',
                 season: 1,
                 episode: 1,
@@ -958,7 +959,7 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
         { title: 'Breaking Bad', meta: 'Dizi · Suç Klasiği', poster: 'https://image.tmdb.org/t/p/w500/ggFHVNu6YYI5L9pCfOacjizRGt.jpg' },
         { title: 'Cyberpunk: Edgerunners', meta: 'Anime · Bilim Kurgu', poster: 'https://image.tmdb.org/t/p/w500/sLWUTu2kO80V91zZlVf8iGkM4Yk.jpg' },
         { title: 'Vinland Saga', meta: 'Anime · Tarihi Macera', poster: 'https://image.tmdb.org/t/p/w500/vUHLpA5c1NXkds59reY3HMb4Abs.jpg' },
-      ];
+      ].map((d) => ({ ...d, poster: proxyPosterUrl(d.poster, { title: d.title, mediaType: 'tv' }) }));
 
       const makeCard = (item) => {
         const card = h('div', {
@@ -1446,9 +1447,16 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
       : `${mins}:${String(secs).padStart(2, '0')}`;
   };
   const initSavedProg = findSavedProgress(item);
-  const initSeason = Math.max(1, Number(item.season || initSavedProg?.season || 1) || 1);
+  const parseSeasonNum = (v) => {
+    if (v === undefined || v === null || v === '' || typeof v === 'boolean') return NaN;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : NaN;
+  };
+  const itemSeasonNum = parseSeasonNum(item.season);
+  const savedSeasonNum = parseSeasonNum(initSavedProg?.season);
+  const initSeason = Number.isFinite(itemSeasonNum) ? itemSeasonNum : (Number.isFinite(savedSeasonNum) ? savedSeasonNum : 1);
   let curSeason = initSeason;
-  let userPickedSeason = Boolean(item.season);
+  let userPickedSeason = Number.isFinite(itemSeasonNum);
   let seasonReqSeq = 0;
   const loadSeason = async (sNum, fromUserClick = false) => {
     if (fromUserClick) userPickedSeason = true;
@@ -1457,11 +1465,12 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
     let info = {};
     try {
       info = await api(`/api/rave/seasons?${qs({
+        id: item.id || '',
         tmdbId: /^\d+$/.test(String(item.tmdbId || '')) ? String(item.tmdbId) : (/^\d+$/.test(String(item.id || '')) ? String(item.id) : ''),
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261122_v238',
+        v: '20261124_v239',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;
@@ -1471,8 +1480,9 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
     const origTitle = info.originalTitle || item.originalTitle || title;
     const year = info.year || item.year || '';
     const overview = info.overview || item.overview || `${prov.name} üzerinde tam uzunlukta senkronize izle.`;
-    const backdrop = info.backdrop || item.backdrop || item.poster || '/static/watchlivo-poster.svg';
-    const poster = info.poster || item.poster || '/static/watchlivo-poster.svg';
+    const posterMeta = { tmdbId: tid, id: item.id || '', title, originalTitle: origTitle, year, mediaType: mtype };
+    const backdrop = proxyPosterUrl(info.backdrop || item.backdrop || item.poster || '', posterMeta);
+    const poster = proxyPosterUrl(info.poster || item.poster || '', posterMeta);
     const rating = info.rating || item.rating || '';
     const effMtype = info.mediaType === 'movie' && (!info.seasons || info.seasons.length <= 1) && (!info.episodes || info.episodes.length <= 1) ? 'movie' : mtype;
     const seasons = info.seasons?.length ? info.seasons : (mtype === 'tv' ? [{ season: 1, name: '1. Sezon' }] : []);
@@ -1483,15 +1493,19 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
     const rawSavedProg = findSavedProgress({ tmdbId: tid, title, originalTitle: origTitle, mediaType: effMtype });
     let savedProg = rawSavedProg ? { ...rawSavedProg } : null;
     if (savedProg && effMtype === 'tv' && seasons.length > 1) {
-      const spS = Math.max(1, Number(savedProg.season || 1));
+      const parsedSpS = parseSeasonNum(savedProg.season);
+      const spS = Number.isFinite(parsedSpS) ? parsedSpS : 1;
       const spE = Math.max(1, Number(savedProg.episode || 1));
-      const s1Max = Math.max(1, Number(seasons[0]?.count || 0));
-      if (spS === 1 && s1Max > 0 && spE > s1Max) {
+      const positiveSeasons = seasons.filter((s) => Number(s?.season) > 0);
+      const s1Obj = positiveSeasons.find((s) => Number(s.season) === 1) || positiveSeasons[0] || null;
+      const s1Max = Number(s1Obj?.episodeCount ?? s1Obj?.count ?? 0);
+      if (spS === 1 && s1Max > 0 && spE > s1Max && positiveSeasons.length > 1) {
         let remEp = spE;
-        for (const sObj of seasons) {
-          const cCnt = Math.max(1, Number(sObj.count || 0));
-          if (remEp <= cCnt || sObj === seasons[seasons.length - 1]) {
-            savedProg.season = Number(sObj.season || 1);
+        const lastPosSeason = positiveSeasons[positiveSeasons.length - 1];
+        for (const sObj of positiveSeasons) {
+          const cCnt = Math.max(1, Number(sObj.episodeCount ?? sObj.count ?? 0));
+          if (remEp <= cCnt || sObj === lastPosSeason) {
+            savedProg.season = Number(sObj.season ?? 1);
             savedProg.episode = Math.max(1, remEp);
             break;
           }
@@ -1549,30 +1563,50 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
     };
 
     const switchSeason = (targetSeason, btnEl = null) => {
-      const nextS = Math.max(1, Number(targetSeason) || 1);
+      const parsedS = Number(targetSeason);
+      const nextS = Number.isFinite(parsedS) && parsedS >= 0 ? parsedS : 1;
       if (nextS === curSeason) return;
       if (btnEl) {
         btnEl.disabled = true;
-        btnEl.textContent = `⏳ ${nextS}. Sezon...`;
+        btnEl.textContent = `⏳ ${nextS === 0 ? 'Özel' : `${nextS}. Sezon`}...`;
       }
       const gridEl = container.querySelector('.episode-grid');
       if (gridEl) gridEl.style.opacity = '0.45';
       loadSeason(nextS, true);
     };
 
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const isEpUnaired = (epObj) => {
+      if (!epObj) return false;
+      const ad = String(epObj.airDate || epObj.air_date || '').trim().slice(0, 10);
+      return Boolean(epObj.unaired) || (/^\d{4}-\d{2}-\d{2}$/.test(ad) && ad > todayIso);
+    };
+    const firstPlayableEp = effMtype === 'tv' ? (episodes.find((ep) => !isEpUnaired(ep)) || null) : { episode: 1, name: '' };
+    const allUnaired = effMtype === 'tv' && episodes.length > 0 && !firstPlayableEp;
+
     const resumeHeroBtn = savedSec > 3 ? h('button', {
       class: 'btn primary',
       id: 'btn-resume-saved',
-      onclick: (ev) => playEp(Number(savedProg?.season || curSeason), Number(savedProg?.episode || 1), '', ev.currentTarget, savedSec),
+      onclick: (ev) => playEp(Number(savedProg?.season ?? curSeason), Number(savedProg?.episode || 1), '', ev.currentTarget, savedSec),
     }, effMtype === 'tv'
-      ? `▶ Devam Et (${savedProg?.season || 1}. Sezon ${savedProg?.episode || 1}. Bölüm · ${fmtClock(savedSec)})`
+      ? `▶ Devam Et (${savedProg?.season ?? 1}. Sezon ${savedProg?.episode || 1}. Bölüm · ${fmtClock(savedSec)})`
       : `▶ Kaldığın Yerden Devam Et (${fmtClock(savedSec)})`) : null;
 
     const primaryPlayBtn = h('button', {
       class: resumeHeroBtn ? 'btn' : 'btn primary',
       id: 'btn-play-primary',
-      onclick: (ev) => playEp(curSeason, 1, episodes[0]?.name || '', ev.currentTarget, 0, Boolean(resumeHeroBtn)),
-    }, effMtype === 'tv' ? `▶ ${curSeason}. Sezon 1. Bölümü ${resumeHeroBtn ? 'Baştan ' : ''}Başlat` : `▶ Tam Filmi ${resumeHeroBtn ? 'Baştan ' : 'Odada '}Başlat (1080p)`);
+      disabled: allUnaired,
+      onclick: (ev) => {
+        if (allUnaired) {
+          toast('⏳ Bu sezonun bölümleri henüz yayınlanmadı.');
+          return;
+        }
+        const targetEpNum = Number(firstPlayableEp?.episode || 1);
+        playEp(curSeason, targetEpNum, firstPlayableEp?.name || '', ev.currentTarget, 0, Boolean(resumeHeroBtn));
+      },
+    }, allUnaired
+      ? '⏳ Henüz Yayınlanmadı'
+      : (effMtype === 'tv' ? `▶ ${curSeason}. Sezon ${firstPlayableEp?.episode || 1}. Bölümü ${resumeHeroBtn ? 'Baştan ' : ''}Başlat` : `▶ Tam Filmi ${resumeHeroBtn ? 'Baştan ' : 'Odada '}Başlat (1080p)`));
 
     const inPopup = Boolean(container.closest?.('.popup'));
     const safeBackdropCss = String(backdrop || '').replace(/["'()\\\r\n]/g, '');
@@ -1584,17 +1618,9 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         h('div', { class: 'series-hero-body' },
           h('img', {
             class: 'series-poster',
-            src: poster || `/api/rave/poster?${qs({ tid: tid || '', t: title || '', ot: origTitle || '', y: year || '', mt: mtype })}`,
+            src: poster,
             alt: title,
-            onerror: (e) => {
-              const el = e.currentTarget || e.target;
-              if (!el.dataset.healed && (title || tid)) {
-                el.dataset.healed = '1';
-                el.src = `/api/rave/poster?${qs({ tid: tid || '', t: title || '', ot: origTitle || '', y: year || '', mt: mtype })}`;
-              } else {
-                el.src = '/static/watchlivo-poster.svg';
-              }
-            },
+            onerror: (e) => healPosterError(e.currentTarget || e.target, posterMeta),
           }),
           h('div', { class: 'series-meta' },
             h('h2', {}, title),
@@ -1604,13 +1630,15 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
     if (effMtype === 'tv') {
       const seasonBar = h('div', { class: 'season-tabs' },
         ...seasons.map((s) => {
-          const sLabel = `${s.name || `${s.season}. Sezon`}${s.count ? ` (${s.count} Bölüm)` : ''}`;
+          const epCnt = Number(s.episodeCount ?? s.count ?? 0);
+          const sLabel = `${s.name || `${s.season}. Sezon`}${epCnt > 0 ? ` (${epCnt} Bölüm)` : ''}`;
           return h('button', {
-            class: `btn season-tab ${s.season === curSeason ? 'primary' : ''}`,
+            class: `btn season-tab ${Number(s.season) === curSeason ? 'primary' : ''}`,
             onclick: (ev) => switchSeason(s.season, ev.currentTarget),
           }, sLabel);
         }));
 
+      const isAnimeProv = prov?.id === 'anime' || String(item.id || '').startsWith('ac-') || String(item.sourceBadge || '').includes('Anime');
       const epGrid = h('div', { class: 'episode-grid' },
         ...episodes.map((ep) => {
           const rawEpName = String(ep.name || '').replace(/\s*\([^)]*HD[^)]*\)/gi, '').trim();
@@ -1618,36 +1646,61 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
           const epTitleText = isRedundantEpName
             ? `${ep.episode}. Bölüm`
             : `${ep.episode}. Bölüm — ${rawEpName}`;
+          const airDateStr = String(ep.airDate || ep.air_date || '').trim().slice(0, 10);
+          const unaired = isEpUnaired(ep);
           const absEpVal = Number(ep.absEpisode || ep.episode || 1);
           const epProg = findSavedProgress({ tmdbId: tid, title, originalTitle: origTitle, mediaType: effMtype }, curSeason, ep.episode)
             || (curSeason > 1 && absEpVal > ep.episode ? findSavedProgress({ tmdbId: tid, title, originalTitle: origTitle, mediaType: effMtype }, 1, absEpVal) : null);
           const epProgSec = Number(epProg?.currentTime ?? epProg?.position ?? 0) > 3 && Number(epProg?.percent || 0) < 96
             ? Math.floor(Number(epProg.currentTime ?? epProg.position ?? 0))
             : 0;
-          const isSavedEp = epProgSec > 3;
+          const isSavedEp = !unaired && epProgSec > 3;
           const epStartSec = isSavedEp ? epProgSec : 0;
+          const epRuntime = Number(ep.runtime || 0) || (isAnimeProv ? 24 : 45);
           const rawDesc = String(ep.overview || '').trim();
           const cleanDesc = (!rawDesc || new RegExp(`^${curSeason}\\.\\s*Sezon\\s*${ep.episode}\\.\\s*Bölüm$`, 'i').test(rawDesc))
-            ? `${title} · ${curSeason}. Sezon ${ep.episode}. Bölüm (${ep.runtime || 24} dk HD)`
+            ? `${title} · ${curSeason}. Sezon ${ep.episode}. Bölüm (${epRuntime} dk HD)`
             : rawDesc;
+          const epThumbSrc = ep.still ? proxyPosterUrl(ep.still, posterMeta) : backdrop;
           return h('div', {
-            class: `episode-card ${isSavedEp ? 'is-saved-resume' : ''}`, role: 'button', tabindex: '0',
-            onclick: (ev) => playEp(curSeason, ep.episode, isRedundantEpName ? '' : rawEpName, ev.currentTarget.querySelector('.episode-play'), epStartSec),
+            class: `episode-card ${isSavedEp ? 'is-saved-resume' : ''} ${unaired ? 'is-unaired is-unavailable' : ''}`.trim(),
+            role: 'button',
+            tabindex: '0',
+            'aria-disabled': unaired ? 'true' : undefined,
+            onclick: (ev) => {
+              if (unaired) {
+                toast(`⏳ Bu bölüm henüz yayınlanmadı${airDateStr ? ` (${airDateStr})` : ''}`);
+                return;
+              }
+              playEp(curSeason, ep.episode, isRedundantEpName ? '' : rawEpName, ev.currentTarget.querySelector('.episode-play'), epStartSec);
+            },
             onkeydown: (e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
+                if (unaired) {
+                  toast(`⏳ Bu bölüm henüz yayınlanmadı${airDateStr ? ` (${airDateStr})` : ''}`);
+                  return;
+                }
                 playEp(curSeason, ep.episode, isRedundantEpName ? '' : rawEpName, null, epStartSec);
               }
             },
           },
           h('div', { class: 'episode-thumb' },
-            h('img', { src: ep.still || backdrop, alt: '', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+            h('img', {
+              src: epThumbSrc,
+              alt: '',
+              onerror: (e) => {
+                const el = e.currentTarget || e.target;
+                el.onerror = null;
+                el.src = backdrop || '/static/watchlivo-poster.svg';
+              },
+            }),
             h('span', {
               class: 'episode-season-badge',
               style: { position: 'absolute', top: '8px', left: '8px', background: 'rgba(15,23,42,.88)', color: '#e0e7ff', border: '1px solid rgba(99,102,241,.45)', borderRadius: '8px', padding: '3px 8px', fontSize: '.72rem', fontWeight: '700', backdropFilter: 'blur(6px)' },
             }, `${curSeason}. Sezon · ${ep.episode}. Bölüm`),
-            h('span', { class: 'episode-dur' }, isSavedEp ? `⏱ ${fmtClock(epStartSec)} / ${ep.runtime || 45} dk` : `${ep.runtime || 45} dk`),
-            h('span', { class: 'episode-play' }, isSavedEp ? `▶ ${fmtClock(epStartSec)}'ten Devam Et` : '▶ Bölümü Başlat')),
+            h('span', { class: 'episode-dur' }, isSavedEp ? `⏱ ${fmtClock(epStartSec)} / ${epRuntime} dk` : `${epRuntime} dk`),
+            h('span', { class: 'episode-play' }, unaired ? (airDateStr ? `⏳ Yakında (${airDateStr})` : '⏳ Henüz Yayınlanmadı') : (isSavedEp ? `▶ ${fmtClock(epStartSec)}'ten Devam Et` : '▶ Bölümü Başlat'))),
           h('div', { class: 'episode-info' },
             h('div', { class: 'episode-title' }, epTitleText),
             h('div', { class: 'episode-desc' }, cleanDesc)));
@@ -1661,7 +1714,10 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
             'aria-label': 'Sezon Seçin',
             style: { background: 'rgba(15,23,42,.92)', color: '#f8fafc', border: '1px solid rgba(99,102,241,.55)', borderRadius: '10px', padding: '6px 12px', fontSize: '.82rem', fontWeight: '700', cursor: 'pointer' },
             onchange: (ev) => switchSeason(ev.target.value),
-          }, ...seasons.map((s) => h('option', { value: String(s.season), selected: s.season === curSeason ? 'selected' : undefined }, `${s.name || `${s.season}. Sezon`}${s.count ? ` (${s.count} Bölüm)` : ''}`))) : h('span', { class: 'dim' }, `${seasons.length} sezon · ${episodes.length} bölüm`)),
+          }, ...seasons.map((s) => {
+            const epCnt = Number(s.episodeCount ?? s.count ?? 0);
+            return h('option', { value: String(s.season), selected: Number(s.season) === curSeason ? 'selected' : undefined }, `${s.name || `${s.season}. Sezon`}${epCnt > 0 ? ` (${epCnt} Bölüm)` : ''}`);
+          })) : h('span', { class: 'dim' }, `${seasons.length} sezon · ${episodes.length} bölüm`)),
         seasons.length > 1 && seasons.length <= 8 ? seasonBar : null,
         epGrid);
     }

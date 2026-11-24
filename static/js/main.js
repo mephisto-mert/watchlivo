@@ -1,12 +1,13 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261122_v238';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession, preloadFirebaseAuth } from './profile.js?v=20261122_v238';
-import { renderHome, destroyHome } from './views/home.js?v=20261122_v238';
-import { api, getEdgeToken, humanApiError } from './api.js?v=20261122_v238';
-import { h, toast } from './ui.js?v=20261122_v238';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261124_v239';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession, preloadFirebaseAuth, provisionGuestWithRecovery } from './profile.js?v=20261124_v239';
+import { renderHome, destroyHome } from './views/home.js?v=20261124_v239';
+import { openLegalModal, openContactModal, openStatsModal } from './views/site-footer.js?v=20261124_v239';
+import { api, humanApiError } from './api.js?v=20261124_v239';
+import { h, popup, toast, initPwaInstallPrompt } from './ui.js?v=20261124_v239';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261122_v238'; } catch (_) { return '20261122_v238'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261124_v239'; } catch (_) { return '20261124_v239'; }
 })();
 
 let _meshMod = null;
@@ -15,7 +16,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261122_v238')
+    _meshModPromise = import('./views/mesh.js?v=20261124_v239')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -31,6 +32,8 @@ function loadMeshModule() {
 function leaveMeshSafe(full = true) {
   _meshMod?.leaveMeshView?.(full);
 }
+
+const MODAL_ROUTES = new Set(['about', 'privacy', 'terms', 'dmca', 'contact', 'stats']);
 
 function parseRoute() {
   const searchParams = new URLSearchParams(location.search);
@@ -52,12 +55,75 @@ function parseRoute() {
     try { roomId = decodeURIComponent(parts[1]); } catch (_) {}
     return { name: 'mesh', params: { ...params, id: roomId } };
   }
+  if (parts[0] === 'u' && parts[1]) {
+    let hdl = parts[1];
+    try { hdl = decodeURIComponent(parts[1]); } catch (_) {}
+    hdl = hdl.replace(/^@+/, '').trim().slice(0, 40);
+    if (hdl) return { name: 'home', params: { ...params, modal: `u:${hdl}` } };
+  }
+  const pathParts = (location.pathname || '/').replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+  if ((!location.hash || location.hash === '#' || location.hash === '#/') && pathParts[0]?.toLowerCase() === 'u' && pathParts[1]) {
+    let hdl = pathParts[1];
+    try { hdl = decodeURIComponent(pathParts[1]); } catch (_) {}
+    hdl = hdl.replace(/^@+/, '').trim().slice(0, 40);
+    if (hdl) return { name: 'home', params: { ...params, modal: `u:${hdl}` } };
+  }
+  const hashSeg = (parts[0] || '').toLowerCase();
+  const pathSeg = (pathParts[0] || '').toLowerCase();
+  if (MODAL_ROUTES.has(hashSeg)) {
+    return { name: 'home', params: { ...params, modal: hashSeg } };
+  }
+  if ((!location.hash || location.hash === '#' || location.hash === '#/') && MODAL_ROUTES.has(pathSeg)) {
+    return { name: 'home', params: { ...params, modal: pathSeg } };
+  }
   return { name: 'home', params };
 }
 
 let current = null;
 let activeMeshRoomId = null;
 let enteringMeshRoomId = null;
+let _skipNextHashRoute = false;
+let _lastRouteModalKey = '';
+
+function openModalForRouteKey(key) {
+  if (!key || document.querySelector('.popup-backdrop:not(.is-closing)')) return;
+  if (key.startsWith('u:')) {
+    const hdl = key.slice(2).replace(/^@+/, '').trim();
+    if (hdl) window.vortexOpenUserProfile?.({ handle: hdl, name: `@${hdl}` });
+    return;
+  }
+  if (['about', 'privacy', 'terms', 'dmca'].includes(key)) {
+    openLegalModal(key);
+  } else if (key === 'contact') {
+    openContactModal('contact');
+  } else if (key === 'stats') {
+    openStatsModal();
+  }
+}
+
+function closeOpenUiLayers() {
+  const ctxMenu = document.querySelector('.context-menu');
+  if (ctxMenu) {
+    ctxMenu.remove();
+    return true;
+  }
+  const backs = Array.from(document.querySelectorAll('.popup-backdrop:not(.is-closing), .modal-backdrop'));
+  if (backs.length) {
+    const top = backs[backs.length - 1];
+    if (typeof top._closePopup === 'function') top._closePopup();
+    else top.remove();
+    return true;
+  }
+  if (document.querySelector('.ctl-menu:not(.hidden)')) {
+    window.__vortexCloseControlsMenu?.();
+    return true;
+  }
+  if (activeMeshRoomId && state.mesh && (state.view?.left !== 'Collapsed' || state.view?.right !== 'Collapsed')) {
+    set({ view: { left: 'Collapsed', right: 'Collapsed' } });
+    return true;
+  }
+  return false;
+}
 
 function ensureViewRoots(app) {
   let homeRoot = document.getElementById('home-root');
@@ -193,7 +259,16 @@ async function route() {
     }
     homeRoot.classList.remove('hidden');
     renderHome(homeRoot);
-    homeRoot.querySelectorAll('.wl-seo-article-box').forEach((el) => el.remove());
+    homeRoot.querySelectorAll('.wl-seo-article-box').forEach((el) => {
+      if (!el.closest('#wl-site-footer-wrap')) el.remove();
+    });
+    const modalKey = r.params?.modal || '';
+    if (modalKey && _lastRouteModalKey !== modalKey) {
+      _lastRouteModalKey = modalKey;
+      setTimeout(() => openModalForRouteKey(modalKey), 30);
+    } else if (!modalKey) {
+      _lastRouteModalKey = '';
+    }
   }
   current = r.name;
 }
@@ -206,6 +281,25 @@ export function navigate(path) {
 window.vortexNavigate = navigate;
 
 async function boot() {
+  initPwaInstallPrompt();
+  if (!window.__wlSpaModalLinkBound) {
+    window.__wlSpaModalLinkBound = true;
+    document.addEventListener('click', (e) => {
+      const a = e.target?.closest?.('a[href]');
+      if (!a || a.target === '_blank' || a.hasAttribute('download')) return;
+      try {
+        const u = new URL(a.getAttribute('href'), location.origin);
+        if (u.origin !== location.origin) return;
+        const seg = u.pathname.replace(/^\/+|\/+$/g, '').split('/')[0].toLowerCase();
+        if (MODAL_ROUTES.has(seg)) {
+          e.preventDefault();
+          history.pushState({}, '', u.pathname);
+          _lastRouteModalKey = '';
+          route();
+        }
+      } catch (_) {}
+    });
+  }
   document.querySelector('.skip-link')?.addEventListener('click', (e) => {
     e.preventDefault();
     const target = document.querySelector('#mesh-root:not(.hidden)') || document.getElementById('home-main') || document.getElementById('app');
@@ -330,6 +424,8 @@ async function boot() {
   const sp = new URLSearchParams(location.search);
   const oobCode = sp.get('oobCode') || '';
   const mode = sp.get('mode') || '';
+  const pendingResetOob = (oobCode && mode === 'resetPassword') ? oobCode : '';
+  const pendingVerifyOob = (oobCode && mode === 'verifyEmail') ? oobCode : '';
   if (oobCode && mode === 'signIn') {
     const email = sp.get('magic_email') || localStorage.getItem('watchlivo_pending_magic_email') || '';
     if (email) {
@@ -361,7 +457,25 @@ async function boot() {
     set({ self: p });
     if (!routed) {
       routed = true;
-      window.addEventListener('hashchange', route);
+      window.addEventListener('hashchange', () => {
+        if (_skipNextHashRoute) {
+          _skipNextHashRoute = false;
+          return;
+        }
+        route();
+      });
+      window.addEventListener('popstate', () => {
+        const nextR = parseRoute();
+        if (activeMeshRoomId && state.mesh && !document.body.classList.contains('mesh-minimized') && nextR.name !== 'mesh') {
+          if (closeOpenUiLayers()) {
+            _skipNextHashRoute = true;
+            try { history.pushState(null, '', `#/mesh/${encodeURIComponent(activeMeshRoomId)}`); } catch (_) {}
+            return;
+          }
+        } else {
+          closeOpenUiLayers();
+        }
+      });
     }
     route();
   };
@@ -374,33 +488,7 @@ async function boot() {
     if (!initialProfile.isGuest) {
       verifyAndRefreshSession().catch(() => {});
     } else if (typeof fetch === 'function' && (initialProfile.uid || initialProfile.id)) {
-      const gHdrs = { 'Content-Type': 'application/json' };
-      const edgeTok = getEdgeToken();
-      if (edgeTok) gHdrs['X-Watchlivo-Token'] = edgeTok;
-      if (initialProfile.guestToken) gHdrs.Authorization = `Bearer ${initialProfile.guestToken}`;
-      fetch('/api/rave/social/guest', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: gHdrs,
-        body: JSON.stringify({
-          uid: initialProfile.uid || initialProfile.id,
-          name: initialProfile.name || '',
-          handle: initialProfile.handle || '',
-          color: initialProfile.color || '#27DCC8',
-          avatarUrl: initialProfile.avatarUrl || '',
-        }),
-      }).then((r) => (r.ok ? r.json() : null)).then((d) => {
-        if (!d || !state.self?.isGuest) return;
-        if (d.uid) { initialProfile.uid = String(d.uid); initialProfile.id = String(d.uid); }
-        if (d.handle) initialProfile.handle = String(d.handle);
-        if (d.guestToken) initialProfile.guestToken = String(d.guestToken);
-        if (state.self && (state.self.uid === initialProfile.uid || state.self.id === initialProfile.id)) {
-          if (d.uid) { state.self.uid = String(d.uid); state.self.id = String(d.uid); }
-          if (d.handle) state.self.handle = String(d.handle);
-          if (d.guestToken) state.self.guestToken = String(d.guestToken);
-        }
-        try { localStorage.setItem('vortex_profile_v2', JSON.stringify(initialProfile)); } catch (_) {}
-      }).catch(() => {});
+      provisionGuestWithRecovery(initialProfile, { storage: 'local' }).catch(() => {});
     }
   } else {
     let guestFallback = null;
@@ -426,36 +514,73 @@ async function boot() {
     }
     start(guestFallback);
     if (typeof fetch === 'function' && guestFallback.uid) {
-      const gHdrs = { 'Content-Type': 'application/json' };
-      const edgeTok = getEdgeToken();
-      if (edgeTok) gHdrs['X-Watchlivo-Token'] = edgeTok;
-      if (guestFallback.guestToken) gHdrs.Authorization = `Bearer ${guestFallback.guestToken}`;
-      fetch('/api/rave/social/guest', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: gHdrs,
-        body: JSON.stringify({
-          uid: guestFallback.uid,
-          name: guestFallback.name,
-          handle: guestFallback.handle,
-          color: guestFallback.color,
-        }),
-      }).then((r) => (r.ok ? r.json() : null)).then((d) => {
-        if (!d || !state.self?.isGuest) return;
-        if (d.uid) { guestFallback.uid = String(d.uid); guestFallback.id = String(d.uid); }
-        if (d.handle) guestFallback.handle = String(d.handle);
-        if (d.guestToken) guestFallback.guestToken = String(d.guestToken);
-        if (state.self && (state.self.uid === guestFallback.uid || state.self.id === guestFallback.id)) {
-          if (d.uid) { state.self.uid = String(d.uid); state.self.id = String(d.uid); }
-          if (d.handle) state.self.handle = String(d.handle);
-          if (d.guestToken) state.self.guestToken = String(d.guestToken);
-        }
-        try { sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(guestFallback)); } catch (_) {}
-      }).catch(() => {});
+      provisionGuestWithRecovery(guestFallback, { storage: 'session' }).catch(() => {});
     }
     if (!isRedirectPending && (sp.get('login') === '1' || sp.get('auth') === '1')) {
       profileSetup({ dismissable: true, onDone: start });
     }
+  }
+  if (pendingResetOob) {
+    const npInp = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: 'Yeni şifre (en az 6 karakter)' });
+    const cpInp = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: 'Yeni şifre (tekrar)' });
+    const resetErr = h('div', { class: 'wl-auth-err' });
+    const resetBox = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+      h('div', { class: 'dim', style: { fontSize: '.82rem' } }, 'Hesabınız için yeni bir şifre belirleyin:'),
+      npInp,
+      cpInp,
+      resetErr);
+    popup({
+      title: '🔑 Yeni Şifre Belirle',
+      kind: 'reset-password',
+      content: resetBox,
+      options: [
+        {
+          label: '✓ Şifreyi Güncelle',
+          primary: true,
+          onClick: async () => {
+            resetErr.textContent = '';
+            const np = npInp.value;
+            if (np.length < 6) {
+              resetErr.textContent = 'Şifre en az 6 karakter olmalıdır.';
+              npInp.focus();
+              return true;
+            }
+            if (np !== cpInp.value) {
+              resetErr.textContent = 'Şifreler eşleşmiyor.';
+              cpInp.focus();
+              return true;
+            }
+            try {
+              const r = await api('/api/auth/email-action', {
+                method: 'POST',
+                body: { action: 'confirm_reset_password', oobCode: pendingResetOob, newPassword: np },
+              });
+              if (!r?.ok) {
+                resetErr.textContent = r?.error || 'Şifre sıfırlama bağlantısı geçersiz veya süresi dolmuş.';
+                return true;
+              }
+              try { history.replaceState({}, '', '/'); } catch (_) {}
+              toast('✓ Şifreniz güncellendi! Yeni şifrenizle giriş yapabilirsiniz.');
+              setTimeout(() => profileSetup({ initialTab: 'login', dismissable: true, onDone: start }), 60);
+              return false;
+            } catch (e) {
+              resetErr.textContent = humanApiError(e, 'Şifre sıfırlama işlemi tamamlanamadı.');
+              return true;
+            }
+          },
+        },
+        { label: 'Vazgeç' },
+      ],
+    });
+  } else if (pendingVerifyOob) {
+    api('/api/auth/email-action', {
+      method: 'POST',
+      body: { action: 'verify_email', oobCode: pendingVerifyOob },
+    }).catch(() => null).finally(() => {
+      verifyAndRefreshSession().catch(() => {});
+      try { history.replaceState({}, '', '/'); } catch (_) {}
+      toast('✓ E-posta doğrulama işlemi tamamlandı.');
+    });
   }
   checkRedirectAuth().then((redirectProf) => {
     if (redirectProf) start(redirectProf);
@@ -468,6 +593,11 @@ async function boot() {
 }
 
 function playNotifChime() {
+  try {
+    const ch = String(localStorage.getItem('vortex_notif_chime') || '').toLowerCase();
+    if (ch === '0' || ch === 'off' || ch === 'false') return;
+  } catch (_) {}
+  if (state.uiPrefs?.notifChime === false) return;
   if (typeof document !== 'undefined' && document.hidden) return;
   const isIos = typeof navigator !== 'undefined' && (/iP(hone|ad|od)/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
   if (isIos && state.mesh?.id) return;
@@ -694,7 +824,8 @@ function initRaveNotifications() {
     stack.appendChild(card);
     setTimeout(() => { if (card.isConnected) closeCard(); }, 12000);
 
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && (document.visibilityState === 'hidden' || payload.forceOsNotification)) {
+    const pushOptOut = (() => { try { return localStorage.getItem('vortex_push_enabled') === 'off'; } catch (_) { return false; } })();
+    if (!pushOptOut && typeof Notification !== 'undefined' && Notification.permission === 'granted' && (document.visibilityState === 'hidden' || payload.forceOsNotification)) {
       const fallbackUrl = roomId ? `/#/mesh/${encodeURIComponent(roomId)}` : (state.mesh?.id ? `/#/mesh/${state.mesh.id}` : location.href);
       const notifPayload = { ...payload, url: payload.url || fallbackUrl };
       if (swReg?.active) {

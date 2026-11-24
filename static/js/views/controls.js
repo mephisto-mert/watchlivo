@@ -1,16 +1,16 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261122_v238';
-import { api, qs as buildQs } from '../api.js?v=20261122_v238';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261122_v238';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261122_v238';
-import { getProvider } from '../providers.js?v=20261122_v238';
-import { expectedPosition } from '../sync.js?v=20261122_v238';
-import { thumbFor } from './lobby.js?v=20261122_v238';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261122_v238';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261122_v238';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261122_v238';
-import { avatar } from '../profile.js?v=20261122_v238';
-import { unlockSfxAudio } from './chat.js?v=20261122_v238';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261124_v239';
+import { api, qs as buildQs } from '../api.js?v=20261124_v239';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261124_v239';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261124_v239';
+import { getProvider } from '../providers.js?v=20261124_v239';
+import { expectedPosition } from '../sync.js?v=20261124_v239';
+import { thumbFor } from './lobby.js?v=20261124_v239';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261124_v239';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261124_v239';
+import { getSubPrefs, setSubPrefs, normalizeClientSubLang } from '../players/subtitles.js?v=20261124_v239';
+import { avatar } from '../profile.js?v=20261124_v239';
+import { unlockSfxAudio } from './chat.js?v=20261124_v239';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -27,6 +27,13 @@ const SN_ICONS = {
 export function buildControls(frame, ctx) {
   const { actions, host } = ctx;
   const ico = (n) => h('span', { html: icons[n], style: { display: 'contents' } });
+  const toProxiedPoster = (raw) => {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    if (s.startsWith('/') || s.startsWith('data:') || s.startsWith('blob:')) return s;
+    if (typeof location !== 'undefined' && s.startsWith(location.origin)) return s;
+    return /^https?:\/\//i.test(s) ? `/api/rave/poster?url=${encodeURIComponent(s)}` : s;
+  };
   const empty = h('div', { class: 'stage-empty hidden' },
     h('h2', {}, 'Henüz bir şey oynatılmıyor'),
     h('p', {}, 'Video Ara ile bir sağlayıcı seç. Seçtiğin video odadaki herkes için aynı anda başlar.'),
@@ -54,13 +61,13 @@ export function buildControls(frame, ctx) {
     };
     const fs = frame.classList.contains('fullscreen') || Boolean(document.fullscreenElement || document.webkitFullscreenElement);
     const isMob = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 960px)').matches;
+    const fw = frame.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 960);
+    const nonFsPx = Math.max(10, Math.min(34, Math.round(fw * (isMob ? 0.032 : 0.024))));
     subCue.style.color = colorMap[p.color] || '#ffffff';
     subCue.style.fontFamily = fontMap[p.font] || fontMap['sans-serif'];
     subCue.style.fontSize = fs
       ? `calc(clamp(16px, 2.2vmin, 48px) * ${Number(p.size || 1)})`
-      : isMob
-        ? `calc(clamp(11px, 3.0vw, 15px) * ${Number(p.size || 1)})`
-        : `calc(clamp(14px, 1.95vmin, 42px) * ${Number(p.size || 1)})`;
+      : `calc(${nonFsPx}px * ${Number(p.size || 1)})`;
     subCue.style.padding = (isMob && !fs) ? '.15em .48em' : '.24em .68em';
     subCue.style.background = `rgba(8, 8, 14, ${Number(p.bgOpacity ?? 0.65)})`;
     const edge = p.edgeStyle || (p.shadow === false ? 'none' : 'drop');
@@ -433,12 +440,14 @@ export function buildControls(frame, ctx) {
     }
     if ((ok === 'entered' || ok === 'exited' || ok === true) && host.adapter?.video) {
       const entered = ok === 'entered' || (ok === true && Boolean(host.isPiP?.()));
+      applySubPrefsStyle();
       update();
       showOverlay(entered ? '⧉ Mini Pencere (PiP) Açık — Ana ekrana veya diğer uygulamalara geçebilirsiniz' : '⧉ PiP Kapatıldı', 2400);
       return;
     }
     if (ok === 'entered' || ok === 'exited' || ok === true) {
       const entered = ok === 'entered' || (ok === true && Boolean(host.isPiP?.()));
+      applySubPrefsStyle();
       update();
       showOverlay(entered ? '⧉ Mini Pencere (PiP) Açık' : '⧉ PiP Kapatıldı', 2400);
       return;
@@ -482,12 +491,20 @@ export function buildControls(frame, ctx) {
     }
     const nextFit = frame.dataset.fit === 'cover' ? 'contain' : 'cover';
     frame.dataset.fit = nextFit;
+    try { localStorage.setItem('vortex_video_fit', nextFit); } catch (_) {}
     fitBtn.classList.toggle('on', nextFit === 'cover');
     syncVideoStageBounds(true);
     showOverlay(nextFit === 'cover' ? '▭ Ekranı Doldur (Tam Çerçeve)' : '▭ Ekrana Sığdır (Orijinal Oran)', 1600);
   };
   const castBtn = h('button', { class: 'ctl-action hidden', id: 'ctl-cast', 'data-tip': "TV'ye Yansıt (AirPlay / Cast)", 'aria-label': "TV'ye Yansıt", ...trustedTapProps(() => triggerCast()) }, ico('cast'));
   const fitBtn = h('button', { type: 'button', class: 'ctl-action', id: 'ctl-fit', 'data-tip': 'Ekran Oranı: Sığdır / Doldur', 'aria-label': 'Ekran Oranı', ...tapProps(() => toggleFitMode()) }, h('span', { html: SN_ICONS.fit, style: { display: 'contents' } }));
+  try {
+    const savedFit = localStorage.getItem('vortex_video_fit');
+    if (savedFit === 'cover' || savedFit === 'contain') {
+      frame.dataset.fit = savedFit;
+      fitBtn.classList.toggle('on', savedFit === 'cover');
+    }
+  } catch (_) {}
   const pipBtn = h('button', { class: 'ctl-action', id: 'ctl-pip', 'data-tip': 'Pencere İçinde Pencere / PiP (P)', 'aria-label': 'Pencere İçinde Pencere', ...trustedTapProps(() => togglePiP()) }, ico('pip'));
   const theaterBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-theater', 'data-tip': 'Sinema Modu (T)', 'aria-label': 'Sinema Modu', ...tapProps(() => ctx.toggleTheaterMode?.()) }, ico('theater'), h('span', { class: 'ctl-btn-lbl' }, 'Sinema'));
   const fsBtn = h('button', { class: 'ctl-action', id: 'ctl-fs', 'data-tip': 'Tam Ekran (F)', 'aria-label': 'Tam ekran', ...trustedTapProps(() => { if (isActuallyMuted() && !host.userMuted) doUnlockAudio(); toggleFullscreen(); }) }, ico('fullscreen'));
@@ -501,7 +518,7 @@ export function buildControls(frame, ctx) {
     closeMenu();
     if (cx >= 0 && cy >= 0 && typeof document !== 'undefined') {
       const under = document.elementFromPoint(cx, cy);
-      const chatInp = under?.closest?.('#chat-input, .chatbar input[type="text"], .chatbar input:not([type])');
+      const chatInp = under?.closest?.('#chat-input, .chatbar textarea, .chatbar input[type="text"], .chatbar input:not([type])');
       if (chatInp && typeof chatInp.focus === 'function') {
         try { chatInp.focus(); } catch (err) { /* ignore */ }
         return;
@@ -575,7 +592,7 @@ export function buildControls(frame, ctx) {
   const brightnessVeil = h('div', { class: 'wl-brightness-veil', id: 'wl-brightness-veil', 'aria-hidden': 'true' });
   const rawSavedBrightStr = localStorage.getItem('vortex_brightness');
   const savedBrightRaw = (rawSavedBrightStr !== null && rawSavedBrightStr !== '') ? Number(rawSavedBrightStr) : NaN;
-  let currentBrightness = Number.isFinite(savedBrightRaw) && savedBrightRaw > 0 && savedBrightRaw <= 100 ? Math.round(savedBrightRaw) : 100;
+  let currentBrightness = Number.isFinite(savedBrightRaw) && savedBrightRaw >= 0 && savedBrightRaw <= 100 ? Math.round(savedBrightRaw) : 100;
   let curFilter = localStorage.getItem('vortex_video_filter') || 'normal';
   let danmakuEnabled = localStorage.getItem('vortex_danmaku') !== 'off';
   let ambilightEnabled = localStorage.getItem('vortex_ambilight') === 'on';
@@ -590,21 +607,23 @@ export function buildControls(frame, ctx) {
     frame.style.setProperty('--video-brightness', `${b}%`);
     frame.dataset.brightness = String(b);
     const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
+    const iframeEl = !v ? frame.querySelector('.player-host iframe, iframe') : null;
+    const filterTarget = v || iframeEl;
     const spec = VIDEO_FILTERS[curFilter] || VIDEO_FILTERS.normal;
-    const useVeilOnlyDim = Boolean(isIosFixedVol() || (host.adapter && !host.adapter.caps?.overlayClicks));
+    const useVeilOnlyDim = Boolean(isIosFixedVol() || !v || (host.adapter && !host.adapter.caps?.overlayClicks));
     const fVal = (b === 100 || useVeilOnlyDim)
       ? spec.css
       : (spec.css === 'none'
         ? 'brightness(var(--video-brightness, 100%))'
         : `${spec.css} brightness(var(--video-brightness, 100%))`);
     frame.style.setProperty('--wl-composed-filter', fVal);
-    if (v) {
+    if (filterTarget) {
       if (fVal === 'none') {
-        v.style.filter = '';
-        v.style.webkitFilter = '';
+        filterTarget.style.filter = '';
+        filterTarget.style.webkitFilter = '';
       } else {
-        v.style.filter = fVal;
-        v.style.webkitFilter = fVal;
+        filterTarget.style.filter = fVal;
+        filterTarget.style.webkitFilter = fVal;
       }
     }
     brightnessVeil.classList.remove('is-boost');
@@ -734,7 +753,7 @@ export function buildControls(frame, ctx) {
     if (seasonMetaCache.has(cacheKey)) return seasonMetaCache.get(cacheKey);
     if (seasonMetaInflight.has(cacheKey)) return null;
     seasonMetaInflight.add(cacheKey);
-    api(`/api/rave/seasons?${buildQs({ tmdbId: m?.tmdbId || '', title: cleanSeries || '', mediaType: 'tv', season: sNum })}`, { timeout: 8000 })
+    api(`/api/rave/seasons?${buildQs({ id: m?.id || '', tmdbId: m?.tmdbId || '', title: cleanSeries || '', mediaType: 'tv', season: sNum })}`, { timeout: 8000 })
       .then((sData) => {
         if (!sData) return;
         const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
@@ -800,7 +819,7 @@ export function buildControls(frame, ctx) {
     let epName = '';
     try {
       try {
-        const sData = await api(`/api/rave/seasons?${buildQs({ tmdbId: m.tmdbId || '', title: cleanTitle, mediaType: 'tv', season: targetSeason })}`, { timeout: 6500 });
+        const sData = await api(`/api/rave/seasons?${buildQs({ id: m.id || '', tmdbId: m.tmdbId || '', title: cleanTitle, mediaType: 'tv', season: targetSeason })}`, { timeout: 6500 });
         if (sData) {
           const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
           if (curE <= 1 && eps.length > 0) {
@@ -881,7 +900,7 @@ export function buildControls(frame, ctx) {
       showOverlay(`⏭️ S${targetSeason}:B${targetEp} hazırlanıyor…`, 4500);
       if (manual) toast(`⏭️ S${targetSeason}:B${targetEp} bölümüne geçiliyor…`);
       try {
-        const sData = await api(`/api/rave/seasons?${buildQs({ tmdbId: m.tmdbId || '', title: cleanTitle, mediaType: 'tv', season: targetSeason })}`, { timeout: 6500 });
+        const sData = await api(`/api/rave/seasons?${buildQs({ id: m.id || '', tmdbId: m.tmdbId || '', title: cleanTitle, mediaType: 'tv', season: targetSeason })}`, { timeout: 6500 });
         if (sData) {
           const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
           const seasons = Array.isArray(sData.seasons) ? sData.seasons : [];
@@ -895,7 +914,7 @@ export function buildControls(frame, ctx) {
             if (hasNextSeason) {
               targetSeason += 1;
               targetEp = 1;
-              const s2 = await api(`/api/rave/seasons?${buildQs({ tmdbId: m.tmdbId || '', title: cleanTitle, mediaType: 'tv', season: targetSeason })}`, { timeout: 6500 });
+              const s2 = await api(`/api/rave/seasons?${buildQs({ id: m.id || '', tmdbId: m.tmdbId || '', title: cleanTitle, mediaType: 'tv', season: targetSeason })}`, { timeout: 6500 });
               if (s2) {
                 const ep1 = (s2.episodes || []).find((x) => Number(x.episode) === 1);
                 if (ep1?.name && !/^(?:1\.\s*bölüm|bölüm\s*1|episode\s*1)(?:\s*\([^)]*\))?$/i.test(ep1.name.trim())) {
@@ -1023,17 +1042,6 @@ export function buildControls(frame, ctx) {
     }, 800);
   };
 
-  const centerBack10Btn = h('button', {
-    type: 'button',
-    class: 'ctl-center-side',
-    id: 'ctl-center-back10',
-    'aria-label': '10 saniye geri',
-    title: '10 saniye geri',
-    ...tapProps(() => {
-      if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
-      seekStep(-10);
-    }),
-  }, ico('rewind10'));
   const centerPlayBtn = h('button', {
     type: 'button',
     class: 'ctl-center-play',
@@ -1045,18 +1053,7 @@ export function buildControls(frame, ctx) {
       togglePlayPause();
     }, { noAutoReveal: true }),
   }, ico('play'));
-  const centerFwd10Btn = h('button', {
-    type: 'button',
-    class: 'ctl-center-side',
-    id: 'ctl-center-fwd10',
-    'aria-label': '10 saniye ileri',
-    title: '10 saniye ileri',
-    ...tapProps(() => {
-      if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
-      seekStep(10);
-    }),
-  }, ico('forward10'));
-  const centerHud = h('div', { class: 'ctl-center-hud', id: 'ctl-center-hud' }, centerBack10Btn, centerPlayBtn, centerFwd10Btn);
+  const centerHud = h('div', { class: 'ctl-center-hud', id: 'ctl-center-hud' }, centerPlayBtn);
   const mid = h('div', { class: 'ctl-mid' }, centerHud);
 
   mid.addEventListener('touchstart', (e) => {
@@ -1264,15 +1261,17 @@ export function buildControls(frame, ctx) {
     revealControls(2600);
   }, { passive: true });
   frame.addEventListener('pointermove', (e) => {
-    if (e.pointerType === 'touch' || e.pointerType === 'pen' || Date.now() - Math.max(touchStartTime, lastAnyTouchAt) < 2200 || Date.now() - lastLayoutShiftAt < 700) return;
-    if (window.matchMedia?.('(hover: none), (pointer: coarse)')?.matches) return;
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') return;
+    if (!e.pointerType && window.matchMedia?.('(hover: none), (pointer: coarse)')?.matches) return;
+    if (Date.now() - Math.max(touchStartTime, lastAnyTouchAt) < 450 || Date.now() - lastLayoutShiftAt < 250) return;
     if (lastMouseX < 0) {
       lastMouseX = e.clientX;
       lastMouseY = e.clientY;
       revealControls(2600);
       return;
     }
-    if (Math.hypot(e.clientX - lastMouseX, e.clientY - lastMouseY) < 8) return;
+    const minMove = controls.classList.contains('ui-active') ? 6 : 2;
+    if (Math.hypot(e.clientX - lastMouseX, e.clientY - lastMouseY) < minMove) return;
     lastMouseX = e.clientX;
     lastMouseY = e.clientY;
     revealControls(2600);
@@ -1578,7 +1577,7 @@ export function buildControls(frame, ctx) {
       const curSeason = nextSpecBanner.season;
       const cleanSeries = nextSpecBanner.cleanSeries;
       const pctCountdown = Math.max(0, Math.min(100, ((35 - rem) / 35) * 100));
-      const posterSrc = thumbFor(m) || '/static/watchlivo-logo.svg';
+      const posterSrc = toProxiedPoster(thumbFor(m)) || '/static/watchlivo-logo.svg';
       const bannerKey = `${curEpKey}:${curSeason}:${nextEp}:${isLeader() ? 1 : 0}`;
       nextEpBanner.classList.remove('hidden');
       if (nextEpBanner.dataset.bannerKey !== bannerKey) {
@@ -1983,7 +1982,7 @@ export function buildControls(frame, ctx) {
           },
         }, h('span', {}, t.label), curAudioId === t.id ? h('span', {}, '✓') : null)),
         ...serverJumpRow,
-        h('div', { class: 'dim', style: { fontSize: '.74em', fontWeight: '700', padding: '.45em .7em .15em', borderTop: '1px solid rgba(255,255,255,.1)', marginTop: '.25em', color: '#a5b4fc' } }, `💬 Altyazı Seçimi (${subTracks.length} Dil)`),
+        h('div', { class: 'dim', style: { fontSize: '.74em', fontWeight: '700', padding: '.45em .7em .15em', borderTop: '1px solid rgba(255,255,255,.1)', marginTop: '.25em', color: '#a5b4fc' } }, `💬 Altyazı Seçimi (${new Set(subTracks.map((t) => normalizeClientSubLang(t?.lang, t?.label)).filter(Boolean)).size} Dil)`),
       ];
       const rows = [
         ...audioSection,
@@ -2033,12 +2032,12 @@ export function buildControls(frame, ctx) {
                 closeMenu();
                 update();
               } else {
-                toast('Altyazı dosyası okunamadı (.srt, .vtt veya .ass seçin)');
+                toast('Altyazı dosyası okunamadı (.srt, .vtt, .ass veya .sub seçin)');
               }
             };
             fIn.click();
           },
-        }, h('span', {}, '📁 Bilgisayardan Altyazı Seç (.srt, .vtt, .ass)')),
+        }, h('span', {}, '📁 Bilgisayardan Altyazı Seç (.srt, .vtt, .ass, .sub)')),
       ];
       const quickStyleRow = h('div', { class: 'ctl-pref-group', style: { borderTop: '1px solid rgba(255,255,255,.1)', marginTop: '.3em' } },
         h('div', { class: 'dim', style: { fontSize: '.74em', marginBottom: '4px' } }, '🔤 Altyazı Boyutu, Rengi & Konumu'),
@@ -2078,8 +2077,20 @@ export function buildControls(frame, ctx) {
             class: `ctl-pref-pill ${Math.abs(curFps - Number(sc)) < 0.005 ? 'on' : ''}`,
             onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleFpsScale?.(sc); renderMenuView('subtitle'); },
           }, lbl))));
+      const dualSubOn = Boolean(host.adapter?.subs?.dualSubEnabled);
+      const canDualSub = new Set(subtitleTracks.map((t) => String(t?.lang || '').toLowerCase()).filter(Boolean)).size >= 2;
+      const dualSubBtn = canDualSub ? h('button', {
+        class: `ctl-pref-pill ${dualSubOn ? 'on' : ''}`,
+        style: { width: '100%', marginBottom: '6px' },
+        onclick: async (e) => {
+          e.stopPropagation();
+          const ok = await host.adapter?.subs?.setDualSubtitle?.(!dualSubOn);
+          showOverlay(ok ? '🌐 Çift Altyazı (TR + EN) Açık' : '🌐 Çift Altyazı Kapalı', 1800);
+          renderMenuView('subtitle');
+        },
+      }, dualSubOn ? '🌐 Çift Altyazı (TR + EN): Açık ✓' : '🌐 Çift Altyazı (TR + EN): Kapalı') : null;
       const prevMenuScroll = menu.querySelector('.ctl-menu-scroll')?.scrollTop || 0;
-      const scrollBox = h('div', { class: 'ctl-menu-scroll' }, ...rows, quickStyleRow, offsetRow);
+      const scrollBox = h('div', { class: 'ctl-menu-scroll' }, ...rows, dualSubBtn, quickStyleRow, offsetRow);
       menu.replaceChildren(backHeader('Altyazı & Dublaj', 'list', prefBtn), scrollBox);
       if (prevMenuScroll > 0) scrollBox.scrollTop = prevMenuScroll;
       return;
@@ -2233,8 +2244,14 @@ export function buildControls(frame, ctx) {
       },
       h('span', {}, '📶 Düşük İnternet Modu (Maks 480p)'),
       h('span', { class: 'dim', style: { fontSize: '.85em' } }, lowBwOn ? 'Açık ✓' : 'Kapalı')) : null;
+      const adName = host.adapter?.constructor?.name || '';
+      const isYtAd = adName === 'YouTubeAdapter' || (!adName && m.provider === 'youtube');
+      const isHlsAd = !isYtAd && Boolean(host.adapter?.hls || host.adapter?.useNativeHls || m.streamType === 'hls' || /\.m3u8(\?|$)/i.test(String(host.adapter?.currentUrl || m.url || '')));
+      const qualityHeaderTitle = isYtAd
+        ? 'Görüntü Kalitesi (YouTube Oto)'
+        : (isHlsAd ? 'Görüntü Kalitesi (HLS Oto)' : (host.adapter?.video ? 'Görüntü Kalitesi (MP4 / Doğrudan)' : 'Görüntü Kalitesi'));
       menu.replaceChildren(
-        backHeader('Görüntü Kalitesi (YouTube Oto)', 'list'),
+        backHeader(qualityHeaderTitle, 'list'),
         ...qLevels.map((q) => h('div', {
           class: `opt ${q.active ? 'on' : ''}`,
           onclick: (e) => {
@@ -2348,7 +2365,8 @@ export function buildControls(frame, ctx) {
     };
 
     if (view === 'effects') {
-      const duckOn = state.uiPrefs?.voiceDucking !== false && !['off', '0', 'false'].includes(String(localStorage.getItem('vortex_voice_duck') || '').toLowerCase());
+      const desktopAotFn = typeof window !== 'undefined' ? (window.vortexDesktop?.toggleAlwaysOnTop || window.pywebview?.api?.toggle_always_on_top) : null;
+      const desktopMiniFn = typeof window !== 'undefined' ? (window.vortexDesktop?.toggleMiniWindow || window.pywebview?.api?.toggle_mini_window) : null;
       menu.replaceChildren(
         backHeader('Sinema Efektleri & Araçlar', 'list'),
         buildSlidersPanel(),
@@ -2382,17 +2400,6 @@ export function buildControls(frame, ctx) {
           },
         }, h('span', {}, '💬 Akan Sohbet (Danmaku)'), h('span', {}, danmakuEnabled ? 'Açık' : 'Kapalı')),
         h('div', {
-          class: `opt ${duckOn ? 'on' : ''}`,
-          onclick: (e) => {
-            e.stopPropagation();
-            const next = !duckOn;
-            if (typeof host.setAutoDuckEnabled === 'function') host.setAutoDuckEnabled(next);
-            try { localStorage.setItem('vortex_voice_duck', next ? '1' : '0'); } catch (_) {}
-            setUiPref({ voiceDucking: next });
-            renderMenuView('effects');
-          },
-        }, h('span', {}, '🎙️ Konuşurken Film Sesini Kıs'), h('span', {}, duckOn ? 'Açık' : 'Kapalı')),
-        h('div', {
           class: `opt ${frame.dataset.fit === 'cover' ? 'on' : ''}`,
           onclick: (e) => {
             e.stopPropagation();
@@ -2400,30 +2407,24 @@ export function buildControls(frame, ctx) {
             renderMenuView('effects');
           },
         }, h('span', {}, '▭ Ekran Oranı (Sığdır / Doldur)'), h('span', {}, frame.dataset.fit === 'cover' ? 'Doldur' : 'Sığdır')),
-        h('div', {
-          class: 'opt',
-          'data-native-gesture': '1',
-          onclick: (e) => {
-            e.stopPropagation();
-            togglePiP();
-          },
-        }, h('span', {}, '🖼️ Pencere İçinde Pencere (PiP)')),
-        ...(typeof window !== 'undefined' && (window.isWatchlivoDesktop || window.pywebview?.api) ? [
+        ...(typeof desktopAotFn === 'function' ? [
           h('div', {
             class: 'opt',
             onclick: async (e) => {
               e.stopPropagation();
               closeMenu();
-              const res = await window.pywebview?.api?.toggle_always_on_top?.();
+              const res = await desktopAotFn();
               showOverlay(res?.onTop ? '📌 Pencere Üstte Tut: Açık (F9)' : '📌 Pencere Üstte Tut: Kapalı', 2000);
             },
           }, h('span', {}, '📌 Pencereyi Üstte Tut (F9)')),
+        ] : []),
+        ...(typeof desktopMiniFn === 'function' ? [
           h('div', {
             class: 'opt',
             onclick: async (e) => {
               e.stopPropagation();
               closeMenu();
-              const res = await window.pywebview?.api?.toggle_mini_window?.();
+              const res = await desktopMiniFn();
               showOverlay(res?.mini ? '🗗 Masaüstü Mini Pencere: Açık (F10)' : '🗖 Standart Pencere Boyutu', 2000);
             },
           }, h('span', {}, '🗗 Masaüstü Mini Pencere Modu (F10)')),
@@ -2551,11 +2552,16 @@ export function buildControls(frame, ctx) {
     },
       optIconLbl('cast', "TV'ye Yansıt (AirPlay / Cast)"),
       h('span', { class: 'dim', style: { fontSize: '.85em' } }, host.canCast?.() ? 'Hazır ›' : 'Seç ›')));
-    if (m.tmdbId) {
-      const s = m.season || 1, e = m.episode || 1, isTv = m.mediaType === 'tv';
-      if (isTv) {
-        items.push(h('div', { class: 'opt', onclick: () => { closeMenu(); openEpisodeModal(); } }, optIconLbl('episodes', `Sezon / Bölüm Değiştir (S${s}:B${e})`)));
-      }
+    const parsedMenuEp = String(m.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm/i);
+    const s = Number(m.season || parsedMenuEp?.[1] || parsedMenuEp?.[3] || 1);
+    const e = Number(m.episode || parsedMenuEp?.[2] || parsedMenuEp?.[4] || 1);
+    const isMovieMenu = m.mediaType === 'movie' || /Tam Film/i.test(String(m.channel || ''));
+    const isTv = !isMovieMenu && Boolean(m.mediaType === 'tv' || parsedMenuEp);
+    const hasSeriesTarget = Boolean(m.tmdbId || /^ac-\d+/i.test(String(m.id || '')) || m.seriesTitle);
+    if (isTv && hasSeriesTarget && canSelectVideo()) {
+      items.push(h('div', { class: 'opt', onclick: () => { closeMenu(); openEpisodeModal(); } }, optIconLbl('episodes', `Sezon / Bölüm Değiştir (S${s}:B${e})`)));
+    }
+    if (m.tmdbId || m.catalogProvider || m.provider) {
       const prov = getProvider(m.catalogProvider || m.provider);
       if (prov?.homeUrl) {
         items.push(h('div', { class: 'opt', onclick: () => { closeMenu(); launchProviderWindow(prov.homeUrl, prov.name); } }, optIconLbl('externalLink', `${prov.name} Hesabım`)));
@@ -2638,11 +2644,13 @@ export function buildControls(frame, ctx) {
   if (typeof ResizeObserver !== 'undefined') {
     stageResizeObs = new ResizeObserver(() => {
       syncVideoStageBounds(false);
+      applySubPrefsStyle();
     });
     stageResizeObs.observe(frame);
     setTimeout(() => {
       if (frame.parentElement && stageResizeObs) stageResizeObs.observe(frame.parentElement);
       syncVideoStageBounds(true);
+      applySubPrefsStyle();
     }, 0);
   }
 
@@ -2654,6 +2662,7 @@ export function buildControls(frame, ctx) {
       document.body.classList.remove('vortex-fs');
       frame.dataset.fsMode = '';
       frame.querySelector('.fs-chat-stack')?.remove();
+      try { screen.orientation?.unlock?.(); } catch (e) { /* ignore */ }
     }
     onViewportChange();
   }
@@ -2723,7 +2732,8 @@ export function buildControls(frame, ctx) {
   let lastDesktopRpcKey = '';
 
   function syncDesktopPresence(m, prov, playing) {
-    if (typeof window === 'undefined' || !window.pywebview?.api?.update_presence) return;
+    const rpcFn = typeof window !== 'undefined' ? (window.vortexDesktop?.updatePresence || window.pywebview?.api?.update_presence) : null;
+    if (typeof rpcFn !== 'function') return;
     const now = Date.now();
     const pCount = Array.isArray(state.mesh?.participants) ? state.mesh.participants.length : 1;
     const roomName = state.mesh?.name || 'Sinema Odası';
@@ -2743,7 +2753,7 @@ export function buildControls(frame, ctx) {
     const startTs = (playing && p >= 0) ? Math.max(0, nowSec - Math.floor(p)) : null;
     const endTs = (playing && d > 0 && d > p) ? (nowSec + Math.floor(d - p)) : null;
     try {
-      window.pywebview.api.update_presence({
+      rpcFn({
         details: titleStr,
         state: stateStr,
         startTs,
@@ -2778,65 +2788,93 @@ export function buildControls(frame, ctx) {
     safeHandler('play', () => {
       ensureIosPlaybackAudioSession();
       resumeSharedAudioContext();
-      if (host.adapter) host.adapter._userPausedViaMediaSession = false;
       if (isLeader()) {
+        if (host.adapter) host.adapter._userPausedViaMediaSession = false;
         if (actions.play) actions.play();
         else actions.toggle?.();
-      } else {
+        ms.playbackState = 'playing';
+      } else if (isRoomMediaPlaying(state.mesh?.media)) {
+        if (host.adapter) host.adapter._userPausedViaMediaSession = false;
         const exp = expectedPosition(state.mesh?.media);
         if (Number.isFinite(exp) && exp > 0.5 && Math.abs((position() || 0) - exp) > 2.2) {
           host.adapter?.seek?.(exp);
         }
         host.adapter?.play?.();
+        ms.playbackState = 'playing';
+      } else {
+        toast('Videoyu yalnızca oda başkanı başlatabilir');
+        ms.playbackState = 'paused';
       }
-      ms.playbackState = 'playing';
       updateMediaSessionPositionImmediate();
     });
     safeHandler('pause', () => {
-      if (host.adapter) host.adapter._userPausedViaMediaSession = true;
       if (isLeader()) {
+        if (host.adapter) host.adapter._userPausedViaMediaSession = true;
         if (actions.pause) actions.pause();
         else actions.toggle?.();
+        ms.playbackState = 'paused';
       } else {
-        host.adapter?.pause?.();
+        toast('Videoyu yalnızca oda başkanı duraklatabilir');
+        ms.playbackState = isRoomMediaPlaying(state.mesh?.media) ? 'playing' : 'paused';
       }
-      ms.playbackState = 'paused';
       updateMediaSessionPositionImmediate();
     });
     safeHandler('stop', () => {
-      if (host.adapter) host.adapter._userPausedViaMediaSession = true;
-      if (isLeader() && actions.pause) actions.pause();
-      else host.adapter?.pause?.();
-      ms.playbackState = 'paused';
+      if (isLeader()) {
+        if (host.adapter) host.adapter._userPausedViaMediaSession = true;
+        if (actions.pause) actions.pause();
+        else host.adapter?.pause?.();
+        ms.playbackState = 'paused';
+      } else {
+        toast('Videoyu yalnızca oda başkanı duraklatabilir');
+        ms.playbackState = isRoomMediaPlaying(state.mesh?.media) ? 'playing' : 'paused';
+        updateMediaSessionPositionImmediate();
+      }
     });
     safeHandler('seekbackward', (details) => {
       const off = Math.max(1, Number(details?.seekOffset || 10));
       const target = Math.max(0, position() - off);
-      if (isLeader()) seekStep(-off);
-      else host.adapter?.seek?.(target);
-      updateMediaSessionPositionImmediate(target);
+      if (isLeader()) {
+        seekStep(-off);
+        updateMediaSessionPositionImmediate(target);
+      } else {
+        toast('Videoyu yalnızca oda başkanı sarabilir');
+        updateMediaSessionPositionImmediate();
+      }
     });
     safeHandler('seekforward', (details) => {
       const off = Math.max(1, Number(details?.seekOffset || 10));
       const d = duration();
       const target = d > 0 ? Math.min(d, position() + off) : (position() + off);
-      if (isLeader()) seekStep(off);
-      else host.adapter?.seek?.(target);
-      updateMediaSessionPositionImmediate(target);
+      if (isLeader()) {
+        seekStep(off);
+        updateMediaSessionPositionImmediate(target);
+      } else {
+        toast('Videoyu yalnızca oda başkanı sarabilir');
+        updateMediaSessionPositionImmediate();
+      }
     });
     safeHandler('seekto', (details) => {
       if (!Number.isFinite(details?.seekTime)) return;
       const target = Math.max(0, Number(details.seekTime));
-      if (isLeader()) actions.seek(target);
-      else host.adapter?.seek?.(target);
-      updateMediaSessionPositionImmediate(target);
+      if (isLeader()) {
+        actions.seek(target);
+        updateMediaSessionPositionImmediate(target);
+      } else {
+        toast('Videoyu yalnızca oda başkanı sarabilir');
+        updateMediaSessionPositionImmediate();
+      }
     });
     safeHandler('previoustrack', () => {
       const curM = state.mesh?.media;
       if (position() > 15) {
-        if (isLeader()) actions.seek(0);
-        else host.adapter?.seek?.(0);
-        updateMediaSessionPositionImmediate(0);
+        if (isLeader()) {
+          actions.seek(0);
+          updateMediaSessionPositionImmediate(0);
+        } else {
+          toast('Videoyu yalnızca oda başkanı sarabilir');
+          updateMediaSessionPositionImmediate();
+        }
         return;
       }
       if ((isLeader() || canSelectVideo()) && curM?.mediaType === 'tv') {
@@ -2961,13 +2999,14 @@ export function buildControls(frame, ctx) {
     }
     updateUnmuteVisibility();
     const prov = getProvider(m.catalogProvider || m.provider);
-    const t = thumbFor(m);
+    const t = toProxiedPoster(thumbFor(m));
     const nextThumbSrc = t || '/static/watchlivo-poster.svg';
     if (thumb.getAttribute('src') !== nextThumbSrc) {
       thumb.dataset.errStep = '0';
       thumb.setAttribute('src', nextThumbSrc);
     }
-    const backdropImg = m.backdrop || m.backdropUrl || t;
+    const rawBackdrop = toProxiedPoster(m.backdrop || m.backdropUrl || '');
+    const backdropImg = (rawBackdrop || t).replace(/["'()\\\r\n]/g, '');
     const bgUrl = backdropImg ? `url("${backdropImg}")` : 'none';
     if (stageBackdrop.style.backgroundImage !== bgUrl) stageBackdrop.style.backgroundImage = bgUrl;
     stageBackdrop.classList.toggle('is-hero-cover', false);
@@ -3002,11 +3041,12 @@ export function buildControls(frame, ctx) {
         } else if (!cachedHyd) {
           window.__wlSeasonsHydrated[hydKey] = 'pending';
           const q = new URLSearchParams({
+            id: String(m.id || ''),
             tmdbId: /^\d+$/.test(String(m.tmdbId || '')) ? String(m.tmdbId) : '',
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261122_v238',
+            v: '20261124_v239',
           });
           api(`/api/rave/seasons?${q.toString()}`, { timeout: 8000 })
             .then((inf) => {
@@ -3160,7 +3200,7 @@ export function buildControls(frame, ctx) {
       centerPlayBtn.dataset.sig = playIconName;
       centerPlayBtn.replaceChildren(ico(playIconName));
     }
-    const showCenterHud = !playing;
+    const showCenterHud = Boolean(!playing && !keepControlsShown);
     centerPlayBtn.classList.toggle('is-paused', showCenterHud);
     centerHud.classList.toggle('is-paused', showCenterHud);
     centerHud.classList.toggle('viewer-playing-hidden', Boolean(!isLeader() && playing));
@@ -3191,10 +3231,6 @@ export function buildControls(frame, ctx) {
     back10Btn.classList.toggle('disabled-control', !leader);
     fwd10Btn.classList.toggle('locked', !leader);
     fwd10Btn.classList.toggle('disabled-control', !leader);
-    centerBack10Btn.classList.toggle('locked', !leader);
-    centerBack10Btn.classList.toggle('disabled-control', !leader);
-    centerFwd10Btn.classList.toggle('locked', !leader);
-    centerFwd10Btn.classList.toggle('disabled-control', !leader);
     if (!leader) {
       back10Btn.setAttribute('data-tip', 'Videoyu yalnızca oda başkanı sarabilir');
       fwd10Btn.setAttribute('data-tip', 'Videoyu yalnızca oda başkanı sarabilir');

@@ -82,7 +82,37 @@ export function buildCuratedLiveTvRooms() {
       },
     };
   });
-  return [...tvSpecs, ...radioSpecs];
+  const cinemaClubRoom = {
+    id: "cinema-club",
+    name: "7/24 Sinema Kulübü",
+    rawName: "7/24 Sinema Kulübü",
+    creator: "Watchlivo Sinema Kulübü",
+    privacy: "public",
+    playMode: "leader",
+    curated: true,
+    media: {
+      provider: "hls",
+      streamType: "hls",
+      title: "🍿 Watchlivo Sinema Kulübü · 7/24 Canlı",
+      url: "https://tv-trt1.medya.trt.com.tr/master.m3u8",
+      altUrls: ["https://tv-trtbelgesel.medya.trt.com.tr/master.m3u8"],
+      channel: "Sinema Kulübü · 7/24",
+      thumbnail: "/static/watchlivo-poster.svg",
+      poster: "/static/watchlivo-poster.svg",
+      live: true,
+      mediaType: "live",
+      duration: 0,
+    },
+  };
+  return [...tvSpecs, ...radioSpecs, cinemaClubRoom];
+}
+
+function normalizeCuratedRoomId(roomId) {
+  const raw = String(roomId || "").trim().toLowerCase();
+  if (raw === "cinema_club" || raw === "sinema-kulubu" || raw === "sinema_kulubu" || raw === "cinema-club") {
+    return "cinema-club";
+  }
+  return String(roomId || "");
 }
 
 export const DEFAULT_CURATED_LIVE_ROOMS = buildCuratedLiveTvRooms();
@@ -219,6 +249,8 @@ async function tryRestoreSyncToken(roomId, syncToken, env) {
       if (!rm.curated) {
         if (obj.host_id) rm.host_id = obj.host_id;
         if (obj.creatorCid) rm.creatorCid = obj.creatorCid;
+        if (Array.isArray(obj.co_hosts)) rm.co_hosts = Array.from(new Set(obj.co_hosts.filter(Boolean)));
+        if (obj.hostTransferred) rm.hostTransferred = true;
       }
       return rm;
     }
@@ -234,6 +266,7 @@ function buildFreshMedia(initMedia = {}, creator = "Misafir", t = nowSec()) {
   const m = initMedia && typeof initMedia === "object" ? initMedia : {};
   const pos = Math.max(0, Number(m.currentTime || 0) || 0);
   const playing = m.playing !== undefined ? Boolean(m.playing) : Boolean(m.url || m.videoId || m.embedUrl);
+  const rate = Math.min(4, Math.max(0.25, Number(m.rate ?? m.meshStatePlaybackSpeed ?? 1) || 1));
   return {
     provider: m.provider || (m.url ? "hls" : ""),
     videoId: m.videoId || "",
@@ -269,13 +302,13 @@ function buildFreshMedia(initMedia = {}, creator = "Misafir", t = nowSec()) {
     musicMode: m.musicMode || "",
     playing,
     currentTime: pos,
-    rate: Number(m.rate || 1) || 1,
+    rate,
     updatedAt: t,
     lastActionBy: creator,
     meshStateStatus: playing ? "PLAYING" : "PAUSED",
     meshStatePosition: pos,
     meshStateTime: t,
-    meshStatePlaybackSpeed: Number(m.rate || 1) || 1,
+    meshStatePlaybackSpeed: rate,
   };
 }
 
@@ -285,6 +318,21 @@ function makeRoomSkeleton(roomId, opts = {}) {
   const cid = isCur ? "kinox_bot" : (opts.clientId || `h_${makeHexNonce(4)}`);
   const creator = String(opts.creator || opts.username || (isCur ? "Watchlivo Canlı TV" : "Misafir")).slice(0, 40);
   const rmName = String(opts.name || "Watchlivo Sinema Odası").slice(0, 64);
+  const validPlayModes = ["leader", "cohost", "autoplay", "quickplay", "vote", "free"];
+  const playMode = isCur
+    ? (opts.playMode || "leader")
+    : (validPlayModes.includes(opts.playMode) ? opts.playMode : "leader");
+  const rawVoip = opts.voipMode === "on" ? "all" : opts.voipMode;
+  const voipMode = isCur
+    ? "all"
+    : (["all", "stage", "leader", "off"].includes(rawVoip) ? rawVoip : "all");
+  const hideWatching = isCur ? false : Boolean(opts.hideWatching);
+  const hideLocation = isCur ? false : Boolean(opts.hideLocation);
+  const hideFriends = isCur ? false : Boolean(opts.hideFriends);
+  const creatorUid = isCur ? "" : String(opts.creatorUid || opts.creatorId || opts.uid || "").trim().slice(0, 64);
+  const invitedUids = isCur || !Array.isArray(opts.invitedUids)
+    ? []
+    : Array.from(new Set(opts.invitedUids.map((x) => String(x || "").trim().slice(0, 64)).filter(Boolean))).slice(0, 100);
   return {
     id: roomId,
     name: rmName,
@@ -293,25 +341,38 @@ function makeRoomSkeleton(roomId, opts = {}) {
     privacy: isCur ? "public" : (["public", "friends", "private"].includes(opts.privacy) ? opts.privacy : "public"),
     pwdSalt: "",
     passwordHash: "",
-    playMode: isCur ? (opts.playMode || "leader") : (opts.playMode === "cohost" ? "cohost" : "leader"),
-    voipMode: "all",
+    playMode,
+    voipMode,
     isMature: Boolean(opts.isMature),
+    locked: isCur ? false : Boolean(opts.locked),
+    hideWatching,
+    hideLocation,
+    hideFriends,
+    friendsPreview: isCur ? [] : sanitizeFriendsPreview(opts.friendsPreview, false),
     creator,
     creatorCid: cid,
+    creatorUid,
+    hostTransferred: Boolean(opts.hostTransferred),
     host_id: cid,
     co_hosts: isCur ? [] : [cid],
     stage_speakers: [],
+    invitedUids,
     rev: 1,
     curated: isCur,
+    createdFromApi: Boolean(opts.createdFromApi),
     media: buildFreshMedia(opts.media, creator, t),
     queue: [],
     voteEndsAt: 0,
     participants: {},
-    kicked: [],
+    kicked: Array.isArray(opts.kicked) ? opts.kicked.slice(-100) : [],
+    kickedUids: Array.isArray(opts.kickedUids) ? opts.kickedUids.slice(-100) : [],
+    bannedCids: Array.isArray(opts.bannedCids) ? opts.bannedCids.slice(-100) : [],
+    bannedUids: Array.isArray(opts.bannedUids) ? opts.bannedUids.slice(-100) : [],
     skip_votes: [],
     polls: [],
     pollVotes: {},
     chat: [],
+    chatClearedAt: Number(opts.chatClearedAt || 0),
     events: [],
     signals: [],
     updatedAt: t,
@@ -319,10 +380,11 @@ function makeRoomSkeleton(roomId, opts = {}) {
 }
 
 function getCuratedSeed(roomId, curatedMap = null, explicitSeed = null) {
-  if (explicitSeed && typeof explicitSeed === "object" && explicitSeed.id === roomId && explicitSeed.curated) {
+  const normId = normalizeCuratedRoomId(roomId);
+  if (explicitSeed && typeof explicitSeed === "object" && (explicitSeed.id === roomId || explicitSeed.id === normId) && explicitSeed.curated) {
     return explicitSeed;
   }
-  return curatedMap?.get(roomId) || DEFAULT_CURATED_MAP.get(roomId) || null;
+  return curatedMap?.get(roomId) || curatedMap?.get(normId) || DEFAULT_CURATED_MAP.get(roomId) || DEFAULT_CURATED_MAP.get(normId) || null;
 }
 
 function reconcileCuratedRoom(rm, seed) {
@@ -372,10 +434,13 @@ function parseTrustedSeedHeader(request) {
 function buildMediaOut(rm) {
   const t = nowSec();
   const m = rm.media || {};
+  const rate = Math.min(4, Math.max(0.25, Number(m.rate ?? m.meshStatePlaybackSpeed ?? 1) || 1));
   const elapsed = Math.max(0, t - (Number(m.updatedAt) || t));
-  const livePos = m.playing ? (Number(m.currentTime) || 0) + elapsed * (Number(m.rate) || 1) : (Number(m.currentTime) || 0);
+  const livePos = m.playing ? (Number(m.currentTime) || 0) + elapsed * rate : (Number(m.currentTime) || 0);
   return {
     ...m,
+    rate,
+    meshStatePlaybackSpeed: rate,
     liveTime: livePos,
     elapsedSinceUpdate: elapsed,
     serverNow: t,
@@ -389,6 +454,7 @@ function pruneStaleParticipants(rm, activeCids = null) {
   const tNow = nowSec();
   const cutoff = tNow - 45;
   let pruned = false;
+  const prunedCids = new Set();
   for (const [pid, p] of Object.entries(rm.participants || {})) {
     if (activeCids && activeCids.has(pid)) {
       p.lastSeen = tNow;
@@ -396,6 +462,14 @@ function pruneStaleParticipants(rm, activeCids = null) {
     }
     if ((p.lastSeen || 0) < cutoff) {
       delete rm.participants[pid];
+      prunedCids.add(pid);
+      pruned = true;
+    }
+  }
+  if (prunedCids.size && Array.isArray(rm.stage_speakers) && rm.stage_speakers.length) {
+    const nextSpeakers = rm.stage_speakers.filter((x) => !prunedCids.has(x));
+    if (nextSpeakers.length !== rm.stage_speakers.length) {
+      rm.stage_speakers = nextSpeakers;
       pruned = true;
     }
   }
@@ -407,6 +481,12 @@ function pruneStaleParticipants(rm, activeCids = null) {
   return pruned;
 }
 
+function isBotParticipant(pid, p) {
+  if (!p || typeof p !== "object") return true;
+  const id = String(pid || p.id || "");
+  return Boolean(p.isBot || p.transport === "bot" || id === "kinox_bot" || id.startsWith("bot_"));
+}
+
 async function serializeEdgeRoom(rm, viewerCid = "", env = null) {
   const t = nowSec();
   const isCur = Boolean(rm.curated);
@@ -415,6 +495,8 @@ async function serializeEdgeRoom(rm, viewerCid = "", env = null) {
   for (const [pid, p] of Object.entries(rm.participants || {})) {
     parts.push({
       ...p,
+      country: p.hideLocation ? "" : (p.country || ""),
+      friendsPreview: p.hideFriends ? [] : (Array.isArray(p.friendsPreview) ? p.friendsPreview : []),
       muted: p.muted !== undefined ? Boolean(p.muted) : true,
       speaking: Boolean(p.speaking),
       cam: Boolean(p.cam),
@@ -436,8 +518,16 @@ async function serializeEdgeRoom(rm, viewerCid = "", env = null) {
     curated: isCur,
     privacy: rm.privacy,
     playMode: rm.playMode,
+    voipMode: rm.voipMode || "all",
+    creatorUid: rm.creatorUid || "",
+    locked: Boolean(!isCur && rm.locked),
+    hideWatching: Boolean(!isCur && rm.hideWatching),
+    hideLocation: Boolean(!isCur && rm.hideLocation),
+    hideFriends: Boolean(!isCur && rm.hideFriends),
+    hostTransferred: Boolean(!isCur && rm.hostTransferred),
     host_id: rm.host_id,
     creatorCid: rm.creatorCid,
+    co_hosts: isCur ? [] : (Array.isArray(rm.co_hosts) ? rm.co_hosts : []),
     rev: rm.rev,
     media: rm.media,
   };
@@ -447,7 +537,8 @@ async function serializeEdgeRoom(rm, viewerCid = "", env = null) {
   const filteredSignals = (rm.signals || [])
     .filter((s) => s && (t - Number(s.ts || 0)) < 25 && viewerCid && (s.targetId === viewerCid || s.fromId === viewerCid))
     .slice(-120);
-  const skipNeeded = Math.max(1, Math.ceil(Math.max(1, parts.length) / 2));
+  const humanCount = Object.entries(rm.participants || {}).filter(([pid, p]) => !isBotParticipant(pid, p)).length;
+  const skipNeeded = Math.max(1, Math.floor(humanCount / 2) + 1);
   const skipVotes = Array.isArray(rm.skip_votes) ? rm.skip_votes : [];
   return {
     id: rm.id,
@@ -458,6 +549,11 @@ async function serializeEdgeRoom(rm, viewerCid = "", env = null) {
     playMode: rm.playMode || "leader",
     voipMode: rm.voipMode || "all",
     isMature: Boolean(rm.isMature),
+    locked: Boolean(!isCur && rm.locked),
+    hideWatching: Boolean(!isCur && rm.hideWatching),
+    hideLocation: Boolean(!isCur && rm.hideLocation),
+    hideFriends: Boolean(!isCur && rm.hideFriends),
+    friendsPreview: (isCur || rm.hideFriends) ? [] : (Array.isArray(rm.friendsPreview) ? rm.friendsPreview : []),
     hasPassword: Boolean(!isCur && (rm.passwordHash || rm.password)),
     creator: rm.creator || "Misafir",
     creatorCid: isViewerCreator ? rm.creatorCid : "",
@@ -479,6 +575,7 @@ async function serializeEdgeRoom(rm, viewerCid = "", env = null) {
     participants: parts,
     participantCount: parts.length,
     chat: (rm.chat || []).slice(-60),
+    chatClearedAt: Number(rm.chatClearedAt || 0),
     events: (rm.events || []).slice(-50),
     signals: filteredSignals,
     serverNow: t,
@@ -524,19 +621,370 @@ function isPrivilegedInRoom(rm, cid) {
   return isHostOrCreator(rm, cid) || (rm.co_hosts || []).includes(cid);
 }
 
+function isCidOccupiedOrReferenced(rm, cid) {
+  if (!rm || !cid) return false;
+  return Boolean(
+    cid === rm.creatorCid ||
+    cid === rm.host_id ||
+    (rm.co_hosts || []).includes(cid) ||
+    rm.participants?.[cid] ||
+    (rm.stage_speakers || []).includes(cid) ||
+    (rm.chat || []).some((m) => m?.cid === cid) ||
+    (rm.queue || []).some((q) => q?.addedByCid === cid)
+  );
+}
+
+function safeDecodeURIComponent(v) {
+  let cur = String(v || "");
+  for (let pass = 0; pass < 2; pass += 1) {
+    let next;
+    try {
+      next = decodeURIComponent(cur);
+    } catch {
+      next = cur.replace(/(?:%[0-9a-fA-F]{2})+/g, (seq) => {
+        try {
+          return decodeURIComponent(seq);
+        } catch {
+          return seq.replace(/%[0-9a-fA-F]{2}/g, (triplet) => {
+            try {
+              return decodeURIComponent(triplet);
+            } catch {
+              return triplet;
+            }
+          });
+        }
+      });
+    }
+    if (next === cur) break;
+    cur = next;
+  }
+  return cur;
+}
+
 function sanitizeAvatarUrl(raw) {
-  const s = String(raw || "").trim();
+  const rawStr = String(raw || "");
+  if (/[\u0000-\u001f\u007f]/.test(rawStr)) return "";
+  const s = rawStr.trim();
   if (!s) return "";
-  if (s.startsWith("https://") || s.startsWith("/static/") || s.startsWith("/uploads/")) return s.slice(0, 512);
-  if (/^data:image\/(?:png|jpeg|jpg|gif|webp|avif);base64,[A-Za-z0-9+/=]+$/i.test(s) && s.length <= 45000) return s;
+  const compact = s.replace(/\s+/g, "");
+  if (/^(?:javascript:|vbscript:|data:text\/|data:application\/|data:image\/svg)/i.test(compact)) return "";
+  if (/image\/svg\+xml/i.test(compact) || /\.svgz?(?:$|[?&#/])/i.test(compact)) return "";
+  try {
+    const parsed = new URL(s, "https://watchlivo.online");
+    const decPath = safeDecodeURIComponent(parsed.pathname || "").trim();
+    const decFull = safeDecodeURIComponent(s).trim();
+    if (/\.svgz?$/i.test(decPath) || /\.svgz?(?:$|[?&#\s/])/i.test(decPath)) return "";
+    if (/image\/svg\+xml/i.test(decFull) || /\.svgz?(?:$|[?&#\s/])/i.test(decFull)) return "";
+    for (const [k, v] of parsed.searchParams.entries()) {
+      const dk = safeDecodeURIComponent(k || "").trim();
+      const dv = safeDecodeURIComponent(v || "").trim();
+      if (/\.svgz?(?:$|[?&#\s/])/i.test(dk) || /\.svgz?(?:$|[?&#\s/])/i.test(dv) || /image\/svg\+xml/i.test(dv)) {
+        return "";
+      }
+    }
+  } catch {}
+  if (/^data:image\/(?:png|jpeg|jpg|gif|webp|avif);base64,[A-Za-z0-9+/=]+$/i.test(compact)) {
+    return compact.length <= 45000 ? compact : "";
+  }
+  if (/^https:\/\//i.test(s)) return s.length <= 2048 ? s : "";
+  if ((s.startsWith("/static/") || s.startsWith("/uploads/")) && !s.startsWith("//")) {
+    return s.length <= 512 ? s : "";
+  }
   return "";
 }
 
+function sanitizeFriendsPreview(list, hideFriends = false) {
+  if (hideFriends || !Array.isArray(list)) return [];
+  const out = [];
+  for (const f of list.slice(0, 12)) {
+    if (!f || typeof f !== "object") continue;
+    const uid = String(f.uid || f.id || "").trim().slice(0, 64);
+    const name = String(f.name || f.username || "").trim().slice(0, 40);
+    if (!uid && !name) continue;
+    out.push({
+      uid,
+      name,
+      handle: String(f.handle || "").trim().slice(0, 40),
+      color: /^#[0-9a-fA-F]{3,8}$/.test(String(f.color || "")) ? f.color : "#27DCC8",
+      avatarUrl: sanitizeAvatarUrl(f.avatarUrl || ""),
+    });
+  }
+  return out;
+}
+
+const TRUSTED_GIF_HOSTS = ["giphy.com", "tenor.com", "klipy.com", "wikimedia.org", "watchlivo.online"];
+
 function sanitizeChatGif(raw) {
   const s = String(raw || "").trim();
-  if (!s) return "";
-  if (/^https:\/\//i.test(s)) return s.slice(0, 512);
+  if (!s || s.length > 512) return "";
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "https:") return "";
+    if (u.username || u.password) return "";
+    const host = u.hostname.toLowerCase();
+    const trusted = TRUSTED_GIF_HOSTS.some((d) => host === d || host.endsWith(`.${d}`));
+    return trusted ? u.toString().slice(0, 512) : "";
+  } catch {
+    return "";
+  }
+}
+
+async function readRoomAuthKv(env, key, wantJson = false) {
+  const k = String(key || "");
+  if (!k) return { value: null, storageError: false };
+  const parseVal = (raw) => {
+    if (raw === null || raw === undefined) return null;
+    if (!wantJson) return raw;
+    if (typeof raw === "object") return raw;
+    try { return JSON.parse(raw); } catch { return null; }
+  };
+  if (env?.WATCHLIVO_KV && typeof env.WATCHLIVO_KV.getDetailed === "function") {
+    try {
+      const res = await env.WATCHLIVO_KV.getDetailed(k, wantJson ? "json" : undefined);
+      if (res && !res.storageError) {
+        return { value: res.value ?? null, storageError: false };
+      }
+    } catch {}
+  }
+  let anySucceeded = false;
+  if (env?.ROOM_DO && Date.now() >= _doQuotaExhaustedUntil) {
+    try {
+      const authStub = env.ROOM_DO.get(env.ROOM_DO.idFromName("__watchlivo_auth_store_v1__"));
+      const resp = await authStub.fetch(new Request("https://do.local/__kv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "get", key: k, ephemeral: false }),
+      }));
+      if (resp.ok) {
+        const res = await resp.json();
+        anySucceeded = true;
+        if (res && res.found) {
+          if (res.deleted || res.value === null || res.value === undefined) {
+            return { value: null, storageError: false };
+          }
+          return { value: parseVal(res.value), storageError: false };
+        }
+      }
+    } catch {}
+  }
+  if (env?.ROOMS_DB) {
+    try {
+      const row = await env.ROOMS_DB.prepare("SELECT v, exp, deleted FROM edge_kv WHERE k = ?").bind(k).first();
+      anySucceeded = true;
+      if (row) {
+        const nowS = Math.floor(nowSec());
+        if (Number(row.exp || 0) > 0 && Number(row.exp) < nowS) {
+          return { value: null, storageError: false };
+        }
+        if (Number(row.deleted || 0) === 1 || row.v === null || row.v === undefined) {
+          return { value: null, storageError: false };
+        }
+        return { value: parseVal(row.v), storageError: false };
+      }
+    } catch {}
+  }
+  if (env?.WATCHLIVO_KV && typeof env.WATCHLIVO_KV.get === "function") {
+    try {
+      const rv = await env.WATCHLIVO_KV.get(k, wantJson ? "json" : undefined);
+      anySucceeded = true;
+      if (rv !== null && rv !== undefined) {
+        return { value: parseVal(rv), storageError: false };
+      }
+    } catch {}
+  }
+  return { value: null, storageError: !anySucceeded };
+}
+
+async function resolveRoomCallerUid(request, env, body = null, url = null) {
+  try {
+    const vuidHdr = String(request?.headers?.get("x-watchlivo-edge-vuid") || "").trim();
+    if (vuidHdr && vuidHdr.includes(".")) {
+      const dot = vuidHdr.lastIndexOf(".");
+      const uid = vuidHdr.slice(0, dot).trim();
+      const sig = vuidHdr.slice(dot + 1).trim();
+      if (uid && sig) {
+        const expected = await hmacRoomHex(`vuid|${uid}`, env);
+        if (timingSafeEqualStr(sig, expected)) return uid.slice(0, 64);
+      }
+    }
+  } catch {}
+
+  let tok = "";
+  const authHdr = String(request?.headers?.get("Authorization") || "").trim();
+  if (/^Bearer\s+/i.test(authHdr)) {
+    tok = authHdr.replace(/^Bearer\s+/i, "").trim();
+  }
+  if (!tok) {
+    const cookieStr = String(request?.headers?.get("Cookie") || "");
+    const m = cookieStr.match(/(?:^|;\s*)wl_auth=([^;]+)/);
+    if (m) {
+      try { tok = decodeURIComponent(m[1]).trim(); } catch { tok = m[1].trim(); }
+    }
+  }
+  if (!tok && body && typeof body === "object") {
+    tok = String(body.authToken || body.guestToken || "").trim();
+  }
+  if (!tok && url) {
+    tok = String(url.searchParams.get("authToken") || url.searchParams.get("guestToken") || "").trim();
+  }
+  if (!tok || tok.length < 16) return "";
+
+  const hasBackingStore = Boolean(env?.WATCHLIVO_KV || env?.ROOM_DO || env?.ROOMS_DB);
+
+  if (tok.startsWith("wl2.")) {
+    const parts = tok.split(".");
+    if (parts.length !== 3) return "";
+    const [, bodyB64, sig] = parts;
+    if (!bodyB64 || !sig) return "";
+    const rawSecret = String(env?.PROXY_SECRET || env?.VORTEX_SECRET || env?.ADMIN_SECRET || "").trim();
+    if (rawSecret) {
+      const expected = await hmacRoomHex(`wl2.${bodyB64}`, env);
+      if (!timingSafeEqualStr(sig, expected)) return "";
+      try {
+        const claims = JSON.parse(b64DecodeUtf8(bodyB64));
+        if (!claims || typeof claims !== "object") return "";
+        if (Number(claims.exp || 0) < Math.floor(nowSec())) return "";
+        const uid = String(claims.uid || "").trim().slice(0, 64);
+        if (!uid) return "";
+        if (hasBackingStore) {
+          const revKey = `revoked:${(await sha256Hex(tok)).slice(0, 24)}`;
+          const email = String(claims.email || "").trim().toLowerCase();
+          const [revRes, delRes, acctRes] = await Promise.all([
+            readRoomAuthKv(env, revKey, false),
+            email ? readRoomAuthKv(env, `deleted_acct:${email}`, false) : Promise.resolve({ value: null, storageError: false }),
+            email ? readRoomAuthKv(env, `acct:${email}`, true) : Promise.resolve({ value: null, storageError: false }),
+          ]);
+          if (revRes.storageError || delRes.storageError) return "";
+          if (revRes.value) return "";
+          if (email) {
+            const delAt = Number(delRes.value || 0) || 0;
+            const issuedAt = Number(claims.exp || 0) - 2592000;
+            if (delAt > 0 && delAt >= issuedAt) return "";
+            if (acctRes.value && typeof acctRes.value === "object" && Number(acctRes.value.sv || 0) !== Number(claims.sv || 0)) {
+              return "";
+            }
+          }
+        }
+        return uid;
+      } catch {
+        return "";
+      }
+    }
+  }
+
+  if (hasBackingStore) {
+    const sessRes = await readRoomAuthKv(env, `session:${tok}`, true);
+    if (!sessRes.storageError && sessRes.value && typeof sessRes.value === "object") {
+      return String(sessRes.value.uid || sessRes.value.id || "").trim().slice(0, 64);
+    }
+  }
   return "";
+}
+
+async function forwardEdgeAuthHeaders(request, verifiedUid, env, extraHeaders = null) {
+  const hdrs = new Headers();
+  const auth = request?.headers?.get("Authorization");
+  const cookie = request?.headers?.get("Cookie");
+  if (auth) hdrs.set("Authorization", auth);
+  if (cookie) hdrs.set("Cookie", cookie);
+  if (extraHeaders && typeof extraHeaders === "object") {
+    for (const [k, v] of Object.entries(extraHeaders)) {
+      if (v !== undefined && v !== null) hdrs.set(k, String(v));
+    }
+  }
+  hdrs.delete("x-watchlivo-edge-vuid");
+  if (verifiedUid) {
+    const sig = await hmacRoomHex(`vuid|${verifiedUid}`, env);
+    hdrs.set("x-watchlivo-edge-vuid", `${verifiedUid}.${sig}`);
+  }
+  return hdrs;
+}
+
+function getKickBanStatus(rm, cid, uid = "") {
+  const uLow = String(uid || "").trim().toLowerCase();
+  const banned = Boolean(
+    (cid && Array.isArray(rm.bannedCids) && rm.bannedCids.includes(cid)) ||
+    (uLow && Array.isArray(rm.bannedUids) && rm.bannedUids.includes(uLow))
+  );
+  const kicked = Boolean(
+    (cid && Array.isArray(rm.kicked) && rm.kicked.includes(cid)) ||
+    (uLow && Array.isArray(rm.kickedUids) && rm.kickedUids.includes(uLow)) ||
+    (uLow && Array.isArray(rm.kicked) && rm.kicked.includes(`uid:${uLow}`))
+  );
+  return { banned, kicked, blocked: banned || kicked };
+}
+
+async function hasFriendsRoomAccess(rm, { cid, tokenVerified, verifiedUid, validSyncToken, env, isInfo = false }) {
+  if (!rm || rm.curated || rm.privacy !== "friends") return true;
+  if (tokenVerified && (rm.participants?.[cid] || isHostOrCreator(rm, cid) || (rm.co_hosts || []).includes(cid))) {
+    return true;
+  }
+  if (validSyncToken) return true;
+  const hasUidPolicy = Boolean(
+    rm.creatorUid ||
+    (Array.isArray(rm.friendsPreview) && rm.friendsPreview.length > 0) ||
+    (Array.isArray(rm.invitedUids) && rm.invitedUids.length > 0)
+  );
+  if (!hasUidPolicy) return !isInfo;
+  const vLow = String(verifiedUid || "").trim().toLowerCase();
+  if (!vLow) return false;
+  if (rm.creatorUid && String(rm.creatorUid).trim().toLowerCase() === vLow) return true;
+  if (Array.isArray(rm.invitedUids) && rm.invitedUids.some((u) => String(u || "").trim().toLowerCase() === vLow)) return true;
+  if (Array.isArray(rm.friendsPreview) && rm.friendsPreview.some((f) => String(f?.uid || f?.id || "").trim().toLowerCase() === vLow)) return true;
+  if (env?.WATCHLIVO_KV || env?.ROOM_DO || env?.ROOMS_DB) {
+    if (rm.creatorUid) {
+      const socRes = await readRoomAuthKv(env, `soc:u:${rm.creatorUid}`, true);
+      const soc = socRes.value;
+      if (Array.isArray(soc?.friends) && soc.friends.some((f) => String(f?.uid || f?.id || f || "").trim().toLowerCase() === vLow)) {
+        return true;
+      }
+    }
+    const rawVuid = String(verifiedUid || "").trim();
+    let ntfsRes = await readRoomAuthKv(env, `soc:ntf:${vLow}`, true);
+    if (!ntfsRes.value && rawVuid && vLow !== rawVuid) {
+      ntfsRes = await readRoomAuthKv(env, `soc:ntf:${rawVuid}`, true);
+    }
+    const ntfs = ntfsRes.value;
+    const tNow = nowSec();
+    if (Array.isArray(ntfs) && ntfs.some((n) => {
+      if (!n || n.type !== "room_invite" || n.roomId !== rm.id) return false;
+      const expRaw = Number(n.expiresAt ?? n.exp ?? 0);
+      const expSec = expRaw > 1e12 ? expRaw / 1000 : expRaw;
+      return !expSec || expSec >= tNow;
+    })) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function checkRoomActionRateLimit(rm, cid, act, t) {
+  const rules = {
+    chat: { windowSec: 2.0, max: 4 },
+    reaction: { windowSec: 1.0, max: 3 },
+    soundfx: { windowSec: 1.5, max: 3 },
+    poll_create: { windowSec: 3.5, max: 1 },
+    break_request: { windowSec: 1.5, max: 1 },
+  };
+  const rule = rules[act];
+  if (!rule || !cid) return false;
+  rm._rl = rm._rl && typeof rm._rl === "object" ? rm._rl : {};
+  const keys = Object.keys(rm._rl);
+  if (keys.length > 200) {
+    for (const k of keys) {
+      if (!rm.participants?.[k]) delete rm._rl[k];
+    }
+  }
+  const bucket = (rm._rl[cid] = rm._rl[cid] && typeof rm._rl[cid] === "object" ? rm._rl[cid] : {});
+  const prev = Array.isArray(bucket[act]) ? bucket[act] : [];
+  const fresh = prev.filter((ts) => t - ts < rule.windowSec);
+  if (fresh.length >= rule.max) {
+    bucket[act] = fresh;
+    return true;
+  }
+  fresh.push(t);
+  bucket[act] = fresh;
+  return false;
 }
 
 function sanitizeChatSnapshot(raw) {
@@ -680,6 +1128,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
   let dirty = Boolean(opts.initialDirty);
   let roomClosed = false;
   let forbiddenError = "";
+  let rateLimitedError = "";
   let pendingPassword;
 
   if (act === "batch" && Array.isArray(body.items)) {
@@ -688,6 +1137,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       clientToken: body.clientToken,
       uid: body.uid,
       username: body.username,
+      name: body.name,
       handle: body.handle,
       avatarUrl: body.avatarUrl,
       bio: body.bio,
@@ -698,14 +1148,27 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       hideWatching: body.hideWatching,
       hideFriends: body.hideFriends,
       hideLocation: body.hideLocation,
+      friendsPreview: body.friendsPreview,
       color: body.color,
       device: body.device,
       country: body.country,
       activeMedia: body.activeMedia,
     };
-    for (const item of body.items) {
+    let lastRateErr = "";
+    let nonSignalCount = 0;
+    for (const item of body.items.slice(0, 80)) {
       if (!item || typeof item !== "object") continue;
+      const subType = String(item.type || "poll");
+      if (subType === "batch") continue;
+      if (!["webrtc_offer", "webrtc_answer", "webrtc_ice"].includes(subType)) {
+        nonSignalCount += 1;
+        if (nonSignalCount > 25) continue;
+      }
       const sub = applyRoomAction(rm, cid, { ...sharedMeta, ...item }, opts);
+      if (sub.rateLimitedError) {
+        lastRateErr = sub.rateLimitedError;
+        continue;
+      }
       dirty = dirty || sub.dirty;
       pushedEvents.push(...sub.pushedEvents);
       privateSignals.push(...sub.privateSignals);
@@ -714,12 +1177,16 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       if (sub.forbiddenError) forbiddenError = sub.forbiddenError;
       if (sub.pendingPassword !== undefined) pendingPassword = sub.pendingPassword;
     }
-    return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError, pendingPassword };
+    if (!dirty && pushedEvents.length === 0 && privateSignals.length === 0 && lastRateErr) {
+      rateLimitedError = lastRateErr;
+    }
+    return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError, rateLimitedError, pendingPassword };
   }
 
   const tokenVerified = Boolean(opts.tokenVerified);
-  const uname = String(body.username || rm.participants?.[cid]?.name || "Misafir").slice(0, 40);
+  const uname = String(body.username || body.name || rm.participants?.[cid]?.name || "Misafir").trim().slice(0, 40) || "Misafir";
   if (act === "leave") {
+    if (rm._rl && rm._rl[cid]) delete rm._rl[cid];
     if (rm.participants?.[cid]) {
       delete rm.participants[cid];
       if (Array.isArray(rm.stage_speakers)) {
@@ -728,7 +1195,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       rm.rev = (rm.rev || 1) + 1;
       dirty = true;
     }
-    return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError };
+    return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError, rateLimitedError };
   }
 
   const prevP = rm.participants?.[cid];
@@ -753,17 +1220,38 @@ function applyRoomAction(rm, cid, body, opts = {}) {
 
   const nextAvatar = body.avatarUrl !== undefined ? sanitizeAvatarUrl(body.avatarUrl) : (prevP?.avatarUrl || "");
   const nextColor = /^#[0-9a-fA-F]{3,8}$/.test(String(body.color || "")) ? body.color : (prevP?.color || "#27DCC8");
-  const nextUid = body.uid !== undefined ? String(body.uid || "").slice(0, 64) : (prevP?.uid || "");
+  const nextVerifiedUid = String(opts.verifiedUid || (tokenVerified ? prevP?.verifiedUid : "") || "").trim().slice(0, 64);
+  const nextUid = nextVerifiedUid || (body.uid !== undefined ? String(body.uid || "").trim().slice(0, 64) : (prevP?.uid || ""));
   const nextHandle = body.handle !== undefined ? String(body.handle || "").slice(0, 40) : (prevP?.handle || "");
   const nextStatusText = body.statusText !== undefined ? String(body.statusText || "").slice(0, 80) : (prevP?.statusText || "");
   const nextStatusEmoji = body.statusEmoji !== undefined ? String(body.statusEmoji || "🍿").slice(0, 12) : (prevP?.statusEmoji || "🍿");
   const nextBio = body.bio !== undefined ? String(body.bio || "").slice(0, 160) : (prevP?.bio || "");
   const nextMedal = body.medal !== undefined ? String(body.medal || "").slice(0, 32) : (prevP?.medal || "");
   const nextWatchMinutes = body.watchMinutes !== undefined ? Math.max(0, Number(body.watchMinutes) || 0) : Number(prevP?.watchMinutes || 0);
+  const nextHideWatching = body.hideWatching !== undefined ? Boolean(body.hideWatching) : Boolean(prevP?.hideWatching);
+  const nextHideFriends = body.hideFriends !== undefined ? Boolean(body.hideFriends) : Boolean(prevP?.hideFriends);
+  const nextHideLocation = body.hideLocation !== undefined ? Boolean(body.hideLocation) : Boolean(prevP?.hideLocation);
+  const nextFriendsPreview = sanitizeFriendsPreview(
+    body.friendsPreview !== undefined ? body.friendsPreview : prevP?.friendsPreview,
+    nextHideFriends
+  );
+  const nextDevice = String(body.device || prevP?.device || "Web").slice(0, 24);
+  const nextCountry = nextHideLocation ? "" : String(body.country || prevP?.country || "TR").slice(0, 4);
 
   const partChanged = Boolean(
     !prevP ||
     prevP.name !== uname ||
+    prevP.uid !== nextUid ||
+    (prevP.verifiedUid || "") !== nextVerifiedUid ||
+    prevP.handle !== nextHandle ||
+    prevP.bio !== nextBio ||
+    prevP.statusEmoji !== nextStatusEmoji ||
+    prevP.medal !== nextMedal ||
+    Number(prevP.watchMinutes || 0) !== nextWatchMinutes ||
+    Boolean(prevP.hideWatching) !== nextHideWatching ||
+    Boolean(prevP.hideFriends) !== nextHideFriends ||
+    Boolean(prevP.hideLocation) !== nextHideLocation ||
+    (prevP.country || "") !== nextCountry ||
     prevP.muted !== nextMuted ||
     Boolean(prevP.speaking) !== nextSpeaking ||
     Boolean(prevP.cam) !== nextCam ||
@@ -784,6 +1272,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     ...(prevP || {}),
     id: cid,
     uid: nextUid,
+    verifiedUid: nextVerifiedUid,
     name: uname,
     handle: nextHandle,
     color: nextColor,
@@ -793,11 +1282,12 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     statusEmoji: nextStatusEmoji,
     medal: nextMedal,
     watchMinutes: nextWatchMinutes,
-    hideWatching: body.hideWatching !== undefined ? Boolean(body.hideWatching) : Boolean(prevP?.hideWatching),
-    hideFriends: body.hideFriends !== undefined ? Boolean(body.hideFriends) : Boolean(prevP?.hideFriends),
-    hideLocation: body.hideLocation !== undefined ? Boolean(body.hideLocation) : Boolean(prevP?.hideLocation),
-    device: String(body.device || prevP?.device || "Web").slice(0, 24),
-    country: String(body.country || prevP?.country || "TR").slice(0, 4),
+    hideWatching: nextHideWatching,
+    hideFriends: nextHideFriends,
+    hideLocation: nextHideLocation,
+    friendsPreview: nextFriendsPreview,
+    device: nextDevice,
+    country: nextCountry,
     muted: nextMuted,
     speaking: nextSpeaking,
     cam: nextCam,
@@ -858,6 +1348,19 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     return true;
   };
 
+  if (["chat", "reaction", "soundfx", "poll_create", "break_request"].includes(act) && checkRoomActionRateLimit(rm, cid, act, t)) {
+    return {
+      dirty,
+      pushedEvents,
+      privateSignals,
+      kickedTargets,
+      roomClosed,
+      forbiddenError,
+      rateLimitedError: "Çok hızlı işlem yapıyorsunuz, lütfen kısa bir süre bekleyin.",
+      pendingPassword,
+    };
+  }
+
   if (act === "play" || act === "pause" || act === "seek" || act === "rate" || act === "video_ended") {
     if (act === "video_ended" && !rm.curated && Array.isArray(rm.queue) && rm.queue.length > 0 && ["autoplay", "vote", "quickplay", "cohost"].includes(rm.playMode || "")) {
       if (rm.playMode === "vote") {
@@ -874,13 +1377,16 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       }
     } else {
       if (rm.playMode === "leader" && !isPrivilegedInRoom(rm, cid)) {
-        return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Lider modunda oynatma kontrolü yalnızca oda yöneticisine aittir." };
+        return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError: "Lider modunda oynatma kontrolü yalnızca oda yöneticisine aittir.", rateLimitedError };
       }
       if (body.currentTime !== undefined) rm.media.currentTime = Math.max(0, Number(body.currentTime) || 0);
       if (act === "play") rm.media.playing = true;
       if (act === "pause" || act === "video_ended") rm.media.playing = false;
       if (act === "video_ended") rm.media.currentTime = 0;
-      if (body.rate !== undefined) rm.media.rate = Math.min(4, Math.max(0.25, Number(body.rate) || 1));
+      if (body.rate !== undefined) {
+        rm.media.rate = Math.min(4, Math.max(0.25, Number(body.rate) || 1));
+        rm.media.meshStatePlaybackSpeed = rm.media.rate;
+      }
       rm.media.updatedAt = t;
       rm.media.lastActionBy = uname;
       pushEv({
@@ -889,6 +1395,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
         currentTime: rm.media.currentTime,
         playing: rm.media.playing,
         rate: rm.media.rate,
+        meshStatePlaybackSpeed: rm.media.rate,
         media: buildMediaOut(rm),
       });
     }
@@ -932,10 +1439,10 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     }
   } else if (act === "change_media" || act === "resolve_media") {
     if (rm.playMode === "leader" && !isPrivilegedInRoom(rm, cid)) {
-      return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Medya değiştirme yetkisi oda yöneticisine aittir." };
+      return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError: "Medya değiştirme yetkisi oda yöneticisine aittir.", rateLimitedError };
     }
     if (rm.curated) {
-      return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Sabit 7/24 odalarda medya değiştirilemez." };
+      return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError: "Sabit 7/24 odalarda medya değiştirilemez.", rateLimitedError };
     }
     const m = body.media || body;
     if (act === "change_media") {
@@ -946,6 +1453,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       }, uname, t);
       rm.skip_votes = [];
     } else {
+      const nextRate = Math.min(4, Math.max(0.25, Number(m.rate ?? m.meshStatePlaybackSpeed ?? rm.media.rate ?? 1) || 1));
       rm.media = {
         ...rm.media,
         provider: m.provider || rm.media.provider || "hls",
@@ -975,6 +1483,8 @@ function applyRoomAction(rm, cid, body, opts = {}) {
         duration: m.duration !== undefined ? Number(m.duration) || 0 : (rm.media.duration || 0),
         currentTime: m.currentTime !== undefined ? Number(m.currentTime) || 0 : rm.media.currentTime,
         playing: m.playing !== undefined ? Boolean(m.playing) : true,
+        rate: nextRate,
+        meshStatePlaybackSpeed: nextRate,
         lastActionBy: uname,
         updatedAt: t,
       };
@@ -996,6 +1506,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
           clientMsgId: msgId,
           cid,
           uid: nextUid,
+          verifiedUid: rm.participants[cid].verifiedUid || "",
           handle: nextHandle,
           user: uname,
           username: uname,
@@ -1052,6 +1563,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
         id: msgId,
         cid,
         uid: nextUid,
+        verifiedUid: rm.participants[cid].verifiedUid || "",
         user: uname,
         username: uname,
         color: rm.participants[cid].color,
@@ -1123,13 +1635,14 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       const votes = new Set(Array.isArray(item.votes) ? item.votes : []);
       if (votes.has(cid)) votes.delete(cid); else votes.add(cid);
       item.votes = Array.from(votes);
+      rm.queue.sort((a, b) => (Array.isArray(b?.votes) ? b.votes.length : 0) - (Array.isArray(a?.votes) ? a.votes.length : 0));
       pushEv({ type: "queue_updated", queue: rm.queue, voteEndsAt: Number(rm.voteEndsAt || 0) });
     }
   } else if (act === "queue_play" || act === "queue_play_index") {
     if (!rm.curated) {
       const canPlayQ = isPrivilegedInRoom(rm, cid) || ["cohost", "quickplay", "free"].includes(rm.playMode || "");
       if (!canPlayQ) {
-        return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Sıradaki videoyu yalnızca oda lideri başlatabilir." };
+        return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError: "Sıradaki videoyu yalnızca oda lideri başlatabilir.", rateLimitedError };
       }
       const targetId = String(body.id || "");
       const targetIdx = Number.isInteger(Number(body.index)) ? Number(body.index) : 0;
@@ -1143,17 +1656,24 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     if (idx < 0 && targetIdx >= 0 && targetIdx < rm.queue.length) idx = targetIdx;
     if (idx >= 0) {
       const item = rm.queue[idx];
-      if (!isPrivilegedInRoom(rm, cid) && item?.addedByCid !== cid) {
-        return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Bu öğeyi sıradan kaldırma yetkiniz yok." };
+      if (!tokenVerified || (!isPrivilegedInRoom(rm, cid) && item?.addedByCid !== cid)) {
+        return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError: "Bu öğeyi sıradan kaldırma yetkiniz yok.", rateLimitedError };
       }
       rm.queue.splice(idx, 1);
       pushEv({ type: "queue_updated", queue: rm.queue, voteEndsAt: Number(rm.voteEndsAt || 0) });
     }
   } else if (act === "vote_skip") {
-    const votes = new Set(rm.skip_votes || []);
-    if (votes.has(cid)) votes.delete(cid); else votes.add(cid);
+    const humanIds = new Set(
+      Object.entries(rm.participants || {})
+        .filter(([pid, p]) => !isBotParticipant(pid, p))
+        .map(([pid]) => pid)
+    );
+    const votes = new Set((rm.skip_votes || []).filter((v) => humanIds.has(v)));
+    if (humanIds.has(cid)) {
+      if (votes.has(cid)) votes.delete(cid); else votes.add(cid);
+    }
     rm.skip_votes = Array.from(votes);
-    const skipNeeded = Math.max(1, Math.ceil(Math.max(1, Object.keys(rm.participants || {}).length) / 2));
+    const skipNeeded = Math.max(1, Math.floor(humanIds.size / 2) + 1);
     pushEv({ type: "skip_votes", votes: rm.skip_votes, needed: skipNeeded, skip_votes: rm.skip_votes, skipNeeded });
     if (!rm.curated && rm.skip_votes.length >= skipNeeded && Array.isArray(rm.queue) && rm.queue.length > 0) {
       advanceQueueItem(-1, "");
@@ -1183,7 +1703,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     const allowCoHostSub = ["toggle_stage_mode", "toggle_stage_speaker"].includes(subAct);
     const permitted = allowCoHostSub ? isPrivilegedInRoom(rm, cid) : isHostOrCreator(rm, cid);
     if (!tokenVerified || !permitted) {
-      return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Bu yönetici işlemi için geçerli host doğrulaması gerekli." };
+      return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError: "Bu yönetici işlemi için geçerli host doğrulaması gerekli.", rateLimitedError };
     }
     const validPlayModes = ["leader", "cohost", "autoplay", "quickplay", "vote", "free"];
     const validVoipModes = ["all", "stage", "leader", "off", "on"];
@@ -1206,6 +1726,14 @@ function applyRoomAction(rm, cid, body, opts = {}) {
         enforceVoipModeOnParticipants(rm);
         changed = true;
       }
+      if (body.locked !== undefined) {
+        rm.locked = Boolean(body.locked);
+        changed = true;
+      }
+      if (Array.isArray(body.invitedUids)) {
+        rm.invitedUids = Array.from(new Set(body.invitedUids.map((x) => String(x || "").trim().slice(0, 64)).filter(Boolean))).slice(0, 100);
+        changed = true;
+      }
       if (typeof body.name === "string" && body.name.trim()) {
         const cleanName = body.name.trim().slice(0, 64);
         rm.name = cleanName;
@@ -1218,8 +1746,11 @@ function applyRoomAction(rm, cid, body, opts = {}) {
         changed = true;
       }
       if (changed) {
-        pushEv({ type: "host_action", subAction: "set_privacy", privacy: rm.privacy, playMode: rm.playMode, voipMode: rm.voipMode, name: rm.name }, { attachRoom: true });
+        pushEv({ type: "host_action", subAction: "set_privacy", privacy: rm.privacy, playMode: rm.playMode, voipMode: rm.voipMode, locked: Boolean(rm.locked), name: rm.name }, { attachRoom: true });
       }
+    } else if ((subAct === "toggle_lock" || subAct === "set_locked") && !rm.curated) {
+      rm.locked = subAct === "toggle_lock" ? !Boolean(rm.locked) : Boolean(body.locked ?? true);
+      pushEv({ type: "host_action", subAction: subAct, locked: rm.locked }, { attachRoom: true });
     } else if (subAct === "toggle_stage_mode") {
       rm.voipMode = rm.voipMode === "stage" ? "all" : "stage";
       if (rm.voipMode !== "stage") {
@@ -1246,13 +1777,80 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       }
       rm.participants[targetCid].handRaised = false;
       pushEv({ type: "host_action", subAction: "toggle_stage_speaker", targetCid, stage_speakers: rm.stage_speakers }, { attachRoom: true });
-    } else if (subAct === "kick" && targetCid && targetCid !== rm.creatorCid) {
-      rm.kicked = Array.from(new Set([...(rm.kicked || []), targetCid])).slice(-100);
-      delete rm.participants[targetCid];
-      rm.co_hosts = (rm.co_hosts || []).filter((x) => x !== targetCid);
-      rm.stage_speakers = (rm.stage_speakers || []).filter((x) => x !== targetCid);
-      kickedTargets.push(targetCid);
-      pushEv({ type: "host_action", subAction: "kick", targetCid }, { attachRoom: true });
+    } else if (subAct === "kick" && targetCid && targetCid !== cid && targetCid !== rm.creatorCid && targetCid !== rm.host_id) {
+      const explicitTargetUid = String(body.targetUid || "").trim().toLowerCase().slice(0, 64);
+      const targetVerifiedUid = String(rm.participants?.[targetCid]?.verifiedUid || "").trim().toLowerCase().slice(0, 64);
+      const kickedUid = targetVerifiedUid || explicitTargetUid;
+      const creatorUidLow = String(rm.creatorUid || "").trim().toLowerCase();
+      if (!kickedUid || kickedUid !== creatorUidLow) {
+        const dropCids = new Set([targetCid]);
+        if (kickedUid) {
+          for (const [pid, p] of Object.entries(rm.participants || {})) {
+            const pVuid = String(p?.verifiedUid || "").trim().toLowerCase();
+            if (p && pVuid === kickedUid && pid !== rm.creatorCid && pid !== rm.host_id) {
+              dropCids.add(pid);
+            }
+          }
+        }
+        rm.kicked = Array.from(new Set([...(rm.kicked || []), ...dropCids])).slice(-100);
+        if (kickedUid) {
+          rm.kickedUids = Array.from(new Set([...(rm.kickedUids || []), kickedUid])).slice(-100);
+        }
+        for (const dc of dropCids) {
+          delete rm.participants[dc];
+          kickedTargets.push(dc);
+        }
+        if (kickedUid) kickedTargets.push(`uid:${kickedUid}`);
+        rm.co_hosts = (rm.co_hosts || []).filter((x) => !dropCids.has(x));
+        rm.stage_speakers = (rm.stage_speakers || []).filter((x) => !dropCids.has(x));
+        pushEv({ type: "host_action", subAction: "kick", targetCid }, { attachRoom: true });
+      }
+    } else if (subAct === "ban" && !rm.curated) {
+      const explicitTargetUid = String(body.targetUid || "").trim().toLowerCase().slice(0, 64);
+      const targetVerifiedUid = String(rm.participants?.[targetCid]?.verifiedUid || "").trim().toLowerCase().slice(0, 64);
+      const targetUid = targetVerifiedUid || explicitTargetUid;
+      const creatorUidLow = String(rm.creatorUid || "").trim().toLowerCase();
+      if ((targetCid || targetUid) && targetCid !== cid && targetCid !== rm.creatorCid && targetCid !== rm.host_id && (!targetUid || targetUid !== creatorUidLow)) {
+        const dropCids = new Set(targetCid ? [targetCid] : []);
+        if (targetUid) {
+          for (const [pid, p] of Object.entries(rm.participants || {})) {
+            const pVuid = String(p?.verifiedUid || "").trim().toLowerCase();
+            if (p && pVuid === targetUid && pid !== rm.creatorCid && pid !== rm.host_id) {
+              dropCids.add(pid);
+            }
+          }
+        }
+        if (dropCids.size > 0) {
+          rm.bannedCids = Array.from(new Set([...(rm.bannedCids || []), ...dropCids])).slice(-100);
+          rm.kicked = Array.from(new Set([...(rm.kicked || []), ...dropCids])).slice(-100);
+        }
+        if (targetUid) {
+          rm.bannedUids = Array.from(new Set([...(rm.bannedUids || []), targetUid])).slice(-100);
+          rm.kickedUids = Array.from(new Set([...(rm.kickedUids || []), targetUid])).slice(-100);
+        }
+        for (const dc of dropCids) {
+          delete rm.participants[dc];
+          kickedTargets.push(dc);
+        }
+        if (targetUid) kickedTargets.push(`uid:${targetUid}`);
+        rm.co_hosts = (rm.co_hosts || []).filter((x) => !dropCids.has(x));
+        rm.stage_speakers = (rm.stage_speakers || []).filter((x) => !dropCids.has(x));
+        pushEv({ type: "host_action", subAction: "ban", targetCid, targetUid }, { attachRoom: true });
+      }
+    } else if (subAct === "unban" && !rm.curated) {
+      const targetUid = String(body.targetUid || "").trim().toLowerCase().replace(/^uid:/, "").slice(0, 64);
+      if (targetCid || targetUid) {
+        if (targetCid) {
+          rm.bannedCids = (rm.bannedCids || []).filter((x) => x !== targetCid);
+          rm.kicked = (rm.kicked || []).filter((x) => x !== targetCid);
+        }
+        if (targetUid) {
+          rm.bannedUids = (rm.bannedUids || []).filter((x) => x !== targetUid);
+          rm.kickedUids = (rm.kickedUids || []).filter((x) => x !== targetUid);
+          rm.kicked = (rm.kicked || []).filter((x) => x !== `uid:${targetUid}`);
+        }
+        pushEv({ type: "host_action", subAction: "unban", targetCid, targetUid }, { attachRoom: true });
+      }
     } else if (subAct === "promote" && targetCid) {
       rm.co_hosts = Array.from(new Set([...(rm.co_hosts || []), targetCid]));
       pushEv({ type: "host_action", subAction: "promote", targetCid }, { attachRoom: true });
@@ -1268,8 +1866,18 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       }
       pushEv({ type: "host_action", subAction: "toggle_cohost", targetCid }, { attachRoom: true });
     } else if (subAct === "transfer_host" && targetCid && rm.participants?.[targetCid] && !rm.curated) {
+      const prevHostCid = rm.host_id;
+      const prevCreatorCid = rm.creatorCid;
+      const targetP = rm.participants[targetCid];
       rm.host_id = targetCid;
-      rm.co_hosts = Array.from(new Set([...(rm.co_hosts || []), targetCid]));
+      rm.creatorCid = targetCid;
+      rm.hostTransferred = true;
+      rm.creatorUid = targetP?.verifiedUid ? String(targetP.verifiedUid).slice(0, 64) : "";
+      if (targetP?.name) rm.creator = targetP.name;
+      rm.co_hosts = Array.from(new Set([
+        ...(rm.co_hosts || []).filter((x) => x !== prevHostCid && x !== prevCreatorCid),
+        targetCid,
+      ]));
       pushEv({ type: "host_action", subAction: "transfer_host", targetCid }, { attachRoom: true });
     } else if (subAct === "mute" && targetCid && rm.participants?.[targetCid]) {
       rm.participants[targetCid].muted = true;
@@ -1277,13 +1885,45 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       rm.participants[targetCid].hostMutedAt = t;
       pushEv({ type: "host_action", subAction: "mute", targetCid }, { attachRoom: true });
     }
+  } else if (act === "delete_msg") {
+    const targetMsgId = String(body.msgId || body.id || "").trim().slice(0, 64);
+    const chatArr = Array.isArray(rm.chat) ? rm.chat : [];
+    const idx = targetMsgId ? chatArr.findIndex((m) => m && m.id === targetMsgId) : -1;
+    if (idx >= 0) {
+      const targetMsg = chatArr[idx];
+      const callerVerifiedUid = String(opts.verifiedUid || (tokenVerified ? prevP?.verifiedUid : "") || "").trim();
+      const isSender = Boolean(
+        (targetMsg.cid && targetMsg.cid === cid) ||
+        (callerVerifiedUid && targetMsg.verifiedUid && callerVerifiedUid === targetMsg.verifiedUid)
+      );
+      if (!tokenVerified || (!isPrivilegedInRoom(rm, cid) && !isSender)) {
+        return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError: "Bu mesajı silme yetkiniz yok.", rateLimitedError, pendingPassword };
+      }
+      chatArr.splice(idx, 1);
+      rm.chat = chatArr;
+      pushEv({ type: "msg_deleted", msgId: targetMsgId });
+    }
   } else if (act === "clear_chat") {
+    if (rm.curated) {
+      return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError: "7/24 canlı yayın odalarında sohbet geçmişi silinemez.", rateLimitedError, pendingPassword };
+    }
     if (!tokenVerified || !isPrivilegedInRoom(rm, cid)) {
-      return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Sohbeti temizleme yetkisi yok." };
+      return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError: "Sohbeti temizleme yetkisi yok.", rateLimitedError, pendingPassword };
     }
     rm.chat = [];
-    rm.polls = [];
-    pushEv({ type: "chat_cleared" });
+    rm.chatClearedAt = t;
+    pushEv({ type: "chat_cleared", chatClearedAt: rm.chatClearedAt });
+  } else if (act === "profile_update") {
+    const pCur = rm.participants[cid] || {};
+    const safePart = {
+      ...pCur,
+      country: pCur.hideLocation ? "" : (pCur.country || ""),
+      friendsPreview: pCur.hideFriends ? [] : (Array.isArray(pCur.friendsPreview) ? pCur.friendsPreview : []),
+      isHost: !rm.curated && cid === rm.host_id,
+      isCoHost: !rm.curated && (rm.co_hosts || []).includes(cid),
+      isCreator: !rm.curated && cid === rm.creatorCid,
+    };
+    pushEv({ type: "profile_updated", cid, profile: safePart, participant: safePart }, { attachRoom: true });
   } else if (act === "reaction" || act === "typing" || act === "soundfx") {
     const actId = String(body.actionId || "").trim().slice(0, 64);
     const validSfx = ["clap", "laugh", "suspense", "fanfare"].includes(String(body.sfx || "")) ? String(body.sfx) : "fanfare";
@@ -1305,14 +1945,14 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     dirty = true;
   }
   if (dirty) rm.updatedAt = t;
-  return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError, pendingPassword };
+  return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError, rateLimitedError, pendingPassword };
 }
 
 function serializeRoomInfo(rm, tokenVerified = false) {
   const isCur = Boolean(rm.curated);
   const mediaOut = buildMediaOut(rm);
   const hasPw = Boolean(!isCur && (rm.passwordHash || rm.password));
-  const shouldMask = !isCur && (rm.privacy === "private" || hasPw) && !tokenVerified;
+  const shouldMask = !isCur && (rm.privacy === "private" || rm.privacy === "friends" || hasPw) && !tokenVerified;
   const parts = Object.values(rm.participants || {});
   const safeMedia = shouldMask
     ? {
@@ -1336,6 +1976,10 @@ function serializeRoomInfo(rm, tokenVerified = false) {
     playMode: rm.playMode || "leader",
     voipMode: rm.voipMode || "all",
     isMature: Boolean(rm.isMature),
+    locked: Boolean(!isCur && rm.locked),
+    hideWatching: Boolean(!isCur && rm.hideWatching),
+    hideLocation: Boolean(!isCur && rm.hideLocation),
+    hideFriends: Boolean(!isCur && rm.hideFriends),
     hasPassword: hasPw,
     creator: rm.creator || "Misafir",
     curated: isCur,
@@ -1346,6 +1990,8 @@ function serializeRoomInfo(rm, tokenVerified = false) {
       ? []
       : parts.map((p) => ({
           ...p,
+          country: p.hideLocation ? "" : (p.country || ""),
+          friendsPreview: p.hideFriends ? [] : (Array.isArray(p.friendsPreview) ? p.friendsPreview : []),
           isHost: !isCur && p.id === rm.host_id,
           isCoHost: !isCur && (rm.co_hosts || []).includes(p.id),
           isCreator: !isCur && p.id === rm.creatorCid,
@@ -1375,9 +2021,15 @@ export class WatchlivoRoomDO {
           healed = true;
         }
       }
-      this.room = stored || seed || makeRoomSkeleton(roomId, curatedSeed || {});
-      if (!seed && curatedSeed && !stored) {
+      if (stored) {
+        this.room = stored;
+      } else if (seed) {
+        this.room = seed;
+      } else if (curatedSeed) {
+        this.room = makeRoomSkeleton(roomId, curatedSeed);
         healed = true;
+      } else {
+        return null;
       }
     }
     if (curatedSeed && reconcileCuratedRoom(this.room, curatedSeed)) {
@@ -1427,10 +2079,11 @@ export class WatchlivoRoomDO {
 
   _ejectKickedSockets(roomId, targetCids) {
     if (!Array.isArray(targetCids) || !targetCids.length) return;
-    const kickSet = new Set(targetCids);
+    const kickSet = new Set(targetCids.map((x) => String(x || "")));
     const payload = JSON.stringify({ type: "kicked", roomId });
     for (const [ws, meta] of this.sockets.entries()) {
-      if (!kickSet.has(meta?.cid)) continue;
+      const uidKey = meta?.verifiedUid ? `uid:${String(meta.verifiedUid).trim().toLowerCase()}` : "";
+      if (!kickSet.has(meta?.cid) && !(uidKey && kickSet.has(uidKey))) continue;
       try { ws.send(payload); } catch {}
       try { ws.close(4008, "kicked"); } catch {}
       this.sockets.delete(ws);
@@ -1519,16 +2172,30 @@ export class WatchlivoRoomDO {
       if (closedMark) {
         return Response.json({ ok: false, error: "Bu oda artık mevcut değil", roomClosed: true }, { status: 410 });
       }
-      const stored = this.room || (await this.state.storage.get("room"));
-      if (!stored) {
+      const rm = await this._load(roomId, null, null);
+      if (!rm) {
         return Response.json({ ok: false, error: "Bu oda artık mevcut değil" }, { status: 404 });
       }
-      this.room = stored;
+      this.room = rm;
       const pruned = pruneStaleParticipants(this.room, this._activeWsCids());
       if (pruned) await this._save();
       const cid = String(u.searchParams.get("clientId") || "");
       const suppliedTok = String(u.searchParams.get("clientToken") || "").trim();
       const tokVerified = Boolean(cid && suppliedTok && (await verifyRoomClientToken(suppliedTok, roomId, cid, this.env)));
+      if (this.room.privacy === "friends") {
+        const verifiedUid = await resolveRoomCallerUid(request, this.env, null, u);
+        const allowed = await hasFriendsRoomAccess(this.room, {
+          cid,
+          tokenVerified: tokVerified,
+          verifiedUid,
+          validSyncToken: false,
+          env: this.env,
+          isInfo: true,
+        });
+        if (!allowed) {
+          return Response.json({ ok: false, error: "friends_only", message: "Bu oda yalnızca arkadaşlara açıktır." }, { status: 403 });
+        }
+      }
       return Response.json({ ok: true, room: serializeRoomInfo(this.room, tokVerified) });
     }
 
@@ -1591,7 +2258,23 @@ export class WatchlivoRoomDO {
           return new Response(null, { status: 101, webSocket: cClient });
         }
       }
-      const rm = await this._load(roomId, await tryRestoreSyncToken(roomId, u.searchParams.get("syncToken"), this.env), curatedSeed);
+      const existingRm = await this._load(roomId, null, curatedSeed);
+      const restoredSeed = !existingRm && !curatedSeed ? await tryRestoreSyncToken(roomId, u.searchParams.get("syncToken"), this.env) : null;
+      const rm = existingRm || (restoredSeed ? await this._load(roomId, restoredSeed, null) : null);
+      if (!rm) {
+        if (typeof WebSocketPair !== "undefined") {
+          const nfPair = new WebSocketPair();
+          const [nfClient, nfServer] = Object.values(nfPair);
+          nfServer.accept();
+          nfServer.send(JSON.stringify({ type: "room_closed", roomId, roomClosed: false, roomNotFound: true, error: "Bu oda artık mevcut değil" }));
+          try { nfServer.close(4010, "room_not_found"); } catch {}
+          return new Response(null, { status: 101, webSocket: nfClient });
+        }
+        return Response.json({ ok: false, error: "Bu oda artık mevcut değil", roomNotFound: true }, { status: 404 });
+      }
+      const verifiedUid = await resolveRoomCallerUid(request, this.env, null, u);
+      const rawUid = String(u.searchParams.get("uid") || "").trim().slice(0, 64);
+      const blockUid = verifiedUid || rawUid;
       const wsCidEarly = u.searchParams.get("clientId") || "";
       const wsTokEarly = u.searchParams.get("clientToken") || "";
       const wsTrusted = Boolean(
@@ -1609,13 +2292,44 @@ export class WatchlivoRoomDO {
         return new Response(null, { status: 101, webSocket: client });
       }
 
-      let cid = u.searchParams.get("clientId") || `h_${makeHexNonce(4)}`;
+      const origCid = u.searchParams.get("clientId") || "";
+      let cid = origCid || `h_${makeHexNonce(4)}`;
       const suppliedTok = u.searchParams.get("clientToken") || "";
       let tokVerified = await verifyRoomClientToken(suppliedTok, roomId, cid, this.env);
-      if ((cid === rm.creatorCid || cid === rm.host_id) && !tokVerified) {
-        cid = `h_${makeHexNonce(4)}`;
+      const kbCheck = getKickBanStatus(rm, origCid || cid, blockUid);
+      if (kbCheck.banned) {
+        return Response.json({ ok: false, error: "kicked", banned: true, message: "Bu odadan yasaklandınız." }, { status: 403 });
       }
-      if ((rm.kicked || []).includes(cid)) {
+      if (kbCheck.kicked) {
+        return new Response("Kicked", { status: 410 });
+      }
+      if (!rm.curated && rm.privacy === "friends") {
+        const allowed = await hasFriendsRoomAccess(rm, {
+          cid,
+          tokenVerified: tokVerified,
+          verifiedUid,
+          validSyncToken: Boolean(restoredSeed),
+          env: this.env,
+          isInfo: false,
+        });
+        if (!allowed) {
+          return Response.json({ ok: false, error: "friends_only", message: "Bu oda yalnızca arkadaşlara açıktır." }, { status: 403 });
+        }
+      }
+      const isExistingOrCreator = Boolean(
+        (tokVerified && (rm.participants?.[cid] || isHostOrCreator(rm, cid) || (rm.co_hosts || []).includes(cid))) ||
+        restoredSeed ||
+        (verifiedUid && rm.creatorUid && verifiedUid.toLowerCase() === String(rm.creatorUid).toLowerCase())
+      );
+      if (rm.locked && !rm.curated && !isExistingOrCreator) {
+        return Response.json({ ok: false, error: "room_locked", message: "Oda kilitli." }, { status: 403 });
+      }
+      if (!tokVerified && isCidOccupiedOrReferenced(rm, cid)) {
+        do {
+          cid = `h_${makeHexNonce(4)}`;
+        } while (isCidOccupiedOrReferenced(rm, cid));
+      }
+      if (getKickBanStatus(rm, cid, blockUid).kicked) {
         return new Response("Kicked", { status: 410 });
       }
       const uname = u.searchParams.get("username") || u.searchParams.get("name") || "Misafir";
@@ -1623,7 +2337,7 @@ export class WatchlivoRoomDO {
       const initAct = applyRoomAction(rm, cid, {
         type: "init",
         username: uname,
-        uid: u.searchParams.get("uid") || "",
+        uid: blockUid,
         handle: u.searchParams.get("handle") || "",
         avatarUrl: u.searchParams.get("avatarUrl") || "",
         bio: u.searchParams.get("bio") || "",
@@ -1631,16 +2345,19 @@ export class WatchlivoRoomDO {
         statusEmoji: u.searchParams.get("statusEmoji") || "🍿",
         medal: u.searchParams.get("medal") || "",
         watchMinutes: Number(u.searchParams.get("watchMinutes") || 0) || 0,
+        hideWatching: u.searchParams.get("hideWatching") === "1" || u.searchParams.get("hideWatching") === "true" ? true : undefined,
+        hideFriends: u.searchParams.get("hideFriends") === "1" || u.searchParams.get("hideFriends") === "true" ? true : undefined,
+        hideLocation: u.searchParams.get("hideLocation") === "1" || u.searchParams.get("hideLocation") === "true" ? true : undefined,
         device: u.searchParams.get("device") || "Web",
         country: u.searchParams.get("country") || "TR",
         color: u.searchParams.get("color") || "#27DCC8",
-      }, { tokenVerified: true });
+      }, { tokenVerified: true, verifiedUid });
       if (initAct.dirty || pruned) await this._save();
 
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       server.accept();
-      this.sockets.set(server, { cid, uname });
+      this.sockets.set(server, { cid, uid: blockUid, verifiedUid, uname });
       const initTok = tokVerified ? suppliedTok : await signRoomClientToken(roomId, cid, this.env);
       tokVerified = true;
       const roomPayload = await serializeEdgeRoom(rm, cid, this.env);
@@ -1651,8 +2368,9 @@ export class WatchlivoRoomDO {
       }
 
       server.addEventListener("message", async (ev) => {
-        if ((rm.kicked || []).includes(cid)) {
-          try { server.send(JSON.stringify({ type: "kicked", roomId })); } catch {}
+        const kbMsg = getKickBanStatus(rm, cid, rm.participants?.[cid]?.verifiedUid || blockUid);
+        if (kbMsg.blocked) {
+          try { server.send(JSON.stringify({ type: "kicked", roomId, banned: kbMsg.banned })); } catch {}
           try { server.close(4008, "kicked"); } catch {}
           this.sockets.delete(server);
           return;
@@ -1680,7 +2398,7 @@ export class WatchlivoRoomDO {
           return;
         }
         const pr = pruneStaleParticipants(rm, this._activeWsCids());
-        const res = applyRoomAction(rm, cid, msg, { tokenVerified: true });
+        const res = applyRoomAction(rm, cid, msg, { tokenVerified: true, verifiedUid });
         if (res.pendingPassword !== undefined) {
           await setRoomPassword(rm, res.pendingPassword);
         }
@@ -1692,11 +2410,15 @@ export class WatchlivoRoomDO {
           server.send(JSON.stringify({ type: "error", error: res.forbiddenError, message: res.forbiddenError }));
           return;
         }
+        if (res.rateLimitedError) {
+          server.send(JSON.stringify({ type: "error", error: "rate_limited", message: res.rateLimitedError }));
+          return;
+        }
         if (msg.type === "leave" || msg.type === "host_action" || pr) {
           await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, "", this.env), this.env);
         }
         for (const item of res.pushedEvents) {
-          const echoToSender = ["chat", "chat_cleared", "poll_updated", "msg_reacted", "queue_updated", "vote_updated", "skip_votes", "hand_raised", "host_action", "media_changed"].includes(item.ev.type);
+          const echoToSender = ["chat", "chat_cleared", "msg_deleted", "profile_updated", "poll_updated", "msg_reacted", "queue_updated", "vote_updated", "skip_votes", "hand_raised", "host_action", "media_changed"].includes(item.ev.type);
           await this._broadcastRoomEvent(rm, item, echoToSender ? null : server);
         }
         for (const sig of res.privateSignals) {
@@ -1707,7 +2429,7 @@ export class WatchlivoRoomDO {
         this.sockets.delete(server);
         const closedMark = await this.state.storage.get("closed").catch(() => false);
         if (closedMark || !this.room) return;
-        const res = applyRoomAction(rm, cid, { type: "leave" }, { tokenVerified: true });
+        const res = applyRoomAction(rm, cid, { type: "leave" }, { tokenVerified: true, verifiedUid });
         await this._save();
         await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, "", this.env), this.env);
         await this._broadcastRoomEvent(rm, { attachRoom: true, ev: { type: "user_left", user: { id: cid, name: uname } } }, null);
@@ -1718,21 +2440,57 @@ export class WatchlivoRoomDO {
       return new Response(null, { status: 101, webSocket: client });
     }
 
-    const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
-    const bodySeed = (body.__curatedSeed && body.__curatedSeed.id === roomId && body.__curatedSeed.curated) ? body.__curatedSeed : null;
-    delete body.__curatedSeed;
-    const curatedSeed = getCuratedSeed(roomId, null, bodySeed || headerSeed);
-
     if (u.pathname === "/create") {
+      let rawBody = null;
+      if (request.method === "POST") {
+        const rawText = await request.text().catch(() => "");
+        if (!rawText || !rawText.trim()) {
+          return Response.json({ ok: false, error: "invalid_json", message: "Geçersiz oda oluşturma verisi." }, { status: 400 });
+        }
+        try {
+          rawBody = JSON.parse(rawText);
+        } catch {
+          return Response.json({ ok: false, error: "invalid_json", message: "Geçersiz JSON verisi." }, { status: 400 });
+        }
+      }
+      if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) {
+        return Response.json({ ok: false, error: "invalid_json", message: "Oda oluşturma verisi bir JSON nesnesi olmalıdır." }, { status: 400 });
+      }
+      const { curated: _sCur, __curatedSeed: _sSeed, ...createBody } = rawBody;
+      const verifiedUid = await resolveRoomCallerUid(request, this.env, createBody, u);
+      const creatorUid = verifiedUid || String(createBody.creatorUid || createBody.creatorId || createBody.uid || "").trim().slice(0, 64);
       await this.state.storage.delete("closed");
-      this.room = makeRoomSkeleton(roomId, { ...body, curated: false });
-      await setRoomPassword(this.room, String(body.password || "").trim());
-      applyRoomAction(this.room, this.room.creatorCid, { type: "init", username: this.room.creator, color: body.color || "#27DCC8" }, { initialDirty: true, tokenVerified: true });
+      this.room = makeRoomSkeleton(roomId, { ...createBody, creatorUid, curated: false });
+      await setRoomPassword(this.room, String(createBody.password || "").trim());
+      applyRoomAction(this.room, this.room.creatorCid, {
+        type: "init",
+        username: this.room.creator,
+        uid: this.room.creatorUid || createBody.uid || "",
+        handle: createBody.handle || "",
+        avatarUrl: createBody.avatarUrl || "",
+        bio: createBody.bio || "",
+        statusText: createBody.statusText || "",
+        statusEmoji: createBody.statusEmoji || "🍿",
+        medal: createBody.medal || "",
+        watchMinutes: Number(createBody.watchMinutes || 0) || 0,
+        hideWatching: Boolean(createBody.hideWatching),
+        hideFriends: Boolean(createBody.hideFriends),
+        hideLocation: Boolean(createBody.hideLocation),
+        friendsPreview: createBody.friendsPreview,
+        device: createBody.device || "Web",
+        country: createBody.hideLocation ? "" : (createBody.country || "TR"),
+        color: createBody.color || "#27DCC8",
+      }, { initialDirty: true, tokenVerified: true, verifiedUid });
       await this._save();
       const cid = this.room.creatorCid;
       const clientToken = await signRoomClientToken(roomId, cid, this.env);
       return Response.json({ ok: true, clientId: cid, clientToken, room: await serializeEdgeRoom(this.room, cid, this.env) });
     }
+
+    const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+    const bodySeed = (body.__curatedSeed && (body.__curatedSeed.id === roomId || body.__curatedSeed.id === normalizeCuratedRoomId(roomId)) && body.__curatedSeed.curated) ? body.__curatedSeed : null;
+    delete body.__curatedSeed;
+    const curatedSeed = getCuratedSeed(roomId, null, bodySeed || headerSeed);
 
     if (curatedSeed) {
       await this.state.storage.delete("closed").catch(() => {});
@@ -1742,20 +2500,56 @@ export class WatchlivoRoomDO {
         return Response.json({ ok: false, error: "Oda kapatıldı.", roomClosed: true }, { status: 410 });
       }
     }
-    const rm = await this._load(roomId, await tryRestoreSyncToken(roomId, body.syncToken, this.env), curatedSeed);
-    let cid = String(body.clientId || `h_${makeHexNonce(4)}`);
+    const existingRm = await this._load(roomId, null, curatedSeed);
+    const restoredSeed = !existingRm && !curatedSeed ? await tryRestoreSyncToken(roomId, body.syncToken, this.env) : null;
+    const rm = existingRm || (restoredSeed ? await this._load(roomId, restoredSeed, null) : null);
+    if (!rm) {
+      return Response.json({ ok: false, error: "Bu oda artık mevcut değil", roomNotFound: true }, { status: 404 });
+    }
+    const verifiedUid = await resolveRoomCallerUid(request, this.env, body, u);
+    const blockUid = verifiedUid || String(body.uid || "").trim().slice(0, 64);
+    const origCid = String(body.clientId || "");
+    let cid = origCid || `h_${makeHexNonce(4)}`;
     const suppliedTok = String(body.clientToken || "").trim();
     const tokenVerified = await verifyRoomClientToken(suppliedTok, roomId, cid, this.env);
     const pwTrustedMember = Boolean(tokenVerified && (rm.participants?.[cid] || isHostOrCreator(rm, cid)));
     if (!curatedSeed && !rm.curated && !pwTrustedMember && !(await verifyRoomPassword(rm, body.pwd || ""))) {
       return Response.json({ ok: false, error: "password_required", message: "Oda şifresi hatalı." }, { status: 403 });
     }
-    if ((cid === rm.creatorCid || cid === rm.host_id) && !tokenVerified) {
-      if (rm.participants?.[cid] || rm.curated || rm.createdFromApi) {
-        cid = `h_${makeHexNonce(4)}`;
+    const kb = getKickBanStatus(rm, origCid || cid, blockUid);
+    if (kb.banned) {
+      return Response.json({ ok: false, error: "kicked", banned: true, message: "Bu odadan yasaklandınız." }, { status: 403 });
+    }
+    if (kb.kicked) {
+      return Response.json({ ok: false, error: "kicked" }, { status: 410 });
+    }
+    if (!rm.curated && rm.privacy === "friends") {
+      const allowed = await hasFriendsRoomAccess(rm, {
+        cid,
+        tokenVerified,
+        verifiedUid,
+        validSyncToken: Boolean(restoredSeed),
+        env: this.env,
+        isInfo: false,
+      });
+      if (!allowed) {
+        return Response.json({ ok: false, error: "friends_only", message: "Bu oda yalnızca arkadaşlara açıktır." }, { status: 403 });
       }
     }
-    if ((rm.kicked || []).includes(cid)) {
+    const isExistingOrCreator = Boolean(
+      (tokenVerified && (rm.participants?.[cid] || isHostOrCreator(rm, cid) || (rm.co_hosts || []).includes(cid))) ||
+      restoredSeed ||
+      (verifiedUid && rm.creatorUid && verifiedUid.toLowerCase() === String(rm.creatorUid).toLowerCase())
+    );
+    if (rm.locked && !rm.curated && !isExistingOrCreator) {
+      return Response.json({ ok: false, error: "room_locked", message: "Oda kilitli." }, { status: 403 });
+    }
+    if (!tokenVerified && isCidOccupiedOrReferenced(rm, cid)) {
+      do {
+        cid = `h_${makeHexNonce(4)}`;
+      } while (isCidOccupiedOrReferenced(rm, cid));
+    }
+    if (getKickBanStatus(rm, cid, blockUid).kicked) {
       return Response.json({ ok: false, error: "kicked" }, { status: 410 });
     }
     if (body.type === "close_room") {
@@ -1767,7 +2561,7 @@ export class WatchlivoRoomDO {
     }
 
     const pruned = pruneStaleParticipants(rm, this._activeWsCids());
-    const res = applyRoomAction(rm, cid, body, { tokenVerified });
+    const res = applyRoomAction(rm, cid, body, { tokenVerified, verifiedUid });
     if (res.pendingPassword !== undefined) {
       await setRoomPassword(rm, res.pendingPassword);
     }
@@ -1777,6 +2571,9 @@ export class WatchlivoRoomDO {
     }
     if (res.forbiddenError) {
       return Response.json({ ok: false, error: res.forbiddenError, message: res.forbiddenError }, { status: 403 });
+    }
+    if (res.rateLimitedError) {
+      return Response.json({ ok: false, error: "rate_limited", message: res.rateLimitedError }, { status: 429 });
     }
     for (const item of res.pushedEvents) {
       await this._broadcastRoomEvent(rm, item, null);
@@ -1803,7 +2600,7 @@ export class WatchlivoRoomDO {
   }
 
   async _closeRoom(roomId) {
-    if (this.room?.curated || DEFAULT_CURATED_MAP.has(roomId)) {
+    if (this.room?.curated || DEFAULT_CURATED_MAP.has(normalizeCuratedRoomId(roomId))) {
       return false;
     }
     this._broadcast({ type: "room_closed", roomId });
@@ -2012,18 +2809,36 @@ export function resetRoomDoQuotaGuardForTests() {
 }
 
 export async function handleEdgeRoomCreate(request, env, jsonResp) {
-  const rawBody = await request.json().catch(() => ({}));
-  const { curated: _spoofCurated, __curatedSeed: _spoofSeed, ...body } = rawBody && typeof rawBody === "object" ? rawBody : {};
+  const rawText = await request.text().catch(() => "");
+  if (!rawText || !rawText.trim()) {
+    return jsonResp({ ok: false, error: "invalid_json", message: "Geçersiz oda oluşturma verisi." }, 400);
+  }
+  let rawBody;
+  try {
+    rawBody = JSON.parse(rawText);
+  } catch {
+    return jsonResp({ ok: false, error: "invalid_json", message: "Geçersiz JSON verisi." }, 400);
+  }
+  if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) {
+    return jsonResp({ ok: false, error: "invalid_json", message: "Oda oluşturma verisi bir JSON nesnesi olmalıdır." }, 400);
+  }
+  const { curated: _spoofCurated, __curatedSeed: _spoofSeed, ...body } = rawBody;
   const roomId = generateOpaqueRoomId();
   const cid = String(body.clientId || `h_${makeHexNonce(4)}`);
-  const createPayload = { ...body, clientId: cid, createdFromApi: true };
+  const verifiedUid = await resolveRoomCallerUid(request, env, body, new URL(request.url));
+  const creatorUid = verifiedUid || String(body.creatorUid || body.creatorId || body.uid || "").trim().slice(0, 64);
+  const createPayload = { ...body, clientId: cid, creatorUid, createdFromApi: true };
   let out = null;
   if (canUseRoomDo(env)) {
     try {
       const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
-      const r = await stub.fetch(`https://do.local/create?roomId=${encodeURIComponent(roomId)}`, { method: "POST", body: JSON.stringify(createPayload) });
+      const doHdrs = await forwardEdgeAuthHeaders(request, verifiedUid, env, { "Content-Type": "application/json" });
+      const r = await stub.fetch(`https://do.local/create?roomId=${encodeURIComponent(roomId)}`, { method: "POST", headers: doHdrs, body: JSON.stringify(createPayload) });
       if (r.ok) {
         out = await r.json();
+      } else if (r.status === 400) {
+        const errData = await r.json().catch(() => ({ ok: false, error: "invalid_json" }));
+        return jsonResp(errData, 400);
       } else {
         const errTxt = await r.text().catch(() => "");
         noteDoFailure(errTxt || `do_${r.status}`);
@@ -2035,8 +2850,26 @@ export async function handleEdgeRoomCreate(request, env, jsonResp) {
   if (!out) {
     const rm = makeRoomSkeleton(roomId, createPayload);
     rm.createdFromApi = true;
-    await setRoomPassword(rm, body.password || "");
-    applyRoomAction(rm, cid, { type: "init", username: rm.creator, color: body.color || "#27DCC8" }, { initialDirty: true, tokenVerified: true });
+    await setRoomPassword(rm, String(body.password || "").trim());
+    applyRoomAction(rm, cid, {
+      type: "init",
+      username: rm.creator,
+      uid: rm.creatorUid || body.uid || "",
+      handle: body.handle || "",
+      avatarUrl: body.avatarUrl || "",
+      bio: body.bio || "",
+      statusText: body.statusText || "",
+      statusEmoji: body.statusEmoji || "🍿",
+      medal: body.medal || "",
+      watchMinutes: Number(body.watchMinutes || 0) || 0,
+      hideWatching: Boolean(body.hideWatching),
+      hideFriends: Boolean(body.hideFriends),
+      hideLocation: Boolean(body.hideLocation),
+      friendsPreview: body.friendsPreview,
+      device: body.device || "Web",
+      country: body.hideLocation ? "" : (body.country || "TR"),
+      color: body.color || "#27DCC8",
+    }, { initialDirty: true, tokenVerified: true, verifiedUid });
     memSetRoom(roomId, rm);
     await d1PutRoom(env, roomId, rm);
     if (env.WATCHLIVO_KV) await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 }).catch(() => {});
@@ -2089,6 +2922,7 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
       if (closedKv) return jsonResp({ ok: false, error: "Oda kapatıldı.", roomClosed: true }, 410);
     }
   }
+  const verifiedUid = await resolveRoomCallerUid(request, env, body, new URL(request.url));
   if (canUseRoomDo(env)) {
     try {
       const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
@@ -2096,7 +2930,8 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
         body.__curatedSeed = seed;
         if (!body.activeMedia && seed.media) body.activeMedia = seed.media;
       }
-      const r = await stub.fetch(`https://do.local/sync?roomId=${encodeURIComponent(roomId)}`, { method: "POST", body: JSON.stringify(body) });
+      const doHdrs = await forwardEdgeAuthHeaders(request, verifiedUid, env, { "Content-Type": "application/json" });
+      const r = await stub.fetch(`https://do.local/sync?roomId=${encodeURIComponent(roomId)}`, { method: "POST", headers: doHdrs, body: JSON.stringify(body) });
       const data = await r.json();
       if (body.type === "close_room" && r.ok && data?.roomClosed && !seed) {
         memMarkClosed(roomId);
@@ -2122,7 +2957,9 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
     }
   }
 
-  let cid = String(body.clientId || `h_${makeHexNonce(4)}`);
+  const origCid = String(body.clientId || "");
+  let cid = origCid || `h_${makeHexNonce(4)}`;
+  const blockUid = verifiedUid || String(body.uid || "").trim().slice(0, 64);
   // Always read global shared store (D1 -> KV) BEFORE local isolate memory to prevent cross-POP/cross-isolate split-brain!
   let rm = null;
   let loadedFromGlobal = false;
@@ -2149,13 +2986,17 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
   }
   let healed = false;
   let isNewRoom = false;
+  const restoredSeed = !rm && !seed ? await tryRestoreSyncToken(roomId, body.syncToken, env) : null;
   if (!rm) {
-    isNewRoom = true;
-    rm = (await tryRestoreSyncToken(roomId, body.syncToken, env)) || makeRoomSkeleton(roomId, seed || body);
     if (seed) {
+      isNewRoom = true;
+      rm = makeRoomSkeleton(roomId, seed);
       healed = reconcileCuratedRoom(rm, seed) || true;
+    } else if (restoredSeed) {
+      isNewRoom = true;
+      rm = restoredSeed;
     } else {
-      await setRoomPassword(rm, body.password || "");
+      return jsonResp({ ok: false, error: "Bu oda artık mevcut değil", roomNotFound: true }, 404);
     }
   } else if (seed) {
     healed = reconcileCuratedRoom(rm, seed);
@@ -2166,10 +3007,40 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
   if (!seed && !rm.curated && !pwTrustedMember && !(await verifyRoomPassword(rm, body.pwd || ""))) {
     return jsonResp({ ok: false, error: "password_required", message: "Oda şifresi hatalı." }, 403);
   }
-  if ((cid === rm.creatorCid || cid === rm.host_id) && !tokenVerified && (rm.participants?.[cid] || rm.curated || rm.createdFromApi)) {
-    cid = `h_${makeHexNonce(4)}`;
+  const kb = getKickBanStatus(rm, origCid || cid, blockUid);
+  if (kb.banned) {
+    return jsonResp({ ok: false, error: "kicked", banned: true, message: "Bu odadan yasaklandınız." }, 403);
   }
-  if ((rm.kicked || []).includes(cid)) return jsonResp({ ok: false, error: "kicked" }, 410);
+  if (kb.kicked) {
+    return jsonResp({ ok: false, error: "kicked" }, 410);
+  }
+  if (!seed && !rm.curated && rm.privacy === "friends") {
+    const allowed = await hasFriendsRoomAccess(rm, {
+      cid,
+      tokenVerified,
+      verifiedUid,
+      validSyncToken: Boolean(restoredSeed),
+      env,
+      isInfo: false,
+    });
+    if (!allowed) {
+      return jsonResp({ ok: false, error: "friends_only", message: "Bu oda yalnızca arkadaşlara açıktır." }, 403);
+    }
+  }
+  const isExistingOrCreator = Boolean(
+    (tokenVerified && (rm.participants?.[cid] || isHostOrCreator(rm, cid) || (rm.co_hosts || []).includes(cid))) ||
+    restoredSeed ||
+    (verifiedUid && rm.creatorUid && verifiedUid.toLowerCase() === String(rm.creatorUid).toLowerCase())
+  );
+  if (rm.locked && !rm.curated && !isExistingOrCreator) {
+    return jsonResp({ ok: false, error: "room_locked", message: "Oda kilitli." }, 403);
+  }
+  if (!tokenVerified && isCidOccupiedOrReferenced(rm, cid)) {
+    do {
+      cid = `h_${makeHexNonce(4)}`;
+    } while (isCidOccupiedOrReferenced(rm, cid));
+  }
+  if (getKickBanStatus(rm, cid, blockUid).kicked) return jsonResp({ ok: false, error: "kicked" }, 410);
   if (body.type === "close_room") {
     if (seed || rm.curated || !tokenVerified || !isHostOrCreator(rm, cid)) {
       return jsonResp({ ok: false, error: seed || rm.curated ? "Sabit 7/24 odalar kapatılamaz." : "Sadece oda kurucusu odayı kapatabilir." }, 403);
@@ -2186,8 +3057,9 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
   const prevSeen = Number(rm.participants?.[cid]?.lastSeen || 0);
   const hadParticipant = Boolean(rm.participants?.[cid]);
   const pruned = pruneStaleParticipants(rm);
-  const res = applyRoomAction(rm, cid, body, { tokenVerified });
-  if (res.forbiddenError) return jsonResp({ ok: false, error: res.forbiddenError }, 403);
+  const res = applyRoomAction(rm, cid, body, { tokenVerified, verifiedUid });
+  if (res.forbiddenError) return jsonResp({ ok: false, error: res.forbiddenError, message: res.forbiddenError }, 403);
+  if (res.rateLimitedError) return jsonResp({ ok: false, error: "rate_limited", message: res.rateLimitedError }, 429);
   if (res.pendingPassword !== undefined) {
     await setRoomPassword(rm, res.pendingPassword);
   }
@@ -2228,6 +3100,7 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
 export async function handleEdgeRoomInfo(roomId, request, env, jsonResp, curatedMap = null) {
   const seed = getCuratedSeed(roomId, curatedMap);
   const url = new URL(request.url);
+  const verifiedUid = await resolveRoomCallerUid(request, env, null, url);
   if (seed) {
     _memClosedRooms.delete(roomId);
     await d1ClearRoomClosed(env, roomId);
@@ -2246,10 +3119,16 @@ export async function handleEdgeRoomInfo(roomId, request, env, jsonResp, curated
       doUrl.searchParams.set("roomId", roomId);
       const cid = url.searchParams.get("clientId") || "";
       const ctok = url.searchParams.get("clientToken") || "";
+      const syncTok = url.searchParams.get("syncToken") || "";
       if (cid) doUrl.searchParams.set("clientId", cid);
       if (ctok) doUrl.searchParams.set("clientToken", ctok);
-      const hdrs = new Headers();
-      if (seed) hdrs.set("x-watchlivo-curated-seed", b64EncodeUtf8(JSON.stringify(seed)));
+      if (syncTok) doUrl.searchParams.set("syncToken", syncTok);
+      const hdrs = await forwardEdgeAuthHeaders(
+        request,
+        verifiedUid,
+        env,
+        seed ? { "x-watchlivo-curated-seed": b64EncodeUtf8(JSON.stringify(seed)) } : null
+      );
       const r = await stub.fetch(new Request(doUrl.toString(), { method: "GET", headers: hdrs }));
       const data = await r.json();
       return jsonResp(data, r.status);
@@ -2299,17 +3178,33 @@ export async function handleEdgeRoomInfo(roomId, request, env, jsonResp, curated
   const cid = String(url.searchParams.get("clientId") || "");
   const ctok = String(url.searchParams.get("clientToken") || "").trim();
   const tokVerified = Boolean(cid && ctok && (await verifyRoomClientToken(ctok, roomId, cid, env)));
+  if (rm.privacy === "friends") {
+    const allowed = await hasFriendsRoomAccess(rm, {
+      cid,
+      tokenVerified: tokVerified,
+      verifiedUid,
+      validSyncToken: false,
+      env,
+      isInfo: true,
+    });
+    if (!allowed) {
+      return jsonResp({ ok: false, error: "friends_only", message: "Bu oda yalnızca arkadaşlara açıktır." }, 403);
+    }
+  }
   return jsonResp({ ok: true, room: serializeRoomInfo(rm, tokVerified) }, 200);
 }
 
 export async function handleEdgeRoomWs(roomId, request, url, env, curatedMap = null) {
-  if (RESERVED_CURATED_ID_RE.test(roomId) && !getCuratedSeed(roomId, curatedMap) && typeof WebSocketPair !== "undefined") {
-    const nfPair = new WebSocketPair();
-    const [nfClient, nfServer] = Object.values(nfPair);
-    nfServer.accept();
-    nfServer.send(JSON.stringify({ type: "room_closed", roomId, roomClosed: false, error: "Bu oda artık mevcut değil" }));
-    try { nfServer.close(4010, "room_closed"); } catch {}
-    return new Response(null, { status: 101, webSocket: nfClient });
+  if (RESERVED_CURATED_ID_RE.test(roomId) && !getCuratedSeed(roomId, curatedMap)) {
+    if (typeof WebSocketPair !== "undefined") {
+      const nfPair = new WebSocketPair();
+      const [nfClient, nfServer] = Object.values(nfPair);
+      nfServer.accept();
+      nfServer.send(JSON.stringify({ type: "room_closed", roomId, roomClosed: false, roomNotFound: true, error: "Bu oda artık mevcut değil" }));
+      try { nfServer.close(4010, "room_not_found"); } catch {}
+      return new Response(null, { status: 101, webSocket: nfClient });
+    }
+    return Response.json({ ok: false, error: "Bu oda artık mevcut değil", roomNotFound: true }, { status: 404 });
   }
   if (!canUseRoomDo(env)) return new Response("WS fallback to HTTP poll", { status: 503 });
   try {
@@ -2318,8 +3213,14 @@ export async function handleEdgeRoomWs(roomId, request, url, env, curatedMap = n
     url.searchParams.forEach((v, k) => doUrl.searchParams.set(k, v));
     doUrl.searchParams.set("roomId", roomId);
     const seed = getCuratedSeed(roomId, curatedMap);
+    const verifiedUid = await resolveRoomCallerUid(request, env, null, url);
     const hdrs = new Headers(request.headers);
     hdrs.delete("x-watchlivo-curated-seed");
+    hdrs.delete("x-watchlivo-edge-vuid");
+    if (verifiedUid) {
+      const sig = await hmacRoomHex(`vuid|${verifiedUid}`, env);
+      hdrs.set("x-watchlivo-edge-vuid", `${verifiedUid}.${sig}`);
+    }
     if (seed) {
       hdrs.set("x-watchlivo-curated-seed", b64EncodeUtf8(JSON.stringify(seed)));
     }

@@ -25,22 +25,38 @@ export function prepareAudioSessionForMic() {
   } catch (_) {}
 }
 
-export async function acquireMicStreamSafe() {
+export async function acquireMicStreamSafe({ timeoutMs = 9000 } = {}) {
   prepareAudioSessionForMic();
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('NO_GUM');
   }
-  try {
-    return await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
-  } catch (err) {
-    const name = String(err?.name || '');
-    if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
-      throw err;
+  const runWithTimeout = async (promise) => {
+    const ms = Math.max(1000, Number(timeoutMs) || 9000);
+    let timerId = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timerId = setTimeout(() => reject(new Error('GUM_TIMEOUT')), ms);
+        }),
+      ]);
+    } finally {
+      if (timerId !== null) clearTimeout(timerId);
     }
-    return navigator.mediaDevices.getUserMedia({ audio: true });
-  }
+  };
+  return runWithTimeout((async () => {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+    } catch (err) {
+      const name = String(err?.name || '');
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+        throw err;
+      }
+      return navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+  })());
 }
 
 export function downsampleFloat32(buffer, srcRate, targetRate) {
@@ -120,14 +136,21 @@ export function dataUrlToBlobUrl(dataUrl) {
   }
 }
 
-export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = null, onTick = null, onFinish = null, onError = null } = {}) {
+export async function startUniversalVoiceRecorder({ maxSeconds = 24, timeoutMs = 9000, apiFn = null, onTick = null, onFinish = null, onError = null } = {}) {
   stopActiveVoiceNoteGlobal();
   let stream = null;
   try {
-    stream = await acquireMicStreamSafe();
+    stream = await acquireMicStreamSafe({ timeoutMs });
   } catch (err) {
     const noGum = err?.name === 'NO_GUM' || err?.message === 'NO_GUM';
-    onError?.(noGum ? 'Tarayıcınız mikrofon erişimini desteklemiyor' : 'Mikrofon izni verilmedi — tarayıcı adres çubuğundan mikrofon iznini açın');
+    const isTimeout = err?.message === 'GUM_TIMEOUT';
+    onError?.(
+      noGum
+        ? 'Tarayıcınız mikrofon erişimini desteklemiyor'
+        : isTimeout
+          ? 'Mikrofon erişimi zaman aşımına uğradı — izin isteğini onaylayıp tekrar deneyin'
+          : 'Mikrofon izni verilmedi — tarayıcı adres çubuğundan mikrofon iznini açın',
+    );
     return null;
   }
   if (typeof window !== 'undefined') window.vortexSetVoiceNotePlaying?.(true);
@@ -199,17 +222,28 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
         const down = downsampleFloat32(merged, srcRate, 12000);
         const wavBytes = encodeWavBytes(down, 12000);
         const b64 = uint8ToBase64(wavBytes);
-        const dataUrl = `data:audio/wav;base64,${b64}`;
+        let dataUrl = `data:audio/wav;base64,${b64}`;
         const normPeaks = peaks.length >= 4 ? peaks.slice(-24) : [0.28, 0.62, 0.84, 0.46, 0.72, 0.54, 0.88, 0.42];
         let payload = { dataUrl, mime: 'audio/wav', duration: Number(durSec.toFixed(1)), peaks: normPeaks };
         if (typeof apiFn === 'function') {
           try {
-            const up = await apiFn('/api/rave/voice-note', { method: 'POST', body: payload });
+            const up = await apiFn('/api/rave/voice-note', { method: 'POST', body: payload, timeout: 10000 });
             if (up?.ok && up.audioNote?.url) {
               payload = { ...payload, id: up.audioNote.id, url: up.audioNote.url, mime: up.audioNote.mime || 'audio/wav' };
               if (dataUrl.length > 36000) delete payload.dataUrl;
             }
           } catch (_) {}
+        }
+        if (!payload.url && dataUrl.length > 350000) {
+          const targetRate = Math.max(4000, Math.min(12000, Math.floor(130000 / Math.max(1, durSec))));
+          const compactDown = downsampleFloat32(merged, srcRate, targetRate);
+          const compactWav = encodeWavBytes(compactDown, targetRate);
+          dataUrl = `data:audio/wav;base64,${uint8ToBase64(compactWav)}`;
+          payload = { ...payload, dataUrl };
+        }
+        if (!payload.url && dataUrl.length > 358000) {
+          onError?.('Sesli mesaj sunucuya yüklenemedi ve boyut sınırını aşıyor — lütfen daha kısa kaydedin');
+          return;
         }
         onFinish?.(payload);
       };
@@ -274,12 +308,16 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
       let payload = { dataUrl, mime: rawMime, duration: Number(durSec.toFixed(1)), peaks: normPeaks };
       if (typeof apiFn === 'function') {
         try {
-          const up = await apiFn('/api/rave/voice-note', { method: 'POST', body: payload });
+          const up = await apiFn('/api/rave/voice-note', { method: 'POST', body: payload, timeout: 10000 });
           if (up?.ok && up.audioNote?.url) {
             payload = { ...payload, id: up.audioNote.id, url: up.audioNote.url, mime: up.audioNote.mime || rawMime };
             if (payload.url && dataUrl.length > 36000) delete payload.dataUrl;
           }
         } catch (_) {}
+      }
+      if (!payload.url && dataUrl.length > 358000) {
+        onError?.('Sesli mesaj sunucuya yüklenemedi ve boyut sınırını aşıyor — lütfen daha kısa kaydedin');
+        return;
       }
       onFinish?.(payload);
     };

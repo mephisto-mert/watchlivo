@@ -53,18 +53,19 @@ async function ensureD1KvSchema(db) {
 }
 
 async function d1KvGet(db, k) {
-  if (!db || !(await ensureD1KvSchema(db))) return { found: false, deleted: false, value: null };
+  if (!db) return { found: false, deleted: false, value: null, error: false };
+  if (!(await ensureD1KvSchema(db))) return { found: false, deleted: false, value: null, error: true };
   try {
     const row = await db.prepare("SELECT v, exp, deleted FROM edge_kv WHERE k = ?").bind(k).first();
-    if (!row) return { found: false, deleted: false, value: null };
+    if (!row) return { found: false, deleted: false, value: null, error: false };
     const nowS = Math.floor(Date.now() / 1000);
     if (Number(row.exp || 0) > 0 && Number(row.exp) < nowS) {
       await db.prepare("DELETE FROM edge_kv WHERE k = ?").bind(k).run().catch(() => {});
-      return { found: false, deleted: false, value: null };
+      return { found: false, deleted: false, value: null, error: false };
     }
-    return { found: true, deleted: Number(row.deleted || 0) === 1, value: Number(row.deleted || 0) === 1 ? null : row.v };
+    return { found: true, deleted: Number(row.deleted || 0) === 1, value: Number(row.deleted || 0) === 1 ? null : row.v, error: false };
   } catch {
-    return { found: false, deleted: false, value: null };
+    return { found: false, deleted: false, value: null, error: true };
   }
 }
 
@@ -101,11 +102,11 @@ function isEphemeralStoreKey(key) {
     k.startsWith("rl:") ||
     k.startsWith("soc:pres:") ||
     k.startsWith("soc:typ:") ||
-    k.startsWith("soc:gclaim:") ||
     k.startsWith("tmdb_q:") ||
     k.startsWith("tmdb2imdb:") ||
     k.startsWith("sub:") ||
     k.startsWith("subs:") ||
+    k.startsWith("seasons:") ||
     k.startsWith("edge_sub:") ||
     k.startsWith("edge_cat:") ||
     k.startsWith("vizyon_cache:") ||
@@ -185,20 +186,25 @@ function createDurableKvAdapter(env) {
   const isDirectRoomStoreKey = (k) => k.startsWith("room:") || k.startsWith("room_closed:") || k === "rooms:public_index";
 
   return {
-    async get(key, typeOrOpts) {
+    async getDetailed(key, typeOrOpts) {
       const k = String(key);
       const wantJson = typeOrOpts === "json" || (typeOrOpts && typeof typeOrOpts === "object" && typeOrOpts.type === "json");
       if (isDirectRoomStoreKey(k)) {
         if (rawKv && typeof rawKv.get === "function") {
-          return await rawKv.get(k, typeOrOpts).catch(() => null);
+          try {
+            const rv = await rawKv.get(k, typeOrOpts);
+            return { value: rv ?? null, storageError: false };
+          } catch {
+            return { value: null, storageError: true };
+          }
         }
-        return null;
+        return { value: null, storageError: false };
       }
       const eph = isEphemeralStoreKey(k);
       if (eph) {
         // Ephemeral keys NEVER touch Durable Objects (saves >95% of DO free-tier request quota!)
         const mHit = memStoreGet(_memEphemeralStore, k);
-        if (mHit.hit) return mHit.deleted ? null : parseOut(mHit.value, wantJson);
+        if (mHit.hit) return { value: mHit.deleted ? null : parseOut(mHit.value, wantJson), storageError: false };
         const ec = getEdgeCacheDefault();
         if (ec) {
           try {
@@ -206,7 +212,7 @@ function createDurableKvAdapter(env) {
             if (cResp && cResp.ok) {
               const txt = await cResp.text();
               memStoreSet(_memEphemeralStore, k, txt, 60);
-              return parseOut(txt, wantJson);
+              return { value: parseOut(txt, wantJson), storageError: false };
             }
           } catch {}
         }
@@ -214,20 +220,22 @@ function createDurableKvAdapter(env) {
           const legacyVal = await rawKv.get(k, "text").catch(() => null);
           if (legacyVal !== null && legacyVal !== undefined) {
             memStoreSet(_memEphemeralStore, k, legacyVal, 60);
-            return parseOut(legacyVal, wantJson);
+            return { value: parseOut(legacyVal, wantJson), storageError: false };
           }
         }
-        return null;
+        return { value: null, storageError: false };
       }
 
       // Persistent Auth / Profile / Social / VoiceRelay keys: DO SQLite primary -> Global D1 SQLite -> rawKv -> isolate cache
+      let anyBackendSucceeded = false;
       if (roomDo && Date.now() >= _authDoQuotaUntil) {
         try {
           const res = await callDoKv({ op: "get", key: k, ephemeral: false });
+          anyBackendSucceeded = true;
           if (res && res.found) {
-            if (res.deleted || res.value === null || res.value === undefined) return null;
+            if (res.deleted || res.value === null || res.value === undefined) return { value: null, storageError: false };
             memStoreSet(_memPersistFallback, k, res.value, 600, false, 600);
-            return parseOut(res.value, wantJson);
+            return { value: parseOut(res.value, wantJson), storageError: false };
           }
         } catch (err) {
           noteAuthDoErr(err);
@@ -235,18 +243,35 @@ function createDurableKvAdapter(env) {
       }
       if (d1Db) {
         const d1Res = await d1KvGet(d1Db, k);
-        if (d1Res.found) {
-          if (d1Res.deleted || d1Res.value === null || d1Res.value === undefined) return null;
-          memStoreSet(_memPersistFallback, k, d1Res.value, 600, false, 600);
-          return parseOut(d1Res.value, wantJson);
+        if (!d1Res.error) {
+          anyBackendSucceeded = true;
+          if (d1Res.found) {
+            if (d1Res.deleted || d1Res.value === null || d1Res.value === undefined) return { value: null, storageError: false };
+            memStoreSet(_memPersistFallback, k, d1Res.value, 600, false, 600);
+            return { value: parseOut(d1Res.value, wantJson), storageError: false };
+          }
         }
       }
-      const pHit = memStoreGet(_memPersistFallback, k);
-      if (pHit.hit) return pHit.deleted ? null : parseOut(pHit.value, wantJson);
+      let rawOk = false;
+      let rawVal = null;
       if (rawKv && typeof rawKv.get === "function") {
-        return await rawKv.get(k, typeOrOpts).catch(() => null);
+        try {
+          rawVal = await rawKv.get(k, typeOrOpts);
+          anyBackendSucceeded = true;
+          rawOk = true;
+        } catch {}
       }
-      return null;
+      if (!anyBackendSucceeded) {
+        return { value: null, storageError: true };
+      }
+      const pHit = memStoreGet(_memPersistFallback, k);
+      if (pHit.hit) {
+        return { value: pHit.deleted ? null : parseOut(pHit.value, wantJson), storageError: false };
+      }
+      return { value: rawOk ? (rawVal ?? null) : null, storageError: false };
+    },
+    async get(key, typeOrOpts) {
+      return (await this.getDetailed(key, typeOrOpts)).value;
     },
     async put(key, value, opts = {}) {
       const k = String(key);
@@ -383,10 +408,53 @@ async function verifyMemberSessionToken(tok, env) {
   }
 }
 
-async function issueAuthSessionToken(user, sv, env) {
+function parseSessionDeviceLabel(ua = "") {
+  const s = String(ua || "");
+  if (!s) return "Web Tarayıcı";
+  if (/iphone|ipad|ipod/i.test(s)) return "iOS / Safari";
+  if (/android/i.test(s)) return "Android Cihaz";
+  if (/macintosh|mac os/i.test(s)) return "macOS Tarayıcı";
+  if (/windows/i.test(s)) return "Windows Tarayıcı";
+  if (/linux/i.test(s)) return "Linux Tarayıcı";
+  return "Web Tarayıcı";
+}
+
+async function issueAuthSessionToken(user, sv, env, request = null) {
   const authToken = await signMemberSessionToken(user, sv, env);
   if (env?.WATCHLIVO_KV) {
     await env.WATCHLIVO_KV.put(`session:${authToken}`, JSON.stringify({ ...user, _sv: Number(sv || 0) }), { expirationTtl: 2592000 }).catch(() => {});
+    const uid = String(user?.uid || user?.id || "").trim();
+    if (uid) {
+      const nowS = Math.floor(Date.now() / 1000);
+      let jti = makeNonce().slice(0, 12);
+      let exp = nowS + 2592000;
+      if (authToken.startsWith("wl2.")) {
+        try {
+          const c = JSON.parse(b64UrlDecodeUtf8(authToken.split(".")[1] || ""));
+          if (c?.jti) jti = String(c.jti);
+          if (Number(c?.exp || 0) > 0) exp = Number(c.exp);
+        } catch {}
+      }
+      const ua = String(request?.headers?.get("User-Agent") || "").slice(0, 180);
+      const tokHashPrefix = (await sha256Hex(authToken)).slice(0, 16);
+      const entry = {
+        id: jti,
+        tokenHashPrefix: tokHashPrefix,
+        device: parseSessionDeviceLabel(ua),
+        userAgent: ua,
+        authProvider: String(user?.authProvider || "email"),
+        issuedAt: nowS,
+        lastUsedAt: nowS,
+        exp,
+        sv: Number(sv || 0),
+      };
+      const sessKey = `acct_sessions:${uid}`;
+      const existing = await env.WATCHLIVO_KV.get(sessKey, "json").catch(() => null);
+      const list = (Array.isArray(existing) ? existing : [])
+        .filter((s) => s && Number(s.sv || 0) === Number(sv || 0) && Number(s.exp || 0) > nowS && s.id !== jti);
+      list.unshift(entry);
+      await env.WATCHLIVO_KV.put(sessKey, JSON.stringify(list.slice(0, 12)), { expirationTtl: 2592000 }).catch(() => {});
+    }
   }
   return authToken;
 }
@@ -542,7 +610,7 @@ async function getBootstrap(env) {
     } catch {}
   }
   _curatedMap = new Map(DEFAULT_CURATED_LIVE_ROOMS.map((rm) => [rm.id, rm]));
-  return { version: "20261120_v228", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
+  return { version: "20261124_v239", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
 }
 
 function makeNonce() {
@@ -643,62 +711,77 @@ function extractSessionToken(request, body = null) {
   return raw.trim();
 }
 
+async function kvReadStrict(kv, key, typeOrOpts) {
+  if (!kv) return { value: null, storageError: true };
+  if (typeof kv.getDetailed === "function") {
+    return await kv.getDetailed(key, typeOrOpts);
+  }
+  try {
+    const value = await kv.get(key, typeOrOpts);
+    return { value: value ?? null, storageError: false };
+  } catch {
+    return { value: null, storageError: true };
+  }
+}
+
 async function resolveAuthUser(request, env, body = null) {
   const tok = extractSessionToken(request, body);
-  if (!tok) return { user: null, token: "", invalidToken: false };
-  if (tok.length < 16) return { user: null, token: tok, invalidToken: true };
+  if (!tok) return { user: null, token: "", invalidToken: false, storageError: false };
+  if (tok.length < 16) return { user: null, token: tok, invalidToken: true, storageError: false };
 
-  // Fast-path: Stateless HMAC-SHA256 signed wl2 session token (immune to KV quota limits!)
+  // Fail-closed HMAC-SHA256 signed wl2 session verification (verifies revocation, tombstone, and active acct record)
   if (tok.startsWith("wl2.")) {
     const claims = await verifyMemberSessionToken(tok, env);
-    if (!claims) return { user: null, token: tok, invalidToken: true };
-    if (env?.WATCHLIVO_KV) {
-      const revKey = `revoked:${(await sha256Hex(tok)).slice(0, 24)}`;
-      const isRevoked = await env.WATCHLIVO_KV.get(revKey).catch(() => null);
-      if (isRevoked) return { user: null, token: tok, invalidToken: true };
-      const delAt = Number(await env.WATCHLIVO_KV.get(`deleted_acct:${claims.email}`).catch(() => 0)) || 0;
-      const issuedAt = Number(claims.exp || 0) - 2592000;
-      if (delAt > 0 && delAt >= issuedAt) {
-        return { user: null, token: tok, invalidToken: true };
-      }
-      const rec = await env.WATCHLIVO_KV.get(`acct:${claims.email}`, "json").catch(() => null);
-      if (rec) {
-        if (!rec.user || Number(rec.sv || 0) !== Number(claims.sv || 0)) {
-          return { user: null, token: tok, invalidToken: true };
-        }
-        return { user: normalizeMemberUserObj(rec.user, claims.email), token: tok, invalidToken: false };
-      }
+    if (!claims) return { user: null, token: tok, invalidToken: true, storageError: false };
+    if (!env?.WATCHLIVO_KV) {
+      return { user: null, token: tok, invalidToken: false, storageError: true };
     }
-    const fallbackUser = normalizeMemberUserObj({
-      id: claims.uid,
-      uid: claims.uid,
-      email: claims.email,
-      name: claims.name || claims.email.split("@")[0],
-      username: claims.name || claims.email.split("@")[0],
-      handle: claims.handle,
-      color: claims.color,
-      authProvider: claims.authProvider || "google",
-      verified: true,
-      isGuest: false,
-    }, claims.email);
-    return { user: fallbackUser, token: tok, invalidToken: false };
+    const revKey = `revoked:${(await sha256Hex(tok)).slice(0, 24)}`;
+    const [revRes, delRes, acctRes] = await Promise.all([
+      kvReadStrict(env.WATCHLIVO_KV, revKey),
+      kvReadStrict(env.WATCHLIVO_KV, `deleted_acct:${claims.email}`),
+      kvReadStrict(env.WATCHLIVO_KV, `acct:${claims.email}`, "json"),
+    ]);
+    if (revRes.storageError || delRes.storageError || acctRes.storageError) {
+      return { user: null, token: tok, invalidToken: false, storageError: true };
+    }
+    if (revRes.value) {
+      return { user: null, token: tok, invalidToken: true, storageError: false };
+    }
+    const delAt = Number(delRes.value || 0) || 0;
+    const issuedAt = Number(claims.exp || 0) - 2592000;
+    if (delAt > 0 && delAt >= issuedAt) {
+      return { user: null, token: tok, invalidToken: true, storageError: false };
+    }
+    const rec = acctRes.value;
+    if (!rec || typeof rec !== "object" || !rec.user || Number(rec.sv || 0) !== Number(claims.sv || 0)) {
+      return { user: null, token: tok, invalidToken: true, storageError: false };
+    }
+    const normUser = normalizeMemberUserObj(rec.user, claims.email);
+    if (!rec.passHash && normUser) normUser.passwordSet = false;
+    return { user: normUser, token: tok, invalidToken: false, storageError: false };
   }
 
-  if (!env?.WATCHLIVO_KV) return { user: null, token: tok, invalidToken: true };
-  const raw = await env.WATCHLIVO_KV.get(`session:${tok}`, "json").catch(() => null);
-  if (!raw || typeof raw !== "object") return { user: null, token: tok, invalidToken: true };
+  if (!env?.WATCHLIVO_KV) return { user: null, token: tok, invalidToken: false, storageError: true };
+  const sessRes = await kvReadStrict(env.WATCHLIVO_KV, `session:${tok}`, "json");
+  if (sessRes.storageError) return { user: null, token: tok, invalidToken: false, storageError: true };
+  const raw = sessRes.value;
+  if (!raw || typeof raw !== "object") return { user: null, token: tok, invalidToken: true, storageError: false };
   const { _sv: sessSv, ...user } = raw;
   const uidStr = String(user.uid || user.id || "");
   const isGuestSess = Boolean(user.isGuest) || uidStr.startsWith("guest_");
   const email = String(user.email || "").trim().toLowerCase();
   if (!isGuestSess && email) {
-    const rec = await env.WATCHLIVO_KV.get(`acct:${email}`, "json").catch(() => null);
+    const acctRes = await kvReadStrict(env.WATCHLIVO_KV, `acct:${email}`, "json");
+    if (acctRes.storageError) return { user: null, token: tok, invalidToken: false, storageError: true };
+    const rec = acctRes.value;
     if (!rec?.user || Number(rec.sv || 0) !== Number(sessSv || 0)) {
       await env.WATCHLIVO_KV.delete(`session:${tok}`).catch(() => {});
-      return { user: null, token: tok, invalidToken: true };
+      return { user: null, token: tok, invalidToken: true, storageError: false };
     }
+    if (!rec.passHash) user.passwordSet = false;
   }
-  return { user, token: tok, invalidToken: false };
+  return { user, token: tok, invalidToken: false, storageError: false };
 }
 
 async function resolveMemberUser(request, env, body = null) {
@@ -706,7 +789,7 @@ async function resolveMemberUser(request, env, body = null) {
   if (!res.user) return { ...res, isGuest: false };
   const uid = String(res.user.id || res.user.uid || "");
   if (res.user.isGuest || uid.startsWith("guest_")) {
-    return { user: null, token: res.token, invalidToken: false, isGuest: true };
+    return { user: null, token: res.token, invalidToken: false, storageError: false, isGuest: true };
   }
   return { ...res, isGuest: false };
 }
@@ -774,26 +857,67 @@ function expandTurkishPhoneticQuery(q) {
 }
 
 const TMDB_GENRE_TAGS = {
-  28: "aksiyon",
-  12: "macera",
-  16: "animasyon",
-  35: "komedi",
-  80: "suc",
-  99: "belgesel",
-  18: "dram",
-  10751: "aile",
-  14: "fantastik",
-  36: "tarih",
-  27: "korku",
-  10402: "muzik",
-  9648: "gizem",
-  10749: "romantik",
-  878: "bilim_kurgu",
-  53: "gerilim",
-  10752: "savas",
-  37: "western",
-  10759: "aksiyon",
-  10765: "bilim_kurgu",
+  28: ["action", "aksiyon"],
+  12: ["adventure", "macera"],
+  16: ["animation", "animasyon"],
+  35: ["comedy", "komedi"],
+  80: ["crime", "suc"],
+  99: ["doc", "documentary", "belgesel"],
+  18: ["drama", "dram"],
+  10751: ["family", "aile"],
+  14: ["fantasy", "fantastik"],
+  36: ["history", "tarih"],
+  27: ["horror", "korku"],
+  10402: ["music", "muzik"],
+  9648: ["mystery", "gizem"],
+  10749: ["romance", "romantik"],
+  878: ["scifi", "bilim_kurgu"],
+  53: ["thriller", "gerilim"],
+  10752: ["war", "savas"],
+  37: ["western"],
+  10759: ["action", "aksiyon", "adventure", "macera"],
+  10765: ["scifi", "bilim_kurgu", "fantasy", "fantastik"],
+  10768: ["war", "savas", "history", "tarih"],
+};
+
+const CATEGORY_ALIASES = {
+  action: ["action", "aksiyon", "adventure", "macera", "western"],
+  aksiyon: ["action", "aksiyon", "adventure", "macera", "western"],
+  adventure: ["adventure", "macera", "action", "aksiyon"],
+  macera: ["adventure", "macera", "action", "aksiyon"],
+  scifi: ["scifi", "bilim_kurgu", "bilim kurgu", "fantasy", "fantastik"],
+  bilim_kurgu: ["scifi", "bilim_kurgu", "bilim kurgu", "fantasy", "fantastik"],
+  "bilim kurgu": ["scifi", "bilim_kurgu", "bilim kurgu", "fantasy", "fantastik"],
+  fantasy: ["fantasy", "fantastik", "scifi", "bilim_kurgu"],
+  fantastik: ["fantasy", "fantastik", "scifi", "bilim_kurgu"],
+  drama: ["drama", "dram", "crime", "suc", "mystery", "gizem"],
+  dram: ["drama", "dram", "crime", "suc", "mystery", "gizem"],
+  crime: ["crime", "suc", "drama", "dram"],
+  suc: ["crime", "suc", "drama", "dram"],
+  mystery: ["mystery", "gizem", "horror", "korku", "thriller", "gerilim"],
+  gizem: ["mystery", "gizem", "horror", "korku", "thriller", "gerilim"],
+  comedy: ["comedy", "komedi", "romance", "romantik"],
+  komedi: ["comedy", "komedi", "romance", "romantik"],
+  romance: ["romance", "romantik", "comedy", "komedi"],
+  romantik: ["romance", "romantik", "comedy", "komedi"],
+  horror: ["horror", "korku", "thriller", "gerilim"],
+  korku: ["horror", "korku", "thriller", "gerilim"],
+  thriller: ["thriller", "gerilim", "horror", "korku"],
+  gerilim: ["thriller", "gerilim", "horror", "korku"],
+  animation: ["animation", "animasyon", "family", "aile"],
+  animasyon: ["animation", "animasyon", "family", "aile"],
+  family: ["family", "aile", "animation", "animasyon"],
+  aile: ["family", "aile", "animation", "animasyon"],
+  doc: ["doc", "documentary", "belgesel", "history", "tarih", "war", "savas"],
+  documentary: ["doc", "documentary", "belgesel", "history", "tarih", "war", "savas"],
+  belgesel: ["doc", "documentary", "belgesel", "history", "tarih", "war", "savas"],
+  history: ["history", "tarih", "doc", "belgesel"],
+  tarih: ["history", "tarih", "doc", "belgesel"],
+  war: ["war", "savas", "history", "tarih"],
+  savas: ["war", "savas", "history", "tarih"],
+  music: ["music", "muzik"],
+  muzik: ["music", "muzik"],
+  western: ["western", "action", "aksiyon"],
 };
 
 function mapTmdbItem(r) {
@@ -805,10 +929,14 @@ function mapTmdbItem(r) {
   const gids = Array.isArray(r.genre_ids) ? r.genre_ids : [];
   const cats = [mt === "tv" ? "series" : "movies"];
   for (const gid of gids) {
-    const tag = TMDB_GENRE_TAGS[gid];
-    if (tag && !cats.includes(tag)) cats.push(tag);
+    const tags = TMDB_GENRE_TAGS[gid];
+    if (Array.isArray(tags)) {
+      for (const tag of tags) {
+        if (tag && !cats.includes(tag)) cats.push(tag);
+      }
+    }
   }
-  if (gids.includes(16) && (r.original_language === "ja" || gids.includes(10759) || gids.includes(10765))) {
+  if (gids.includes(16) && r.original_language === "ja") {
     cats.push("anime");
   }
   return {
@@ -816,6 +944,7 @@ function mapTmdbItem(r) {
     tmdbId: tid,
     title,
     originalTitle: orig,
+    overview: String(r.overview || "").trim(),
     year: rel,
     releaseDate: String(r.release_date || r.first_air_date || ""),
     rating: r.vote_average ? Math.round(r.vote_average * 10) / 10 : 0,
@@ -904,29 +1033,47 @@ async function searchTmdbEdge(rawQ, env) {
   return top;
 }
 
+const TR_DOMESTIC_PROVIDERS = new Set(["exxen", "blutv", "gain", "tod", "tabii", "tvplus", "puhutv"]);
+const GLOBAL_OTT_PROVIDERS = new Set(["netflix", "disney", "prime", "max", "hbomax", "apple", "appletv", "mubi", "hulu", "paramount", "peacock", "plex", "pluto", "tubi", "vk"]);
+
 function matchesProviderAndCategory(x, provider, cat) {
-  if (provider === "anime") {
-    if (!((x.categories || []).includes("anime") || String(x.id || "").startsWith("ac-") || (Array.isArray(x.genreIds) && x.genreIds.includes(16) && x.origLang === "ja"))) {
-      return false;
-    }
-  } else if (provider === "series") {
-    if (!(x.mediaType === "tv" || (x.categories || []).includes("series"))) return false;
-  } else if (provider === "movies") {
-    if (!(x.mediaType === "movie" || (x.categories || []).includes("movies"))) return false;
-  } else if (provider === "livetv" || provider === "tv") {
-    if (!(x.live || provider === String(x.provider || "").toLowerCase() || (x.categories || []).includes("livetv"))) return false;
-  }
   const cats = (x.categories || []).map((c) => String(c).toLowerCase());
+  const itemProv = String(x.provider || "").toLowerCase();
+  const isAnimeItem = Array.isArray(x.genreIds) && x.genreIds.length
+    ? (x.genreIds.includes(16) && (String(x.origLang || "").toLowerCase() === "ja" || cats.includes("anime")))
+    : (cats.includes("anime") || String(x.id || "").startsWith("ac-"));
+
+  if (provider === "anime") {
+    if (!isAnimeItem) return false;
+  } else if (provider === "crunchyroll") {
+    if (!(itemProv === "crunchyroll" || x._fromTmdbDiscover || isAnimeItem)) return false;
+  } else if (provider === "series") {
+    if (!(x.mediaType === "tv" || cats.includes("series"))) return false;
+  } else if (provider === "movies") {
+    if (!(x.mediaType === "movie" || cats.includes("movies"))) return false;
+  } else if (provider === "livetv" || provider === "tv") {
+    if (!(x.live || provider === itemProv || cats.includes("livetv"))) return false;
+  } else if (TR_DOMESTIC_PROVIDERS.has(provider)) {
+    const isTrOrigin = String(x.origLang || "").toLowerCase() === "tr" || cats.includes("tr");
+    if (!(x._fromTmdbDiscover || itemProv === provider || (x._fromTmdb && isTrOrigin))) return false;
+  } else if (GLOBAL_OTT_PROVIDERS.has(provider)) {
+    const provMatch = itemProv === provider || (provider === "appletv" && itemProv === "apple") || (provider === "apple" && itemProv === "appletv") || (provider === "hbomax" && itemProv === "max") || (provider === "max" && itemProv === "hbomax");
+    if (!(x._fromTmdbDiscover || provMatch)) return false;
+  }
+
   if (cat === "series" || cat === "diziler") {
     return x.mediaType === "tv" || cats.includes("series");
   }
   if (cat === "movies" || cat === "filmler") {
     return x.mediaType === "movie" || cats.includes("movies");
   }
+  if (cat === "anime") {
+    return isAnimeItem;
+  }
   if (cat === "vizyon") {
     return Boolean(x.isVizyon || x.customRelease || cats.includes("vizyon") || Number(x.year || 0) >= 2025);
   }
-  if (cat === "tr") {
+  if (cat === "tr" || cat === "yerli") {
     return Boolean(
       cats.includes("tr") ||
       String(x.origLang || "").toLowerCase() === "tr" ||
@@ -948,6 +1095,8 @@ function matchesProviderAndCategory(x, provider, cat) {
   if (cat && cat !== "all" && cat !== "recommended" && cat !== "for_you" && cat !== "trending") {
     const gLabel = normalizeSearchText(x.genreLabel || "");
     const normCat = normalizeSearchText(cat);
+    const aliases = CATEGORY_ALIASES[cat] || CATEGORY_ALIASES[normCat] || [cat, normCat];
+    if (aliases.some((a) => cats.includes(a))) return true;
     return cats.includes(cat) || cats.includes(normCat) || (normCat.length >= 3 && gLabel.includes(normCat));
   }
   return true;
@@ -1012,9 +1161,26 @@ function filterCatalog(items, url) {
   };
 }
 
+function scoreSearchItem(it, normQ) {
+  if (!it || !normQ) return 0;
+  const nt = normalizeSearchText(it.title);
+  const no = normalizeSearchText(it.originalTitle);
+  const ntPref = normalizeSearchText(String(it.title || "").split(/[:\-–—]/)[0]);
+  const noPref = normalizeSearchText(String(it.originalTitle || "").split(/[:\-–—]/)[0]);
+  let tier = 0;
+  if (nt === normQ || no === normQ) tier = 4_000_000;
+  else if (nt.startsWith(`${normQ} `) || no.startsWith(`${normQ} `) || ntPref === normQ || noPref === normQ) tier = 3_000_000;
+  else if (` ${nt} `.includes(` ${normQ} `) || ` ${no} `.includes(` ${normQ} `)) tier = 2_000_000;
+  else if (nt.includes(normQ) || no.includes(normQ)) tier = 1_000_000;
+  const pop = Math.min(900_000, Math.round(Math.sqrt(Math.max(0, Number(it.voteCount || 0))) * 20) + Math.round(Number(it.rating || 0) * 10));
+  return tier + pop;
+}
+
 async function handleEdgeCatalogSearch(boot, url, env) {
   const rawQ = (url.searchParams.get("q") || url.searchParams.get("query") || "").trim();
-  if (rawQ.length < 2) {
+  const provider = (url.searchParams.get("provider") || "cinema").trim().toLowerCase();
+  const cat = (url.searchParams.get("category") || url.searchParams.get("genre") || "all").trim().toLowerCase();
+  if (!rawQ) {
     const shuffleOnly = ["1", "true", "yes"].includes((url.searchParams.get("shuffle") || url.searchParams.get("random") || "").trim().toLowerCase());
     if (!shuffleOnly) {
       const disc = await handleEdgeTmdbDiscoverCatalog(boot, url, env).catch(() => null);
@@ -1022,21 +1188,51 @@ async function handleEdgeCatalogSearch(boot, url, env) {
     }
     return filterCatalog(boot.catalog, url);
   }
+  const normQ = normalizeSearchText(rawQ);
+  const page = Math.max(1, Number(url.searchParams.get("page") || 1) || 1);
+  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") || 48) || 48));
+  if (!normQ) {
+    return { provider, query: rawQ, page, total: 0, totalAvailable: 0, totalTv: 0, totalMovies: 0, items: [], hasMore: false };
+  }
+  if (normQ.length === 1) {
+    const exactOne = (Array.isArray(boot.catalog) ? boot.catalog : []).filter((x) => {
+      if (!matchesProviderAndCategory(x, provider, cat)) return false;
+      return normalizeSearchText(x.title) === normQ || normalizeSearchText(x.originalTitle) === normQ;
+    });
+    const startOne = (page - 1) * limit;
+    return {
+      provider,
+      query: rawQ,
+      page,
+      total: exactOne.length,
+      totalAvailable: exactOne.length,
+      totalTv: exactOne.filter((x) => x.mediaType === "tv").length,
+      totalMovies: exactOne.filter((x) => x.mediaType !== "tv").length,
+      items: exactOne.slice(startOne, startOne + limit),
+      hasMore: exactOne.length > startOne + limit,
+    };
+  }
 
-  const { provider, cat, list: localAll } = filterCatalogUnpaged(boot.catalog, url);
+  const { list: localAll } = filterCatalogUnpaged(boot.catalog, url);
   const tmdbHits = await searchTmdbEdge(rawQ, env);
   const filteredTmdb = tmdbHits.filter((x) => matchesProviderAndCategory(x, provider, cat));
 
-  const seenIds = new Set();
+  const seenIdx = new Map();
   const merged = [];
   for (const it of [...localAll, ...filteredTmdb]) {
     const k = it.tmdbId ? `${it.mediaType}:${it.tmdbId}` : `t:${normalizeSearchText(it.title)}`;
-    if (seenIds.has(k)) continue;
-    seenIds.add(k);
-    merged.push(it);
+    if (seenIdx.has(k)) {
+      const existing = merged[seenIdx.get(k)];
+      if (existing) {
+        if (!existing.overview && it.overview) existing.overview = it.overview;
+        if (Number(it.voteCount || 0) > Number(existing.voteCount || 0)) existing.voteCount = it.voteCount;
+      }
+      continue;
+    }
+    seenIdx.set(k, merged.length);
+    merged.push({ ...it });
   }
-  const page = Math.max(1, Number(url.searchParams.get("page") || 1) || 1);
-  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") || 48) || 48));
+  merged.sort((a, b) => scoreSearchItem(b, normQ) - scoreSearchItem(a, normQ));
   const start = (page - 1) * limit;
   return {
     provider,
@@ -1055,24 +1251,63 @@ async function handleEdgeCatalogSearch(boot, url, env) {
 // TMDB Discover-backed catalog (parity with Python origin `/api/rave/catalog`)
 // ---------------------------------------------------------------------------
 const DISCOVER_GENRES = {
-  aksiyon: ["10759", "28"], action: ["10759", "28"],
+  aksiyon: ["10759|37", "28|12|37"], action: ["10759|37", "28|12|37"],
   macera: ["10759", "12"], adventure: ["10759", "12"],
-  animasyon: ["16", "16"], animation: ["16", "16"],
-  komedi: ["35", "35"], comedy: ["35", "35"],
+  animasyon: ["16|10751|10762", "16|10751"], animation: ["16|10751|10762", "16|10751"],
+  komedi: ["35", "35|10749"], comedy: ["35", "35|10749"],
   suc: ["80", "80"], crime: ["80", "80"],
-  belgesel: ["99", "99"], documentary: ["99", "99"], doc: ["99,36", "99,36"],
-  dram: ["18", "18"], drama: ["18", "18"],
+  belgesel: ["99", "99|36"], documentary: ["99", "99|36"], doc: ["99", "99|36"],
+  dram: ["18|80|9648", "18|80|9648"], drama: ["18|80|9648", "18|80|9648"],
   aile: ["10751", "10751"], family: ["10751", "10751"],
   fantastik: ["10765", "14"], fantasy: ["10765", "14"],
   tarih: ["10768", "36"], history: ["10768", "36"],
-  korku: ["9648", "27"], horror: ["9648", "27"],
-  muzik: ["", "10402"],
+  korku: ["9648|10765", "27|53"], horror: ["9648|10765", "27|53"],
+  muzik: ["", "10402"], music: ["", "10402"],
   gizem: ["9648", "9648"], mystery: ["9648", "9648"],
   romantik: ["10749", "10749"], romance: ["10749", "10749"],
-  bilim_kurgu: ["10765", "878"], scifi: ["10765", "878"],
+  bilim_kurgu: ["10765", "878|14"], scifi: ["10765", "878|14"],
   gerilim: ["80", "53"], thriller: ["80", "53"],
   savas: ["10768", "10752"], war: ["10768", "10752"],
   western: ["37", "37"],
+};
+const OTT_WATCH_PROVIDERS = {
+  netflix: "8",
+  disney: "337",
+  prime: "119",
+  max: "1899|384",
+  hbomax: "1899|384",
+  crunchyroll: "283",
+  apple: "350",
+  appletv: "350",
+  mubi: "11",
+  hulu: "15",
+  paramount: "531|582|2303|2616",
+  peacock: "386",
+  plex: "538",
+  pluto: "300",
+  tubi: "73",
+};
+const OTT_TV_NETWORKS = {
+  netflix: "213",
+  prime: "1024",
+  disney: "2739|420",
+  max: "49|3186|3308",
+  hbomax: "49|3186|3308",
+  apple: "2552",
+  appletv: "2552",
+  paramount: "4330|67",
+  hulu: "453|88",
+  peacock: "3353|6",
+};
+const OTT_US_PRIMARY_PROVIDERS = new Set(["hulu", "paramount", "peacock", "plex", "pluto", "tubi"]);
+const TR_DOMESTIC_GENRES = {
+  exxen: ["35", "35"],
+  blutv: ["18|80", "18|80"],
+  gain: ["18|35", "18|35"],
+  tod: ["80|9648|18", "80|9648|18"],
+  tabii: ["18|36|35|10759", "18|36|35|10759"],
+  tvplus: ["18|10759", "18|28"],
+  puhutv: ["18", "18"],
 };
 const _discoverMemCache = new Map();
 const _liveVizyonMemCache = { ts: 0, items: [] };
@@ -1256,14 +1491,20 @@ async function fetchTmdbDiscoverPage(u, dtype) {
   }
 }
 
+const SUPPORTED_DISCOVER_PROVIDERS = new Set([
+  "cinema", "all", "free_tr", "netflix", "disney", "prime", "max", "hbomax", "crunchyroll",
+  "apple", "appletv", "mubi", "hulu", "paramount", "peacock", "plex", "pluto", "tubi", "vk",
+  "exxen", "blutv", "gain", "tod", "tabii", "tvplus", "puhutv",
+]);
+
 async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
   const provider = (url.searchParams.get("provider") || "cinema").trim().toLowerCase();
-  if (!["cinema", "all", "free_tr", "netflix", "disney", "prime", "max", "hbomax", "crunchyroll"].includes(provider)) return null;
+  if (!SUPPORTED_DISCOVER_PROVIDERS.has(provider)) return null;
   const cat = (url.searchParams.get("category") || url.searchParams.get("genre") || "all").trim().toLowerCase();
   const mtFlt = (url.searchParams.get("mediaType") || url.searchParams.get("type") || "").trim().toLowerCase();
   const pg = Math.max(1, Math.min(500, Number(url.searchParams.get("page") || 1) || 1));
   const forceRefresh = url.searchParams.get("refresh") === "1";
-  const cacheKey = `catdisc:v4:${provider}:${cat}:${mtFlt}:${pg}`;
+  const cacheKey = `catdisc:v5:${provider}:${cat}:${mtFlt}:${pg}`;
   const now = Date.now();
   const mem = _discoverMemCache.get(cacheKey);
   if (!forceRefresh && mem && now - mem.ts < 600_000) return mem.payload;
@@ -1280,18 +1521,30 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
   const mvCut = new Date(Date.now() - 21 * 86400_000).toISOString().slice(0, 10);
   const vizyonMinCut = new Date(Date.now() - 365 * 86400_000).toISOString().slice(0, 10);
   const vizyonVodCut = new Date(Date.now() - 35 * 86400_000).toISOString().slice(0, 10);
-  const isTrCat = cat === "tr" || cat === "dublaj" || cat === "yerli";
-  const tvMinVotes = isTrCat ? 5 : (cat === "anime" ? 20 : 5);
-  const mvMinVotes = isTrCat ? 10 : 25;
-  const tvWithoutGenres = cat === "anime" ? "10762,10763,10764,10766,10767" : "10763,10764,10766,10767";
+  const isTrCat = cat === "tr" || cat === "yerli";
+  const isDomesticTrProv = TR_DOMESTIC_PROVIDERS.has(provider);
+  const ottProvId = OTT_WATCH_PROVIDERS[provider] || "";
+  const tvMinVotes = isTrCat || isDomesticTrProv ? 5 : (cat === "anime" || provider === "crunchyroll" ? 20 : (ottProvId ? 15 : 5));
+  const mvMinVotes = isTrCat || isDomesticTrProv ? 10 : (ottProvId ? 15 : 25);
+  const tvWithoutGenres = (cat === "anime" || provider === "crunchyroll") ? "10762,10763,10764,10766,10767" : "10763,10764,10766,10767";
   let tvQ = `&without_genres=${tvWithoutGenres}&first_air_date.lte=${today}&vote_count.gte=${tvMinVotes}`;
   let mvQ = `&primary_release_date.lte=${mvCut}&vote_count.gte=${mvMinVotes}`;
-  if (isTrCat) {
+  if (isTrCat || isDomesticTrProv) {
     tvQ += "&with_original_language=tr";
     mvQ += "&with_original_language=tr";
-  } else if (cat === "anime") {
-    tvQ += "&with_genres=16&with_original_language=ja";
-    mvQ += "&with_genres=16&with_original_language=ja";
+  }
+  if (cat === "anime" || provider === "crunchyroll") {
+    if (provider === "crunchyroll" && DISCOVER_GENRES[cat]) {
+      const [tg, mg] = DISCOVER_GENRES[cat];
+      tvQ += tg ? `&with_genres=16,${tg}&with_original_language=ja` : "&with_genres=16&with_original_language=ja";
+      mvQ += mg ? `&with_genres=16,${mg}&with_original_language=ja` : "&with_genres=16&with_original_language=ja";
+    } else {
+      tvQ += "&with_genres=16&with_original_language=ja";
+      mvQ += "&with_genres=16&with_original_language=ja";
+    }
+  } else if (cat === "dublaj") {
+    tvQ += "&with_genres=10759|18|10765&vote_count.gte=40";
+    mvQ += "&with_genres=28|12|878|14&vote_count.gte=50";
   } else if (DISCOVER_GENRES[cat]) {
     const [tg, mg] = DISCOVER_GENRES[cat];
     tvQ += tg ? `&with_genres=${tg}` : "&with_genres=-1";
@@ -1299,42 +1552,70 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
   } else if (cat === "trend") {
     tvQ += "&vote_average.gte=7.5&vote_count.gte=150";
     mvQ += "&vote_average.gte=7.5&vote_count.gte=250";
+  } else if (isDomesticTrProv && TR_DOMESTIC_GENRES[provider] && cat === "all") {
+    const [tg, mg] = TR_DOMESTIC_GENRES[provider];
+    if (tg) tvQ += `&with_genres=${tg}`;
+    if (mg) mvQ += `&with_genres=${mg}`;
   }
-  const baseTv = `https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&language=tr-TR${tvQ}`;
-  const baseMv = `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=tr-TR${mvQ}`;
 
   const wantTv = mtFlt !== "movie" && cat !== "movies";
-  const wantMv = mtFlt !== "tv" && cat !== "series" && cat !== "anime";
-  const eps = [];
-  if (cat === "vizyon") {
-    if (wantMv) {
-      // Use digitally-released recent films (VOD window >=35d) instead of theater-only trailers from movie/now_playing
-      eps.push([`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=tr-TR&primary_release_date.gte=${vizyonMinCut}&primary_release_date.lte=${vizyonVodCut}&vote_count.gte=40&sort_by=popularity.desc&page=${pg}`, "movie"]);
-      eps.push([`https://api.themoviedb.org/3/trending/movie/week?api_key=${apiKey}&language=tr-TR&page=${pg}`, "movie"]);
+  const wantMv = mtFlt !== "tv" && cat !== "series";
+
+  const buildEndpointsForRegion = (region, useNetworkFallback = false) => {
+    let provTvQ = tvQ;
+    let provMvQ = mvQ;
+    if (ottProvId) {
+      if (useNetworkFallback && OTT_TV_NETWORKS[provider]) {
+        provTvQ += `&with_networks=${encodeURIComponent(OTT_TV_NETWORKS[provider])}`;
+        provMvQ += `&with_watch_providers=${encodeURIComponent(ottProvId)}&watch_region=${region}`;
+      } else {
+        provTvQ += `&with_watch_providers=${encodeURIComponent(ottProvId)}&watch_region=${region}`;
+        provMvQ += `&with_watch_providers=${encodeURIComponent(ottProvId)}&watch_region=${region}`;
+      }
     }
-    if (wantTv) {
-      eps.push([`https://api.themoviedb.org/3/tv/on_the_air?api_key=${apiKey}&language=tr-TR&page=${pg}`, "tv"]);
-      eps.push([`https://api.themoviedb.org/3/trending/tv/week?api_key=${apiKey}&language=tr-TR&page=${pg}`, "tv"]);
+    const baseTv = `https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&language=tr-TR${provTvQ}`;
+    const baseMv = `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=tr-TR${provMvQ}`;
+    const eps = [];
+    if (cat === "vizyon" && !ottProvId && !isDomesticTrProv) {
+      if (wantMv) {
+        // Use digitally-released recent films (VOD window >=35d) instead of theater-only trailers from movie/now_playing
+        eps.push([`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=tr-TR&primary_release_date.gte=${vizyonMinCut}&primary_release_date.lte=${vizyonVodCut}&vote_count.gte=40&sort_by=popularity.desc&page=${pg}`, "movie"]);
+        eps.push([`https://api.themoviedb.org/3/trending/movie/week?api_key=${apiKey}&language=tr-TR&page=${pg}`, "movie"]);
+      }
+      if (wantTv) {
+        eps.push([`https://api.themoviedb.org/3/tv/on_the_air?api_key=${apiKey}&language=tr-TR&page=${pg}`, "tv"]);
+        eps.push([`https://api.themoviedb.org/3/trending/tv/week?api_key=${apiKey}&language=tr-TR&page=${pg}`, "tv"]);
+      }
+    } else {
+      const p1 = (pg - 1) * 2 + 1;
+      const p2 = p1 + 1;
+      if (wantTv) {
+        eps.push([`${baseTv}&sort_by=vote_count.desc&page=${p1}`, "tv"]);
+        eps.push([`${baseTv}&sort_by=popularity.desc&page=${p2}`, "tv"]);
+      }
+      if (wantMv) {
+        eps.push([`${baseMv}&sort_by=vote_count.desc&page=${p1}`, "movie"]);
+        eps.push([`${baseMv}&sort_by=popularity.desc&page=${p2}`, "movie"]);
+      }
     }
-  } else {
-    const p1 = (pg - 1) * 2 + 1;
-    const p2 = p1 + 1;
-    if (wantTv) {
-      eps.push([`${baseTv}&sort_by=vote_count.desc&page=${p1}`, "tv"]);
-      eps.push([`${baseTv}&sort_by=popularity.desc&page=${p2}`, "tv"]);
-    }
-    if (wantMv) {
-      eps.push([`${baseMv}&sort_by=vote_count.desc&page=${p1}`, "movie"]);
-      eps.push([`${baseMv}&sort_by=popularity.desc&page=${p2}`, "movie"]);
-    }
-  }
-  const liveVizyonPromise = (cat === "vizyon" && pg === 1 && wantMv)
+    return eps;
+  };
+
+  const primaryRegion = OTT_US_PRIMARY_PROVIDERS.has(provider) ? "US" : "TR";
+  const eps = buildEndpointsForRegion(primaryRegion, false);
+  const liveVizyonPromise = (cat === "vizyon" && !ottProvId && !isDomesticTrProv && pg === 1 && wantMv)
     ? fetchLiveSinemaccVizyonMovies(env, { forceRefresh, maxItems: 18 }).catch(() => [])
     : Promise.resolve([]);
-  const [results, liveVizyon] = await Promise.all([
+  let [results, liveVizyon] = await Promise.all([
     Promise.all(eps.map(([u, t]) => fetchTmdbDiscoverPage(u, t))),
     liveVizyonPromise,
   ]);
+  const hasAnyDisc = results.some((r) => r.items.length > 0);
+  if (!hasAnyDisc && ottProvId && primaryRegion === "TR") {
+    const usEps = buildEndpointsForRegion("US", Boolean(OTT_TV_NETWORKS[provider]));
+    results = await Promise.all(usEps.map(([u, t]) => fetchTmdbDiscoverPage(u, t)));
+  }
+
   let totTv = 0;
   let totMv = 0;
   const seen = new Set();
@@ -1342,11 +1623,19 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
   const maxLen = Math.max(0, ...results.map((r) => r.items.length));
   for (let i = 0; i < maxLen; i++) {
     for (const r of results) {
-      const it = r.items[i];
-      if (!it) continue;
-      if (cat === "vizyon" && it.mediaType === "movie" && it.releaseDate && it.releaseDate > vizyonVodCut) continue;
-      const k = `${it.mediaType}:${it.tmdbId}`;
+      const rawIt = r.items[i];
+      if (!rawIt) continue;
+      if (cat === "vizyon" && rawIt.mediaType === "movie" && rawIt.releaseDate && rawIt.releaseDate > vizyonVodCut) continue;
+      if ((cat === "anime" || provider === "crunchyroll") && !(Array.isArray(rawIt.genreIds) && rawIt.genreIds.includes(16))) continue;
+      const k = `${rawIt.mediaType}:${rawIt.tmdbId}`;
       if (seen.has(k)) continue;
+      const it = {
+        ...rawIt,
+        _fromTmdbDiscover: true,
+        ...(provider !== "cinema" && provider !== "all" && provider !== "free_tr" ? { provider } : {}),
+        ...(cat === "dublaj" && !(rawIt.categories || []).includes("dublaj") ? { categories: [...(rawIt.categories || []), "dublaj"] } : {}),
+      };
+      if (provider === "crunchyroll" && DISCOVER_GENRES[cat] && !matchesProviderAndCategory(it, provider, cat)) continue;
       seen.add(k);
       tmdbItems.push(it);
     }
@@ -1356,17 +1645,32 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
     else totMv = Math.max(totMv, r.total);
   }
   if (!tmdbItems.length && !liveVizyon.length) return null;
-
-  let items = tmdbItems;
   const { list: localList } = filterCatalogUnpaged(boot.catalog, url);
   const localFiltered = localList.filter((x) => (mtFlt === "tv" ? x.mediaType === "tv" : mtFlt === "movie" ? x.mediaType !== "tv" : true));
+
+  let items = tmdbItems;
   if (pg === 1 && cat === "vizyon" && liveVizyon.length) {
     const liveNormTitles = new Set(liveVizyon.flatMap((x) => [normalizeSearchText(x.title), normalizeSearchText(x.originalTitle)]).filter(Boolean));
     const filteredTmdb = tmdbItems.filter((x) => !liveNormTitles.has(normalizeSearchText(x.title)) && !liveNormTitles.has(normalizeSearchText(x.originalTitle)));
     items = [...liveVizyon, ...filteredTmdb];
   } else if (pg === 1 && localFiltered.length) {
-    const localKeys = new Set(localFiltered.map((x) => (x.tmdbId ? `${x.mediaType === "tv" ? "tv" : "movie"}:${x.tmdbId}` : "")).filter(Boolean));
-    items = [...localFiltered.slice(0, 24), ...tmdbItems.filter((x) => !localKeys.has(`${x.mediaType}:${x.tmdbId}`))];
+    let leadLocal = localFiltered.slice(0, 24);
+    if (cat === "all" && (provider === "cinema" || provider === "all" || provider === "free_tr")) {
+      const isTrLocal = (x) => Boolean(
+        (x.categories || []).includes("tr") ||
+        String(x.origLang || "").toLowerCase() === "tr" ||
+        String(x.country || "").toUpperCase() === "TR" ||
+        /yerli/i.test(`${x.genreLabel || ""} ${x.sourceBadge || ""}`)
+      );
+      const trLead = localFiltered.filter(isTrLocal).slice(0, 8);
+      if (trLead.length) {
+        const trIds = new Set(trLead.map((x) => x.id || x.tmdbId || x.title));
+        const nonTrLead = localFiltered.filter((x) => !trIds.has(x.id || x.tmdbId || x.title)).slice(0, 24 - trLead.length);
+        leadLocal = [...trLead, ...nonTrLead];
+      }
+    }
+    const localKeys = new Set(leadLocal.map((x) => (x.tmdbId ? `${x.mediaType === "tv" ? "tv" : "movie"}:${x.tmdbId}` : "")).filter(Boolean));
+    items = [...leadLocal, ...tmdbItems.filter((x) => !localKeys.has(`${x.mediaType}:${x.tmdbId}`))];
   }
   const localTv = localFiltered.filter((x) => x.mediaType === "tv").length;
   const localMv = Math.max(localFiltered.length - localTv, liveVizyon.length);
@@ -1439,11 +1743,48 @@ function sanitizeColor(raw) {
   return /^#[0-9a-fA-F]{3,8}$/.test(s) ? s : "#27DCC8";
 }
 
+function computeWatchMedal(mins) {
+  const m = Math.max(0, Number(mins || 0) || 0);
+  if (m >= 300) return "🥇 Altın İzleyici";
+  if (m >= 120) return "🥈 Gümüş İzleyici";
+  if (m >= 30) return "🥉 Bronz İzleyici";
+  return "⚡ Yeni İzleyici";
+}
+
 function sanitizeAvatarUrl(raw) {
   const s = String(raw || "").trim();
   if (!s) return "";
-  if (s.startsWith("https://") || s.startsWith("/static/") || s.startsWith("/uploads/")) return s.slice(0, 512);
-  if (/^data:image\/(?:png|jpeg|jpg|gif|webp|avif);base64,[A-Za-z0-9+/=]+$/i.test(s) && s.length <= 45000) return s;
+  const compact = s.replace(/[\u0000-\u0020]+/g, "");
+  let decoded1 = compact;
+  try { decoded1 = decodeURIComponent(compact); } catch {}
+  let decoded2 = decoded1;
+  try { decoded2 = decodeURIComponent(decoded1); } catch {}
+  const variants = [s, compact, decoded1, decoded2];
+  if (variants.some((v) => /[\u0000-\u001F\u007F]/.test(v))) return "__INVALID__";
+  if (variants.some((v) => /^(?:javascript:|vbscript:|data:text\/|data:application\/)/i.test(v))) return "__INVALID__";
+  if (variants.some((v) => /image\/svg(?:\+xml)?/i.test(v) || /\.svgz?(?:$|[?#&/;,]|[\u0000-\u0020])/i.test(v))) return "__INVALID__";
+  for (const v of variants) {
+    if (/^https:\/\//i.test(v)) {
+      try {
+        const u = new URL(v);
+        const pathOnly = u.pathname.split(";")[0];
+        if (/\.svgz?$/i.test(pathOnly) || /\.svgz?(?:$|\/|;)/i.test(u.pathname)) {
+          return "__INVALID__";
+        }
+      } catch {
+        return "__INVALID__";
+      }
+    }
+  }
+  if (/^data:image\/(?:png|jpeg|jpg|gif|webp|avif);base64,[A-Za-z0-9+/=]+$/i.test(compact) && compact.length <= 45000) {
+    return compact;
+  }
+  if (/^https:\/\//i.test(s) && !/[\u0000-\u001F\s<>"]/.test(s) && s.length <= 2048) {
+    return s;
+  }
+  if ((s.startsWith("/static/") || s.startsWith("/uploads/")) && !s.startsWith("//") && !/[\u0000-\u001F\s<>"]/.test(s) && s.length <= 512) {
+    return s;
+  }
   return "__INVALID__";
 }
 
@@ -1457,6 +1798,7 @@ function normalizeMemberUserObj(u, fallbackEmail = "") {
   const uid = String(u.uid || u.id || "");
   const name = cleanStr(u.name || u.username || "Kullanıcı", 40) || "Kullanıcı";
   const handle = normalizeHandle(u.handle || "", name);
+  const watchMinutes = Math.max(0, Math.floor(Number(u.watchMinutes || 0) || 0));
   return {
     id: uid,
     uid,
@@ -1472,6 +1814,8 @@ function normalizeMemberUserObj(u, fallbackEmail = "") {
     hideWatching: Boolean(u.hideWatching),
     hideFriends: Boolean(u.hideFriends),
     hideLocation: Boolean(u.hideLocation),
+    watchMinutes,
+    medal: cleanStr(u.medal || computeWatchMedal(watchMinutes), 40) || computeWatchMedal(watchMinutes),
     authProvider: String(u.authProvider || u.provider || "email"),
     verified: u.verified !== false,
     passwordSet: u.passwordSet !== false,
@@ -1574,6 +1918,8 @@ async function ensureUserSocial(env, uid, defaults = {}, persist = true) {
       privacy: {
         presenceVisibility: "friends",
         hideWatching: Boolean(defaults.hideWatching),
+        hideFriends: Boolean(defaults.hideFriends),
+        hideLocation: Boolean(defaults.hideLocation),
         allowInvites: "friends",
       },
       friends: [],
@@ -1581,6 +1927,9 @@ async function ensureUserSocial(env, uid, defaults = {}, persist = true) {
       outgoingRequests: [],
       blocked: [],
       unread: {},
+      watchMinutes: Math.max(0, Math.floor(Number(defaults.watchMinutes || 0) || 0)),
+      _watchSec: 0,
+      medal: computeWatchMedal(defaults.watchMinutes),
       lastSeen: nowS,
     };
     if (persist && env?.WATCHLIVO_KV) {
@@ -1601,10 +1950,20 @@ async function ensureUserSocial(env, uid, defaults = {}, persist = true) {
     if (defaults.bio !== undefined) { u.bio = cleanStr(defaults.bio, 160); changed = true; }
     if (defaults.statusText !== undefined) { u.statusText = cleanStr(defaults.statusText, 60); changed = true; }
     if (defaults.statusEmoji !== undefined) { u.statusEmoji = cleanStr(defaults.statusEmoji || "🍿", 12) || "🍿"; changed = true; }
-    if (defaults.hideWatching !== undefined) {
-      u.privacy = u.privacy || { presenceVisibility: "friends", hideWatching: false, allowInvites: "friends" };
-      u.privacy.hideWatching = Boolean(defaults.hideWatching);
-      changed = true;
+    if (defaults.hideWatching !== undefined || defaults.hideFriends !== undefined || defaults.hideLocation !== undefined) {
+      u.privacy = u.privacy || { presenceVisibility: "friends", hideWatching: false, hideFriends: false, hideLocation: false, allowInvites: "friends" };
+      if (defaults.hideWatching !== undefined && Boolean(defaults.hideWatching) !== Boolean(u.privacy.hideWatching)) {
+        u.privacy.hideWatching = Boolean(defaults.hideWatching);
+        changed = true;
+      }
+      if (defaults.hideFriends !== undefined && Boolean(defaults.hideFriends) !== Boolean(u.privacy.hideFriends)) {
+        u.privacy.hideFriends = Boolean(defaults.hideFriends);
+        changed = true;
+      }
+      if (defaults.hideLocation !== undefined && Boolean(defaults.hideLocation) !== Boolean(u.privacy.hideLocation)) {
+        u.privacy.hideLocation = Boolean(defaults.hideLocation);
+        changed = true;
+      }
     }
     if (!Array.isArray(u.friends)) u.friends = [];
     if (!Array.isArray(u.requests)) u.requests = [];
@@ -1614,6 +1973,11 @@ async function ensureUserSocial(env, uid, defaults = {}, persist = true) {
     if (!u.privacy || typeof u.privacy !== "object") {
       u.privacy = { presenceVisibility: "friends", hideWatching: false, allowInvites: "friends" };
     }
+    const mins = Math.max(0, Math.floor(Number(u.watchMinutes || 0) || 0));
+    if (u.watchMinutes !== mins) { u.watchMinutes = mins; changed = true; }
+    if (!Number.isFinite(Number(u._watchSec))) { u._watchSec = 0; }
+    const expectedMedal = computeWatchMedal(u.watchMinutes);
+    if (!u.medal || u.medal !== expectedMedal) { u.medal = expectedMedal; }
     if (changed && persist && env?.WATCHLIVO_KV) {
       await env.WATCHLIVO_KV.put(key, JSON.stringify(u), { expirationTtl: 2592000 }).catch(() => {});
     }
@@ -1624,6 +1988,21 @@ async function ensureUserSocial(env, uid, defaults = {}, persist = true) {
 async function saveUserSocial(env, u) {
   if (!env?.WATCHLIVO_KV || !u?.uid) return;
   await env.WATCHLIVO_KV.put(`soc:u:${u.uid}`, JSON.stringify(u), { expirationTtl: 2592000 }).catch(() => {});
+}
+
+async function syncAccountWatchMinutes(env, email, watchMinutes) {
+  const em = String(email || "").trim().toLowerCase();
+  if (!em || !env?.WATCHLIVO_KV) return null;
+  const rec = await env.WATCHLIVO_KV.get(`acct:${em}`, "json").catch(() => null);
+  if (!rec?.user) return null;
+  const nextMins = Math.max(Math.floor(Number(rec.user.watchMinutes || 0) || 0), Math.floor(Number(watchMinutes || 0) || 0));
+  const nextMedal = computeWatchMedal(nextMins);
+  if (rec.user.watchMinutes !== nextMins || rec.user.medal !== nextMedal) {
+    rec.user.watchMinutes = nextMins;
+    rec.user.medal = nextMedal;
+    await env.WATCHLIVO_KV.put(`acct:${em}`, JSON.stringify(rec)).catch(() => {});
+  }
+  return { watchMinutes: nextMins, medal: nextMedal };
 }
 
 async function computeLivePresence(env, targetUid, viewerUid = "", isFriend = false) {
@@ -1770,11 +2149,18 @@ async function resolveSocialTarget(env, identifier, hintUid = "") {
 
 async function resolveSocialCaller(request, env, fallbackUid = "", body = null) {
   let authRes = await resolveAuthUser(request, env, body);
-  if (!authRes.user && env?.WATCHLIVO_KV) {
+  if (authRes.storageError) {
+    return { uid: "guest_default", user: null, authenticated: false, isGuest: true, invalidToken: false, storageError: true };
+  }
+  const memberInvalidToken = Boolean(authRes.invalidToken);
+  if (!authRes.user && !memberInvalidToken && env?.WATCHLIVO_KV) {
     const gTok = (request.headers.get("X-Guest-Token") || (body && typeof body.guestToken === "string" ? body.guestToken : "") || "").trim();
     if (gTok.length >= 16) {
-      const gUser = await env.WATCHLIVO_KV.get(`session:${gTok}`, "json").catch(() => null);
-      if (gUser) authRes = { user: gUser, token: gTok, invalidToken: false };
+      const gRes = await kvReadStrict(env.WATCHLIVO_KV, `session:${gTok}`, "json");
+      if (gRes.storageError) {
+        return { uid: "guest_default", user: null, authenticated: false, isGuest: true, invalidToken: false, storageError: true };
+      }
+      if (gRes.value) authRes = { user: gRes.value, token: gTok, invalidToken: false, storageError: false };
     }
   }
   if (authRes.user) {
@@ -1783,6 +2169,8 @@ async function resolveSocialCaller(request, env, fallbackUid = "", body = null) 
       user: authRes.user,
       authenticated: true,
       isGuest: Boolean(authRes.user.isGuest || String(authRes.user.uid || authRes.user.id || "").startsWith("guest_")),
+      invalidToken: false,
+      storageError: false,
     };
   }
   const fb = cleanStr(fallbackUid, 64);
@@ -1790,7 +2178,7 @@ async function resolveSocialCaller(request, env, fallbackUid = "", body = null) 
   if (safeGuestUid !== "guest_default" && (await isGuestUidClaimed(env, safeGuestUid))) {
     safeGuestUid = "guest_default";
   }
-  return { uid: safeGuestUid, user: null, authenticated: false, isGuest: true };
+  return { uid: safeGuestUid, user: null, authenticated: false, isGuest: true, invalidToken: memberInvalidToken, storageError: false };
 }
 
 async function enrichSocialFriend(env, fr, viewerUid) {
@@ -1800,6 +2188,7 @@ async function enrichSocialFriend(env, fr, viewerUid) {
   const pres = await computeLivePresence(env, pUid, viewerUid, true);
   const name = cleanStr(dCard.name || fr.name || "İzleyici", 32);
   const handle = `@${normalizeHandle(dCard.handle || fr.handle || "", name)}`;
+  const watchMinutes = Math.max(0, Number(fr.watchMinutes || 0) || 0);
   return {
     ...fr,
     uid: pUid,
@@ -1816,8 +2205,8 @@ async function enrichSocialFriend(env, fr, viewerUid) {
     mediaTitle: pres.mediaTitle,
     watchingRoom: pres.watchingRoom,
     bestFriend: Boolean(fr.bestFriend),
-    watchMinutes: Math.max(0, Number(fr.watchMinutes || 0) || 0),
-    medal: fr.medal || "🥉 Bronz İzleyici",
+    watchMinutes,
+    medal: fr.medal || computeWatchMedal(watchMinutes),
   };
 }
 
@@ -2300,8 +2689,51 @@ async function persistEdgeAudioNote(env, rawAn) {
   };
 }
 
+const DEFAULT_APP_VERSION = {
+  ok: true,
+  packageName: "online.watchlivo.app",
+  versionCode: 27,
+  versionName: "2.0.6-v206",
+  apkUrl: "https://watchlivo.online/download/Watchlivo-v2.0.apk",
+  fallbackUrl: "https://watchlivo.online/static/Watchlivo-v2.0.apk",
+  sha256: "4d3f7044e4662505dafc10bd50aa59ea1bf1865e2b28605a22cde4e4f342c86b",
+  sizeBytes: 63027,
+  mandatory: true,
+  autoInstall: true,
+  publishedAt: "2026-11-11T23:45:00.000000+03:00",
+  changelog: "v206: High-Throughput Keep-Alive Chunk Proxying & Intelligent Segment Prefetching with YouTube-Style Quality Locking Engine.",
+  version: "20261114_v215",
+  build: 1,
+  description: "YouTube-Style Persistent Quality Locking Engine with server-side &res= master playlist filtering",
+};
+
+const DEFAULT_IOS_VERSION = {
+  ok: true,
+  bundleId: "online.watchlivo.app",
+  packageName: "online.watchlivo.app",
+  versionCode: 231,
+  versionName: "2.2.11",
+  ipaUrl: "https://watchlivo.online/download/ipa",
+  fallbackUrl: "https://watchlivo.online/static/Watchlivo.ipa",
+  manifestUrl: "https://watchlivo.online/api/ios/manifest.plist",
+  sha256: "11df55b975211b243fe045e94252c50f26666b7d43ef162242c3647f2631f17d",
+  sizeBytes: 682018,
+  mandatory: true,
+  autoInstall: true,
+  remoteConfig: { baseUrl: "https://watchlivo.online", posterProxyEnabled: true, syncIntervalMs: 2000 },
+};
+
+function xmlEscapeEdge(v) {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 export async function handleAutonomousEdge(request, url, safePath, env, ctx = null) {
-  if (env?.ROOM_DO && !env._durableWrapped) {
+  if ((env?.ROOM_DO || env?.ROOMS_DB) && !env._durableWrapped) {
     env = { ...env, WATCHLIVO_KV: createDurableKvAdapter(env), _durableWrapped: true };
   }
   const boot = await getBootstrap(env);
@@ -2395,9 +2827,111 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     }
     return new Response(null, { status: 302, headers: { Location: "/#/?platform=windows", "Cache-Control": "no-store" } });
   }
+  if (safePath === "/api/app/version") {
+    let meta = { ...DEFAULT_APP_VERSION };
+    if (env?.ASSETS) {
+      const rv = await env.ASSETS.fetch(new Request("https://assets.local/app_version.json")).catch(() => null);
+      if (rv?.ok) {
+        const parsed = await rv.json().catch(() => null);
+        if (parsed && typeof parsed === "object") meta = { ...meta, ...parsed };
+      }
+    }
+    return new Response(request.method === "HEAD" ? null : JSON.stringify(meta), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Access-Control-Allow-Origin": "*",
+        "X-Content-Type-Options": "nosniff",
+        "X-Watchlivo-Origin": "cf-autonomous-edge",
+      },
+    });
+  }
   if (safePath === "/api/ios/version") {
-    const rv = env?.ASSETS ? await env.ASSETS.fetch(new Request("https://assets.local/ios_version.json")) : null;
-    if (rv?.ok) return edgeJson(await rv.json());
+    let meta = { ...DEFAULT_IOS_VERSION };
+    if (env?.ASSETS) {
+      const rv = await env.ASSETS.fetch(new Request("https://assets.local/ios_version.json")).catch(() => null);
+      if (rv?.ok) {
+        const parsed = await rv.json().catch(() => null);
+        if (parsed && typeof parsed === "object") meta = { ...meta, ...parsed };
+      }
+    }
+    return new Response(request.method === "HEAD" ? null : JSON.stringify(meta), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Access-Control-Allow-Origin": "*",
+        "X-Content-Type-Options": "nosniff",
+        "X-Watchlivo-Origin": "cf-autonomous-edge",
+      },
+    });
+  }
+  if (safePath === "/api/ios/manifest.plist") {
+    let meta = { ...DEFAULT_IOS_VERSION };
+    if (env?.ASSETS) {
+      const rv = await env.ASSETS.fetch(new Request("https://assets.local/ios_version.json")).catch(() => null);
+      if (rv?.ok) {
+        const parsed = await rv.json().catch(() => null);
+        if (parsed && typeof parsed === "object") meta = { ...meta, ...parsed };
+      }
+    }
+    const verName = xmlEscapeEdge(meta.versionName || "2.2.11");
+    const bundleId = xmlEscapeEdge(meta.bundleId || "online.watchlivo.app");
+    const ipaUrl = xmlEscapeEdge(meta.ipaUrl || "https://watchlivo.online/download/ipa");
+    const plistXml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>items</key>
+  <array>
+    <dict>
+      <key>assets</key>
+      <array>
+        <dict>
+          <key>kind</key>
+          <string>software-package</string>
+          <key>url</key>
+          <string>${ipaUrl}</string>
+        </dict>
+        <dict>
+          <key>kind</key>
+          <string>display-image</string>
+          <key>url</key>
+          <string>https://watchlivo.online/static/watchlivo-icon-192.png</string>
+        </dict>
+        <dict>
+          <key>kind</key>
+          <string>full-size-image</string>
+          <key>url</key>
+          <string>https://watchlivo.online/static/watchlivo-icon-512.png</string>
+        </dict>
+      </array>
+      <key>metadata</key>
+      <dict>
+        <key>bundle-identifier</key>
+        <string>${bundleId}</string>
+        <key>bundle-version</key>
+        <string>${verName}</string>
+        <key>kind</key>
+        <string>software</string>
+        <key>title</key>
+        <string>Watchlivo</string>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>`;
+    return new Response(request.method === "HEAD" ? null : plistXml, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/xml; charset=utf-8",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Access-Control-Allow-Origin": "*",
+        "X-Content-Type-Options": "nosniff",
+        "X-Watchlivo-Origin": "cf-autonomous-edge",
+      },
+    });
   }
   if (safePath === "/desktop-auth.html" || safePath === "/static/desktop-auth.html") {
     if (env?.ASSETS) {
@@ -2471,7 +3005,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
 
   // 4. Health & Diagnostics
   if (safePath === "/health" || safePath === "/api/health" || safePath === "/api/rave/server-health") {
-    return edgeJson({ ok: true, version: boot.version, mode: "cf-autonomous-edge", sharedStore: true, vercel: false, activeRooms: boot.curatedRooms.length });
+    const resp = edgeJson({ ok: true, version: "20261124_v239", mode: "cf-autonomous-edge", sharedStore: true, vercel: false, activeRooms: boot.curatedRooms.length });
+    return request.method === "HEAD" ? new Response(null, { status: 200, headers: resp.headers }) : resp;
   }
 
   // 5. Catalog, Search & Streams (Origin/Bot Shield + Signed Token + KV Takedown Filter)
@@ -2548,9 +3083,23 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     return edgeJson(res);
   }
   if (safePath === "/api/rave/supersearch") {
-    const res = await handleEdgeCatalogSearch(boot, url, env);
+    const rawQ = (url.searchParams.get("q") || url.searchParams.get("query") || "").trim();
+    const normQ = normalizeSearchText(rawQ);
+    if (!rawQ || !normQ) {
+      return edgeJson({ query: rawQ, tmdb: [], justwatch: [], youtube: [], items: [] });
+    }
+    const ytPromise = normQ.length >= 2
+      ? Promise.race([
+          ytSearchEdge(rawQ).catch(() => []),
+          new Promise((resolve) => setTimeout(() => resolve([]), 4500)),
+        ])
+      : Promise.resolve([]);
+    const [res, ytItems] = await Promise.all([
+      handleEdgeCatalogSearch(boot, url, env),
+      ytPromise,
+    ]);
     const filtered = blockedSet.size ? (res.items || []).filter((it) => !isItemBlocked(it, blockedSet)) : (res.items || []);
-    return edgeJson({ query: res.query || "", tmdb: filtered, justwatch: [], youtube: [], items: filtered });
+    return edgeJson({ query: res.query || rawQ, tmdb: filtered, justwatch: [], youtube: Array.isArray(ytItems) ? ytItems : [], items: filtered });
   }
   if (safePath === "/api/rave/new-releases") {
     if (request.method === "POST") {
@@ -2655,7 +3204,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   }
   if (safePath === "/api/rave/latest-episodes") {
     const forceRefresh = url.searchParams.get("refresh") === "1";
-    const kvCacheKey = "live:latest_vizyon_eps_v2";
+    const kvCacheKey = "live:latest_vizyon_eps_v3";
+    const EXCLUDED_EP_GENRES = new Set([10763, 10764, 10766, 10767]);
     const filterBlocked = (arr) => (blockedSet.size ? arr.filter((it) => it && !isItemBlocked(it, blockedSet)) : arr.filter(Boolean));
     if (!forceRefresh && env?.WATCHLIVO_KV) {
       const cached = await env.WATCHLIVO_KV.get(kvCacheKey, "json").catch(() => null);
@@ -2679,10 +3229,12 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       }
     };
 
-    const [liveVizyonMovies, discVod, onAir, acLatest] = await Promise.all([
+    const [liveVizyonMovies, discVod, onAir, trOnAir, popOnAir, acLatest] = await Promise.all([
       fetchLiveSinemaccVizyonMovies(env, { forceRefresh, maxItems: 10 }).catch(() => []),
       fetchJsonSafe(`https://api.themoviedb.org/3/discover/movie?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&primary_release_date.gte=${cutoffDate}&primary_release_date.lte=${vodCutoffDate}&vote_count.gte=40&sort_by=popularity.desc&page=1`),
       fetchJsonSafe(`https://api.themoviedb.org/3/tv/on_the_air?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&page=1`),
+      fetchJsonSafe(`https://api.themoviedb.org/3/discover/tv?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&with_original_language=tr&without_genres=10763,10764,10766,10767&air_date.gte=${cutoffDate}&air_date.lte=${todayIso}&sort_by=popularity.desc&page=1`),
+      fetchJsonSafe(`https://api.themoviedb.org/3/discover/tv?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&without_genres=10763,10764,10766,10767&vote_count.gte=40&air_date.gte=${cutoffDate}&air_date.lte=${todayIso}&sort_by=popularity.desc&page=1`),
       fetchJsonSafe("https://animecix.tv/secure/last-episodes?page=1&perPage=10", { Referer: "https://animecix.tv/", Accept: "application/json" }),
     ]);
 
@@ -2694,7 +3246,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       const mk = `t:${normalizeSearchText(lm.title)}`;
       if (seenMov.has(mk)) continue;
       seenMov.add(mk);
-      freshMovies.push(lm);
+      freshMovies.push({ ...lm, streamReady: lm.streamReady !== false });
       if (freshMovies.length >= 8) break;
     }
     if (freshMovies.length < 8) {
@@ -2715,6 +3267,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
           title: String(m.title || m.original_title || "").trim(),
           originalTitle: String(m.original_title || m.title || "").trim(),
           year: yr,
+          origLang: String(m.original_language || "").toLowerCase(),
           rating: Number(Number(m.vote_average || 0).toFixed(1)) || 7.2,
           poster: `https://image.tmdb.org/t/p/w342${m.poster_path}`,
           backdrop: m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : `https://image.tmdb.org/t/p/w342${m.poster_path}`,
@@ -2723,16 +3276,40 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
           episodeLabel: `🎬 VİZYON ${yr}`,
           sourceBadge: "🍿 Yeni Vizyon Filmi",
           provider: "cinema",
+          streamReady: true,
         });
         if (freshMovies.length >= 8) break;
       }
     }
 
-    // 2. Currently airing TV series with REAL last_episode_to_air season & episode numbers
-    const airCands = (onAir?.results || [])
-      .filter((t) => t && t.id && t.poster_path && Number(t.vote_count || 0) >= 20 && !String(t.original_language || "").match(/^(zh|th|vi|tl)$/i))
-      .sort((a, b) => Number(b.popularity || 0) - Number(a.popularity || 0))
-      .slice(0, 8);
+    // 2. Currently airing TV series with REAL last_episode_to_air season & episode numbers (no talk/reality/soap/news)
+    const bootPlayableTids = new Set(
+      (Array.isArray(boot.catalog) ? boot.catalog : [])
+        .map((x) => String(x?.tmdbId || "").trim())
+        .filter(Boolean)
+    );
+    const mergedAirMap = new Map();
+    for (const pool of [trOnAir?.results || [], popOnAir?.results || [], onAir?.results || []]) {
+      for (const t of pool) {
+        if (!t || !t.id || !t.poster_path) continue;
+        if (Array.isArray(t.genre_ids) && t.genre_ids.some((g) => EXCLUDED_EP_GENRES.has(Number(g)))) continue;
+        if (String(t.original_language || "").match(/^(zh|th|vi|tl)$/i)) continue;
+        const isTrOrPlayable = String(t.original_language || "").toLowerCase() === "tr" || bootPlayableTids.has(String(t.id));
+        if (!isTrOrPlayable && Number(t.vote_count || 0) < 20) continue;
+        if (!mergedAirMap.has(String(t.id))) mergedAirMap.set(String(t.id), t);
+      }
+    }
+    const airCands = Array.from(mergedAirMap.values())
+      .sort((a, b) => {
+        const aTr = String(a.original_language || "").toLowerCase() === "tr" ? 1 : 0;
+        const bTr = String(b.original_language || "").toLowerCase() === "tr" ? 1 : 0;
+        if (bTr !== aTr) return bTr - aTr;
+        const aPlay = bootPlayableTids.has(String(a.id)) ? 1 : 0;
+        const bPlay = bootPlayableTids.has(String(b.id)) ? 1 : 0;
+        if (bPlay !== aPlay) return bPlay - aPlay;
+        return Number(b.popularity || 0) - Number(a.popularity || 0);
+      })
+      .slice(0, 12);
     const tvDetails = await Promise.all(
       airCands.map((t) => fetchJsonSafe(`https://api.themoviedb.org/3/tv/${t.id}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR`, {}, 3500))
     );
@@ -2740,6 +3317,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const seenTv = new Set();
     for (const d of tvDetails) {
       if (!d || !d.id || !d.poster_path) continue;
+      if (Array.isArray(d.genres) && d.genres.some((g) => EXCLUDED_EP_GENRES.has(Number(g?.id ?? g)))) continue;
+      if (Array.isArray(d.genre_ids) && d.genre_ids.some((g) => EXCLUDED_EP_GENRES.has(Number(g)))) continue;
       const le = d.last_episode_to_air;
       const sNum = Number(le?.season_number || 0);
       const eNum = Number(le?.episode_number || 0);
@@ -2752,7 +3331,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       const yr = String(d.first_air_date || "").slice(0, 4) || todayIso.slice(0, 4);
       const stillPath = le?.still_path || d.backdrop_path || d.poster_path;
       const epTitle = String(le?.name || "").trim();
-      const cleanEpTitle = epTitle && !/^bölüm\s*\d+$/i.test(epTitle) && !/^episode\s*\d+$/i.test(epTitle) ? epTitle : "";
+      const isGenericEp = /^(?:\d+\.\s*bölüm|bölüm\s*\d+|episode\s*\d+|ep\.?\s*\d+|\d+\.\s*sezon\s*\d+\.\s*bölüm)$/i.test(epTitle);
+      const cleanEpTitle = epTitle && !isGenericEp ? epTitle : "";
       freshTvEps.push({
         id: `tmdb-tv-${tid}-s${sNum}e${eNum}`,
         tmdbId: tid,
@@ -2760,6 +3340,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
         title: String(d.name || d.original_name || "").trim(),
         originalTitle: String(d.original_name || d.name || "").trim(),
         year: yr,
+        origLang: String(d.original_language || "").toLowerCase(),
+        rating: Number(Number(d.vote_average || 0).toFixed(1)) || 7.5,
         season: sNum,
         episode: eNum,
         episodeLabel: `S${sNum}:B${eNum}`,
@@ -2770,6 +3352,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
         still: stillPath ? `https://image.tmdb.org/t/p/w500${stillPath}` : `https://image.tmdb.org/t/p/w342${d.poster_path}`,
         sourceBadge: "📺 Yeni Bölüm",
         provider: "cinema",
+        streamReady: true,
       });
       if (freshTvEps.length >= 8) break;
     }
@@ -2794,6 +3377,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
         title: aTitle,
         originalTitle: aTitle,
         year: todayIso.slice(0, 4),
+        origLang: "ja",
+        rating: 8.0,
         season: Math.max(1, sNum),
         episode: eNum,
         episodeLabel: `S${Math.max(1, sNum)}:B${eNum}`,
@@ -2802,6 +3387,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
         sourceBadge: "⚡ Yeni Anime Bölümü",
         provider: "anime",
         catalogProvider: "anime",
+        streamReady: true,
       });
       if (freshAnimeEps.length >= 4) break;
     }
@@ -2862,8 +3448,10 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   }
   if (isSeasonsPath) {
     const rawId = (url.searchParams.get("id") || "").trim();
+    const rawTidIn = (url.searchParams.get("tmdbId") || "").trim();
     const tidMatch = rawId.match(/^(?:tmdb-(?:tv|movie)-)?(\d+)$/i);
-    let tid = (url.searchParams.get("tmdbId") || (tidMatch ? tidMatch[1] : "")).trim();
+    const acMatch = rawId.match(/^ac-(\d+)(?:-\d+)?$/) || rawTidIn.match(/^ac-(\d+)(?:-\d+)?$/);
+    let tid = (/^\d+$/.test(rawTidIn) ? rawTidIn : (tidMatch ? tidMatch[1] : "")).trim();
     const isMoviePrefix = /^tmdb-movie-/i.test(rawId);
     const isTvPrefix = /^tmdb-tv-/i.test(rawId);
     const reqMediaType = (url.searchParams.get("mediaType") || url.searchParams.get("type") || "").trim().toLowerCase();
@@ -2871,8 +3459,9 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       return edgeJson({ ok: true, tmdbId: tid, mediaType: "movie", seasons: [], episodes: [] });
     }
     const qTitle = (url.searchParams.get("title") || "").trim();
-    const sNum = Math.max(1, Number(url.searchParams.get("season") || url.searchParams.get("s") || 1) || 1);
-    const cacheKey = `seasons:v2:${tid || rawId || qTitle.toLowerCase()}:${sNum}`;
+    const rawSParam = (url.searchParams.get("season") ?? url.searchParams.get("s") ?? "").trim();
+    const sNum = /^\d+$/.test(rawSParam) ? Math.max(0, Number(rawSParam)) : 1;
+    const cacheKey = `seasons:v3:${tid || rawId || qTitle.toLowerCase()}:${sNum}`;
     if (env?.WATCHLIVO_KV) {
       const cached = await env.WATCHLIVO_KV.get(cacheKey, "json").catch(() => null);
       if (cached && !cached.isFallback && Array.isArray(cached.seasons) && cached.seasons.length && Array.isArray(cached.episodes) && cached.episodes.length) {
@@ -2882,7 +3471,6 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const apiKey = String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim();
     let acTitleObj = null;
     try {
-      const acMatch = rawId.match(/^ac-(\d+)(?:-\d+)?$/);
       if (acMatch) {
         const acRes = await fetch(`https://animecix.tv/secure/titles/${acMatch[1]}?seasonNumber=${sNum}`, {
           headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://animecix.tv/" },
@@ -2909,47 +3497,103 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       }
       let seasons = [];
       let episodes = [];
+      let tvMeta = {};
       if (/^\d+$/.test(tid)) {
         const [tvResp, seaResp] = await Promise.all([
-          fetch(`https://api.themoviedb.org/3/tv/${tid}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR`, { signal: AbortSignal.timeout(3500) }).catch(() => null),
+          fetch(`https://api.themoviedb.org/3/tv/${tid}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&append_to_response=external_ids`, { signal: AbortSignal.timeout(3500) }).catch(() => null),
           fetch(`https://api.themoviedb.org/3/tv/${tid}/season/${sNum}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR`, { signal: AbortSignal.timeout(3500) }).catch(() => null),
         ]);
         const tvJson = tvResp?.ok ? await tvResp.json().catch(() => ({})) : {};
         let seaJson = seaResp?.ok ? await seaResp.json().catch(() => ({})) : {};
-        if (!Array.isArray(seaJson.episodes) || !seaJson.episodes.length) {
+        let enJson = null;
+        const needEnFallback = !Array.isArray(seaJson.episodes) || !seaJson.episodes.length || seaJson.episodes.some((ep) => !ep?.overview || /^bölüm\s*\d+$/i.test(String(ep?.name || "").trim()));
+        if (needEnFallback) {
           const enResp = await fetch(`https://api.themoviedb.org/3/tv/${tid}/season/${sNum}?api_key=${encodeURIComponent(apiKey)}&language=en-US`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
           if (enResp && enResp.ok) {
-            const enJson = await enResp.json().catch(() => null);
-            if (Array.isArray(enJson?.episodes) && enJson.episodes.length) seaJson = enJson;
+            enJson = await enResp.json().catch(() => null);
+            if ((!Array.isArray(seaJson.episodes) || !seaJson.episodes.length) && Array.isArray(enJson?.episodes) && enJson.episodes.length) {
+              seaJson = enJson;
+            }
           }
         }
-        seasons = (tvJson.seasons || []).filter((x) => Number(x.season_number) > 0 && Number(x.episode_count || 0) > 0).map((x) => ({
-          season: x.season_number,
-          name: x.name || `${x.season_number}. Sezon`,
-          episodeCount: x.episode_count || 1,
-        }));
-        episodes = (seaJson.episodes || []).map((ep) => ({
-          episode: ep.episode_number,
-          name: ep.name || `${ep.episode_number}. Bölüm`,
-          overview: ep.overview || "",
-          still: ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : "",
-        }));
-      }
-      const acSeasons = (acTitleObj && Array.isArray(acTitleObj.seasons))
-        ? acTitleObj.seasons.filter((x) => Number(x.number || x.season_number || 0) > 0).map((x) => {
-            const num = Number(x.number || x.season_number);
-            return {
-              season: num,
-              name: x.name || `${num}. Sezon`,
-              episodeCount: Number(x.episodes_count || x.episode_count || 1),
-            };
+        const enEpMap = new Map(Array.isArray(enJson?.episodes) ? enJson.episodes.map((ep) => [Number(ep.episode_number), ep]) : []);
+        const epRunArr = Array.isArray(tvJson.episode_run_time) ? tvJson.episode_run_time.filter((x) => Number(x) > 0) : [];
+        const defaultRt = Number(epRunArr[0] || 45) || 45;
+        tvMeta = {
+          imdbId: String(tvJson?.external_ids?.imdb_id || "").trim(),
+          title: String(tvJson?.name || tvJson?.original_name || "").trim(),
+          originalTitle: String(tvJson?.original_name || tvJson?.name || "").trim(),
+          year: String(tvJson?.first_air_date || "").slice(0, 4),
+          rating: tvJson?.vote_average ? Math.round(Number(tvJson.vote_average) * 10) / 10 : 0,
+          overview: String(tvJson?.overview || "").trim(),
+          poster: tvJson?.poster_path ? `https://image.tmdb.org/t/p/w500${tvJson.poster_path}` : "",
+          backdrop: tvJson?.backdrop_path ? `https://image.tmdb.org/t/p/w780${tvJson.backdrop_path}` : "",
+          runtime: defaultRt,
+        };
+        seasons = (tvJson.seasons || [])
+          .filter((x) => Number(x.season_number) >= 0 && Number(x.episode_count || 0) > 0)
+          .sort((a, b) => {
+            const sa = Number(a.season_number);
+            const sb = Number(b.season_number);
+            if (sa === 0 && sb !== 0) return 1;
+            if (sb === 0 && sa !== 0) return -1;
+            return sa - sb;
           })
+          .map((x) => {
+            const sno = Number(x.season_number);
+            const cnt = Number(x.episode_count || 1);
+            return {
+              season: sno,
+              name: sno === 0 ? (x.name || "Özel Bölümler") : (x.name || `${sno}. Sezon`),
+              count: cnt,
+              episodeCount: cnt,
+            };
+          });
+        episodes = (seaJson.episodes || []).map((ep) => {
+          const enEp = enEpMap.get(Number(ep.episode_number));
+          const epName = String(ep.name || "").trim() || String(enEp?.name || "").trim() || `${ep.episode_number}. Bölüm`;
+          const epOv = String(ep.overview || "").trim() || String(enEp?.overview || "").trim();
+          return {
+            episode: ep.episode_number,
+            season: sNum,
+            name: epName,
+            overview: epOv,
+            runtime: Number(ep.runtime || enEp?.runtime || defaultRt) || defaultRt,
+            airDate: String(ep.air_date || enEp?.air_date || "").slice(0, 10),
+            still: ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : (enEp?.still_path ? `https://image.tmdb.org/t/p/w300${enEp.still_path}` : ""),
+          };
+        });
+      }
+      const acDefaultRt = Number(acTitleObj?.runtime || 24) || 24;
+      const acSeasons = (acTitleObj && Array.isArray(acTitleObj.seasons))
+        ? acTitleObj.seasons
+            .filter((x) => Number(x.number ?? x.season_number ?? 0) >= 0 && Number(x.episodes_count ?? x.episode_count ?? 1) > 0)
+            .sort((a, b) => {
+              const sa = Number(a.number ?? a.season_number ?? 0);
+              const sb = Number(b.number ?? b.season_number ?? 0);
+              if (sa === 0 && sb !== 0) return 1;
+              if (sb === 0 && sa !== 0) return -1;
+              return sa - sb;
+            })
+            .map((x) => {
+              const num = Number(x.number ?? x.season_number ?? 0);
+              const cnt = Number(x.episodes_count || x.episode_count || 1);
+              return {
+                season: num,
+                name: num === 0 ? (x.name || "Özel Bölümler") : (x.name || `${num}. Sezon`),
+                count: cnt,
+                episodeCount: cnt,
+              };
+            })
         : [];
       const acEpisodes = acTitleObj?.season?.episodes?.length
         ? acTitleObj.season.episodes.map((ep, idx) => ({
             episode: Number(ep.episode_number || idx + 1),
+            season: sNum,
             name: ep.name || `${Number(ep.episode_number || idx + 1)}. Bölüm`,
             overview: ep.description || "",
+            runtime: Number(ep.runtime || acDefaultRt) || acDefaultRt,
+            airDate: String(ep.release_date || ep.air_date || "").slice(0, 10),
             still: ep.poster || "",
           }))
         : [];
@@ -2960,12 +3604,36 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       if ((!episodes.length || preferAc) && acEpisodes.length) {
         episodes = acEpisodes;
       }
+      if (acTitleObj && !tvMeta.title) {
+        tvMeta = {
+          imdbId: String(acTitleObj.imdb_id || "").trim(),
+          title: String(acTitleObj.name || "").trim(),
+          originalTitle: String(acTitleObj.original_title || acTitleObj.name || "").trim(),
+          year: String(acTitleObj.year || "").slice(0, 4),
+          rating: acTitleObj.rating ? Math.round(Number(acTitleObj.rating) * 10) / 10 : 0,
+          overview: String(acTitleObj.description || "").trim(),
+          poster: String(acTitleObj.poster || ""),
+          backdrop: String(acTitleObj.backdrop || acTitleObj.poster || ""),
+          runtime: acDefaultRt,
+        };
+      }
       const isFallback = !seasons.length && !episodes.length;
+      const fbCount = episodes.length || 1;
       const out = {
         ok: true,
         tmdbId: tid,
-        seasons: seasons.length ? seasons : [{ season: 1, name: "1. Sezon", episodeCount: episodes.length || 1 }],
-        episodes: episodes.length ? episodes : [{ episode: 1, name: "1. Bölüm" }],
+        imdbId: tvMeta.imdbId || "",
+        mediaType: "tv",
+        title: tvMeta.title || qTitle,
+        originalTitle: tvMeta.originalTitle || tvMeta.title || qTitle,
+        year: tvMeta.year || "",
+        rating: tvMeta.rating || 0,
+        overview: tvMeta.overview || "",
+        poster: tvMeta.poster || "",
+        backdrop: tvMeta.backdrop || "",
+        runtime: tvMeta.runtime || 45,
+        seasons: seasons.length ? seasons : [{ season: 1, name: "1. Sezon", count: fbCount, episodeCount: fbCount }],
+        episodes: episodes.length ? episodes : [{ episode: 1, season: sNum, name: "1. Bölüm", runtime: tvMeta.runtime || 45, airDate: "" }],
         ...(isFallback ? { isFallback: true } : {}),
       };
       if (env?.WATCHLIVO_KV && !isFallback) {
@@ -2973,7 +3641,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       }
       return edgeJson(out);
     } catch {
-      return edgeJson({ ok: true, tmdbId: tid, seasons: [{ season: 1, name: "1. Sezon", episodeCount: 1 }], episodes: [{ episode: 1, name: "1. Bölüm" }], isFallback: true });
+      return edgeJson({ ok: true, tmdbId: tid, mediaType: "tv", seasons: [{ season: 1, name: "1. Sezon", count: 1, episodeCount: 1 }], episodes: [{ episode: 1, season: sNum, name: "1. Bölüm", runtime: 45, airDate: "" }], isFallback: true });
     }
   }
   if (safePath === "/api/rave/resolve-catalog" || safePath === "/api/rave/resolve-stream") {
@@ -3001,6 +3669,96 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     let tid = tidPrefixM ? tidPrefixM[2] : "";
     let imdbId = (url.searchParams.get("imdbId") || url.searchParams.get("imdb_id") || "").trim().slice(0, 30);
     if (!/^tt\d{5,10}$/i.test(imdbId)) imdbId = "";
+    const rawVidParam = (url.searchParams.get("videoId") || url.searchParams.get("v") || "").trim().slice(0, 1500);
+    const rawStreamUrl = (url.searchParams.get("url") || "").trim().slice(0, 1500);
+    let ytVid = extractYtVidAny(rawVidParam);
+    if (!ytVid && !tid && !imdbId && rawStreamUrl) {
+      ytVid = extractYtVidAny(rawStreamUrl);
+    }
+    const bypassSubCache = url.searchParams.get("refresh") === "1" || url.searchParams.get("nocache") === "1";
+    if (ytVid && !tid && !imdbId) {
+      const ytSubKey = `subs:v4:yt:${ytVid}`;
+      if (!bypassSubCache && env?.WATCHLIVO_KV) {
+        const cachedYt = await env.WATCHLIVO_KV.get(ytSubKey, "json").catch(() => null);
+        if (cachedYt && Array.isArray(cachedYt.subtitleTracks) && cachedYt.subtitleTracks.length) {
+          return edgeJson(cachedYt);
+        }
+      }
+      const fetchYtPlayerCaptions = async (clientCtx) => {
+        try {
+          const pr = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "User-Agent": EDGE_UA, "Accept-Language": "tr-TR,tr;q=0.9" },
+            body: JSON.stringify({ context: { client: clientCtx }, videoId: ytVid }),
+            signal: AbortSignal.timeout(4000),
+          });
+          if (!pr.ok) return [];
+          const pj = await pr.json().catch(() => null);
+          const tracks = pj?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+          return Array.isArray(tracks) ? tracks : [];
+        } catch {
+          return [];
+        }
+      };
+      let capTracks = await fetchYtPlayerCaptions({ clientName: "IOS", clientVersion: "20.03.02", hl: "tr", gl: "TR" });
+      if (!capTracks.length) {
+        capTracks = await fetchYtPlayerCaptions({ clientName: "WEB", clientVersion: "2.20250201.01.00", hl: "tr", gl: "TR" });
+      }
+      const ytSubs = [];
+      const seenYtLang = new Set();
+      let hasTrYt = false;
+      let bestSrcVttUrl = "";
+      for (const trk of capTracks) {
+        const baseUrl = String(trk?.baseUrl || "").trim();
+        if (!baseUrl || !isPublicHttpUrl(baseUrl)) continue;
+        const lcodeRaw = String(trk?.languageCode || "").trim().toLowerCase();
+        const lcodeShort = lcodeRaw.split("-")[0] || "en";
+        const isAsr = trk?.kind === "asr";
+        const nameTxt = String(trk?.name?.simpleText || (trk?.name?.runs || []).map((x) => x.text || "").join("") || "").trim();
+        const vttRawU = baseUrl.includes("fmt=vtt") ? baseUrl : `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}fmt=vtt`;
+        if (lcodeShort === "tr") hasTrYt = true;
+        if (!bestSrcVttUrl && (lcodeShort === "en" || !isAsr)) bestSrcVttUrl = vttRawU;
+        const dedupKey = `${lcodeShort}:${isAsr ? "asr" : "man"}`;
+        if (seenYtLang.has(dedupKey)) continue;
+        seenYtLang.add(dedupKey);
+        ytSubs.push({
+          id: `yt-${lcodeShort}${isAsr ? "-asr" : ""}`,
+          lang: lcodeShort,
+          ytLangCode: lcodeRaw || lcodeShort,
+          label: formatSubLabel(lcodeShort, isAsr ? "YouTube Otomatik" : (nameTxt || "YouTube")),
+          url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(vttRawU)}&lang=${encodeURIComponent(lcodeShort)}`,
+          kind: "subtitles",
+          source: isAsr ? "youtube-asr" : "youtube",
+        });
+      }
+      if (!bestSrcVttUrl && ytSubs.length) {
+        const firstSrc = capTracks.find((t) => t?.baseUrl && isPublicHttpUrl(t.baseUrl))?.baseUrl || "";
+        if (firstSrc) bestSrcVttUrl = firstSrc.includes("fmt=vtt") ? firstSrc : `${firstSrc}${firstSrc.includes("?") ? "&" : "?"}fmt=vtt`;
+      }
+      if (!hasTrYt && bestSrcVttUrl) {
+        ytSubs.unshift({
+          id: "yt-tr-auto",
+          lang: "tr",
+          ytLangCode: "tr",
+          label: "🇹🇷 Türkçe (YouTube Otomatik Çeviri)",
+          url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(bestSrcVttUrl)}&lang=tr&translate=tr`,
+          kind: "subtitles",
+          source: "ai-tr",
+        });
+      }
+      const ytRank = (s) => {
+        if (s.lang === "tr" && s.source !== "ai-tr") return 0;
+        if (s.lang === "tr") return 1;
+        if (s.lang === "en") return 2;
+        return 3;
+      };
+      ytSubs.sort((a, b) => ytRank(a) - ytRank(b));
+      const ytPayload = { ok: true, subtitleTracks: ytSubs, subtitles: ytSubs, audioTracks: [], intro: null, mode: "cf-autonomous-edge" };
+      if (ytSubs.length && env?.WATCHLIVO_KV) {
+        await env.WATCHLIVO_KV.put(ytSubKey, JSON.stringify(ytPayload), { expirationTtl: 900 }).catch(() => {});
+      }
+      return edgeJson(ytPayload);
+    }
     const mtypeParam = (url.searchParams.get("mediaType") || url.searchParams.get("type") || url.searchParams.get("mtype") || "").trim().toLowerCase();
     const hasExplicitSe = Boolean(url.searchParams.get("season") || url.searchParams.get("s") || url.searchParams.get("episode") || url.searchParams.get("e"));
     let mtype = (mtypeParam === "tv" || mtypeParam === "series" || mtypeParam === "show" || (!mtypeParam && (tidPrefixM?.[1]?.toLowerCase() === "tv" || hasExplicitSe))) ? "tv" : "movie";
@@ -3008,7 +3766,6 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const e = Math.max(1, Number(url.searchParams.get("episode") || url.searchParams.get("e") || 1) || 1);
     const reqTitleSub = (url.searchParams.get("title") || "").trim().slice(0, 120);
     const reqDurSec = Number(url.searchParams.get("duration") || url.searchParams.get("dur") || 0) || 0;
-    const bypassSubCache = url.searchParams.get("refresh") === "1" || url.searchParams.get("nocache") === "1";
     const subKey = `subs:v4:${mtype}:${tid || imdbId || normalizeSearchText(reqTitleSub).slice(0, 32)}:${s}:${e}`;
     if (!bypassSubCache && (tid || imdbId) && env?.WATCHLIVO_KV) {
       const cachedSubs = await env.WATCHLIVO_KV.get(subKey, "json").catch(() => null);
@@ -3457,10 +4214,94 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   }
   if (safePath === "/api/auth/me" && request.method !== "DELETE") {
     const authRes = await resolveMemberUser(request, env);
+    if (authRes.storageError) return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
     if (authRes.user) return edgeJson({ ok: true, authenticated: true, user: normalizeMemberUserObj(authRes.user) });
     if (authRes.isGuest) return edgeJson({ ok: true, authenticated: false, user: null });
     if (authRes.invalidToken) return edgeJson({ ok: false, authenticated: false, user: null, error: "invalid_session" }, 401);
     return edgeJson({ ok: true, authenticated: false, user: null });
+  }
+  if (safePath === "/api/auth/export" && request.method === "GET") {
+    const authRes = await resolveMemberUser(request, env);
+    if (authRes.storageError) return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    if (!authRes.user || !env?.WATCHLIVO_KV) return edgeJson({ ok: false, error: "Oturum gerekli." }, 401);
+    const email = String(authRes.user.email || "").toLowerCase();
+    const uid = String(authRes.user.uid || authRes.user.id || "");
+    const [acctRes, socRes, progRes, wlRes, mhRes, ytpRes, prefsRes] = await Promise.all([
+      email ? kvReadStrict(env.WATCHLIVO_KV, `acct:${email}`, "json") : Promise.resolve({ value: null, storageError: false }),
+      kvReadStrict(env.WATCHLIVO_KV, `soc:u:${uid}`, "json"),
+      kvReadStrict(env.WATCHLIVO_KV, `ulist:${uid}:progress`, "json"),
+      kvReadStrict(env.WATCHLIVO_KV, `ulist:${uid}:watchlist`, "json"),
+      kvReadStrict(env.WATCHLIVO_KV, `ulist:${uid}:music-history`, "json"),
+      kvReadStrict(env.WATCHLIVO_KV, `ulist:${uid}:ytprefs`, "json"),
+      kvReadStrict(env.WATCHLIVO_KV, `ulist:${uid}:prefs`, "json"),
+    ]);
+    if (acctRes.storageError) return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    const safeUser = acctRes.value?.user ? normalizeMemberUserObj(acctRes.value.user, email) : normalizeMemberUserObj(authRes.user, email);
+    if (acctRes.value && !acctRes.value.passHash && safeUser) safeUser.passwordSet = false;
+    return edgeJson({
+      ok: true,
+      exportedAt: new Date().toISOString(),
+      schemaVersion: "1.0",
+      user: safeUser,
+      preferences: prefsRes.value && typeof prefsRes.value === "object" ? prefsRes.value : {},
+      social: socRes.value && typeof socRes.value === "object" ? socRes.value : null,
+      progress: Array.isArray(progRes.value) ? progRes.value : (progRes.value?.items || []),
+      watchlist: Array.isArray(wlRes.value) ? wlRes.value : (wlRes.value?.items || []),
+      musicHistory: Array.isArray(mhRes.value) ? mhRes.value : (mhRes.value?.items || []),
+      ytPrefs: ytpRes.value && typeof ytpRes.value === "object" ? ytpRes.value : defaultYtPrefs(),
+    });
+  }
+  if (safePath === "/api/auth/sessions" && request.method === "GET") {
+    const authRes = await resolveMemberUser(request, env);
+    if (authRes.storageError) return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    if (!authRes.user || !env?.WATCHLIVO_KV) return edgeJson({ ok: false, error: "Oturum gerekli." }, 401);
+    const email = String(authRes.user.email || "").toLowerCase();
+    const uid = String(authRes.user.uid || authRes.user.id || "");
+    const [acctRes, sessListRes] = await Promise.all([
+      email ? kvReadStrict(env.WATCHLIVO_KV, `acct:${email}`, "json") : Promise.resolve({ value: null, storageError: false }),
+      kvReadStrict(env.WATCHLIVO_KV, `acct_sessions:${uid}`, "json"),
+    ]);
+    if (acctRes.storageError || sessListRes.storageError) {
+      return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    }
+    const currentSv = Number(acctRes.value?.sv || 0);
+    const nowS = Math.floor(Date.now() / 1000);
+    let currentSessionId = "";
+    let curClaims = null;
+    if (authRes.token && authRes.token.startsWith("wl2.")) {
+      curClaims = await verifyMemberSessionToken(authRes.token, env);
+      currentSessionId = String(curClaims?.jti || "");
+    }
+    if (!currentSessionId && authRes.token) {
+      currentSessionId = (await sha256Hex(authRes.token)).slice(0, 12);
+    }
+    const rawList = Array.isArray(sessListRes.value) ? sessListRes.value : [];
+    const active = rawList
+      .filter((s) => s && typeof s === "object" && Number(s.sv || 0) === currentSv && Number(s.exp || 0) > nowS)
+      .map((s) => ({
+        id: String(s.id || ""),
+        device: String(s.device || "Web Tarayıcı"),
+        userAgent: String(s.userAgent || ""),
+        authProvider: String(s.authProvider || authRes.user.authProvider || "email"),
+        issuedAt: Number(s.issuedAt || 0),
+        lastUsedAt: Number(s.lastUsedAt || s.issuedAt || nowS),
+        exp: Number(s.exp || 0),
+        current: Boolean(currentSessionId && s.id === currentSessionId),
+      }));
+    if (currentSessionId && !active.some((s) => s.id === currentSessionId)) {
+      const ua = String(request.headers.get("User-Agent") || "").slice(0, 180);
+      active.unshift({
+        id: currentSessionId,
+        device: parseSessionDeviceLabel(ua),
+        userAgent: ua,
+        authProvider: String(curClaims?.authProvider || authRes.user.authProvider || "email"),
+        issuedAt: curClaims ? Math.max(0, Number(curClaims.exp || 0) - 2592000) : nowS,
+        lastUsedAt: nowS,
+        exp: Number(curClaims?.exp || nowS + 2592000),
+        current: true,
+      });
+    }
+    return edgeJson({ ok: true, sessions: active, currentSessionId });
   }
   if (safePath === "/api/auth/register" && request.method === "POST" && env?.WATCHLIVO_KV) {
     const b = await request.json().catch(() => ({}));
@@ -3519,7 +4360,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     }
     await upsertSocialDir(env, user);
     await ensureUserSocial(env, uid, user, true);
-    const authToken = await issueAuthSessionToken(user, 0, env);
+    const authToken = await issueAuthSessionToken(user, 0, env, request);
     return edgeJson({ ok: true, authToken, user }, 200, {
       "Set-Cookie": `wl_auth=${encodeURIComponent(authToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     });
@@ -3534,6 +4375,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       return edgeJson({ ok: false, error: "E-posta veya şifre hatalı." }, 401);
     }
     const normUser = normalizeMemberUserObj(rec.user, ident);
+    if (!rec.passHash && normUser) normUser.passwordSet = false;
     let needUpdate = !rec.user?.handle || rec.user?.isGuest !== false;
     let nextHash = rec.passHash;
     if (!String(rec.passHash || "").startsWith("pbkdf2_v1$")) {
@@ -3547,7 +4389,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       await env.WATCHLIVO_KV.put(`acct_handle:${normUser.handle}`, ident).catch(() => {});
     }
     await upsertSocialDir(env, normUser);
-    const authToken = await issueAuthSessionToken(normUser, Number(rec.sv || 0), env);
+    const authToken = await issueAuthSessionToken(normUser, Number(rec.sv || 0), env, request);
     return edgeJson({ ok: true, authToken, user: normUser }, 200, {
       "Set-Cookie": `wl_auth=${encodeURIComponent(authToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     });
@@ -3620,6 +4462,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     }
     let rec = await env.WATCHLIVO_KV.get(`acct:${fbEmail}`, "json").catch(() => null);
     let user = rec?.user ? normalizeMemberUserObj(rec.user, fbEmail) : null;
+    if (rec && !rec.passHash && user) user.passwordSet = false;
     if (!user) {
       const uid = `u_${(await sha256Hex(fbEmail)).slice(0, 14)}`;
       const displayName = (fbName || String(b.name || "").trim() || fbEmail.split("@")[0] || "Kullanıcı").slice(0, 40);
@@ -3656,7 +4499,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     }
     await upsertSocialDir(env, user);
     await ensureUserSocial(env, user.uid, user, true);
-    const authToken = await issueAuthSessionToken(user, Number(rec?.sv || 0), env);
+    const authToken = await issueAuthSessionToken(user, Number(rec?.sv || 0), env, request);
     return edgeJson({ ok: true, authToken, user }, 200, {
       "Set-Cookie": `wl_auth=${encodeURIComponent(authToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     });
@@ -3669,6 +4512,15 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       if (tok.startsWith("wl2.")) {
         const revKey = `revoked:${(await sha256Hex(tok)).slice(0, 24)}`;
         await env.WATCHLIVO_KV.put(revKey, "1", { expirationTtl: 2592000 }).catch(() => {});
+        const claims = await verifyMemberSessionToken(tok, env);
+        if (claims?.uid && claims?.jti) {
+          const sessKey = `acct_sessions:${claims.uid}`;
+          const existing = await env.WATCHLIVO_KV.get(sessKey, "json").catch(() => null);
+          if (Array.isArray(existing)) {
+            const pruned = existing.filter((s) => s && s.id !== claims.jti);
+            await env.WATCHLIVO_KV.put(sessKey, JSON.stringify(pruned), { expirationTtl: 2592000 }).catch(() => {});
+          }
+        }
       }
     }
     return edgeJson({ ok: true }, 200, {
@@ -3686,18 +4538,28 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       return edgeJson({ ok: false, error: "Bu işlem için POST veya DELETE gereklidir." }, 405, { Allow: "POST, DELETE" });
     }
     const b = await request.json().catch(() => ({}));
-    const { user, token } = await resolveMemberUser(request, env, b);
+    const authRes = await resolveMemberUser(request, env, b);
+    if (authRes.storageError) {
+      return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    }
+    const { user, token } = authRes;
     if (!user || !env?.WATCHLIVO_KV) {
       return edgeJson({ ok: false, error: "Oturum doğrulanamadı." }, 401);
     }
     const email = String(user.email || "").toLowerCase();
-    const rec = email ? await env.WATCHLIVO_KV.get(`acct:${email}`, "json").catch(() => null) : null;
+    const recRes = email ? await kvReadStrict(env.WATCHLIVO_KV, `acct:${email}`, "json") : { value: null, storageError: false };
+    if (recRes.storageError) {
+      return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    }
+    const rec = recRes.value;
     if (!rec) return edgeJson({ ok: false, error: "Hesap bulunamadı." }, 401);
     if (rec.passHash) {
       const suppliedPw = String(b?.password || "");
       if (!suppliedPw || !(await verifyPasswordHash(suppliedPw, email, rec.passHash))) {
         return edgeJson({ ok: false, error: "Hesap silme işlemi için mevcut şifrenizi doğrulamalısınız." }, 401);
       }
+    } else if (b?.confirmDelete !== true) {
+      return edgeJson({ ok: false, error: "Şifresiz hesap silme işlemi için confirmDelete: true onayı gereklidir." }, 400);
     }
     const uid = String(rec.user?.uid || rec.user?.id || user.uid || user.id);
     const oldH = foldHandleBase(rec.user?.handle || user.handle || "");
@@ -3709,10 +4571,12 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       oldNameKey ? env.WATCHLIVO_KV.delete(`acct_name:${oldNameKey}`) : Promise.resolve(),
       token ? env.WATCHLIVO_KV.delete(`session:${token}`) : Promise.resolve(),
       token && token.startsWith("wl2.") ? env.WATCHLIVO_KV.put(`revoked:${(await sha256Hex(token)).slice(0, 24)}`, "1", { expirationTtl: 2592000 }) : Promise.resolve(),
+      env.WATCHLIVO_KV.delete(`acct_sessions:${uid}`),
       env.WATCHLIVO_KV.delete(`ulist:${uid}:progress`),
       env.WATCHLIVO_KV.delete(`ulist:${uid}:watchlist`),
       env.WATCHLIVO_KV.delete(`ulist:${uid}:music-history`),
       env.WATCHLIVO_KV.delete(`ulist:${uid}:ytprefs`),
+      env.WATCHLIVO_KV.delete(`ulist:${uid}:prefs`),
       env.WATCHLIVO_KV.delete(`soc:u:${uid}`),
       env.WATCHLIVO_KV.delete(`soc:pres:${uid}`),
       removeSocialDir(env, uid),
@@ -3724,14 +4588,23 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   if (safePath === "/api/auth/profile" && request.method === "POST") {
     const b = await request.json().catch(() => null);
     if (!b || typeof b !== "object") return edgeJson({ ok: false, error: "Geçersiz veri." }, 400);
-    const { user, token } = await resolveMemberUser(request, env, b);
+    const authRes = await resolveMemberUser(request, env, b);
+    if (authRes.storageError) {
+      return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    }
+    const { user, token } = authRes;
     if (!user || !env?.WATCHLIVO_KV) {
       return edgeJson({ ok: false, error: "Oturum doğrulanamadı. Lütfen tekrar giriş yapın." }, 401);
     }
     const email = String(user.email || "").toLowerCase();
-    const rec = email ? await env.WATCHLIVO_KV.get(`acct:${email}`, "json").catch(() => null) : null;
+    const recRes = email ? await kvReadStrict(env.WATCHLIVO_KV, `acct:${email}`, "json") : { value: null, storageError: false };
+    if (recRes.storageError) {
+      return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    }
+    const rec = recRes.value;
     if (!rec?.user) return edgeJson({ ok: false, error: "Hesap bulunamadı. Lütfen tekrar giriş yapın." }, 401);
     const curUser = normalizeMemberUserObj(rec.user, email);
+    if (!rec.passHash && curUser) curUser.passwordSet = false;
     if (b.name !== undefined && b.name !== null) {
       const nextName = cleanStr(b.name, 24);
       if (nextName.length < 2) return edgeJson({ ok: false, error: "Görünen ad en az 2 karakter olmalıdır." }, 400);
@@ -3788,12 +4661,20 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   if ((safePath === "/api/auth/password" || safePath === "/api/auth/change-password") && (request.method === "POST" || request.method === "PUT")) {
     const b = await request.json().catch(() => null);
     if (!b || typeof b !== "object") return edgeJson({ ok: false, error: "Geçersiz veri." }, 400);
-    const { user, token } = await resolveMemberUser(request, env, b);
+    const authRes = await resolveMemberUser(request, env, b);
+    if (authRes.storageError) {
+      return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    }
+    const { user, token } = authRes;
     if (!user || !env?.WATCHLIVO_KV) {
       return edgeJson({ ok: false, error: "Oturum doğrulanamadı. Lütfen tekrar giriş yapın." }, 401);
     }
     const email = String(user.email || "").toLowerCase();
-    const rec = email ? await env.WATCHLIVO_KV.get(`acct:${email}`, "json").catch(() => null) : null;
+    const recRes = email ? await kvReadStrict(env.WATCHLIVO_KV, `acct:${email}`, "json") : { value: null, storageError: false };
+    if (recRes.storageError) {
+      return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    }
+    const rec = recRes.value;
     if (!rec?.user) return edgeJson({ ok: false, error: "Hesap bulunamadı." }, 401);
     const curPw = String(b.currentPassword || b.oldPassword || "");
     const newPw = String(b.newPassword || b.password || "");
@@ -3813,7 +4694,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
         await env.WATCHLIVO_KV.put(`revoked:${(await sha256Hex(token)).slice(0, 24)}`, "1", { expirationTtl: 2592000 }).catch(() => {});
       }
     }
-    const newTok = await issueAuthSessionToken(normUser, nextSv, env);
+    await env.WATCHLIVO_KV.delete(`acct_sessions:${normUser.uid}`).catch(() => {});
+    const newTok = await issueAuthSessionToken(normUser, nextSv, env, request);
     return edgeJson({ ok: true, user: normUser, authToken: newTok, message: "Şifreniz başarıyla güncellendi." }, 200, {
       "Set-Cookie": `wl_auth=${encodeURIComponent(newTok)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     });
@@ -3907,15 +4789,95 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
         }
       }
       await upsertSocialDir(env, user);
-      const authToken = await issueAuthSessionToken(user, Number(rec?.sv || 0), env);
+      const authToken = await issueAuthSessionToken(user, Number(rec?.sv || 0), env, request);
       return edgeJson({ ok: true, user, authToken }, 200, {
         "Set-Cookie": `wl_auth=${encodeURIComponent(authToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
       });
     }
     return edgeJson({ ok: false, error: "Bilinmeyen işlem." }, 400);
   }
+  if (safePath === "/api/user/preferences") {
+    const authRes = await resolveMemberUser(request, env);
+    if (authRes.storageError) return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    const { user } = authRes;
+    if (!user) return edgeJson({ ok: false, authenticated: false, error: "Oturum gerekli." }, 401);
+    const prefKey = `ulist:${user.uid || user.id}:prefs`;
+    const defaultUserPrefs = {
+      theme: "dark",
+      ambient: false,
+      density: "comfortable",
+      cardStyle: "poster",
+      subSize: "md",
+      subColor: "#ffffff",
+      subDual: false,
+      subOffsetSec: 0,
+      subLang: "tr",
+      audioLang: "tr",
+      voiceDucking: true,
+      notifSoundMuted: false,
+      danmaku: true,
+      ambilight: false,
+      brightness: 100,
+      videoFit: "contain",
+      updatedAt: 0,
+    };
+    const readPrefsRes = env?.WATCHLIVO_KV ? await kvReadStrict(env.WATCHLIVO_KV, prefKey, "json") : { value: null, storageError: false };
+    if (readPrefsRes.storageError) return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    const curPrefs = { ...defaultUserPrefs, ...(readPrefsRes.value && typeof readPrefsRes.value === "object" && !Array.isArray(readPrefsRes.value) ? readPrefsRes.value : {}) };
+    if (request.method === "GET") {
+      return edgeJson({ ok: true, authenticated: true, uid: user.uid || user.id, preferences: curPrefs });
+    }
+    if (request.method !== "PUT" && request.method !== "POST") {
+      return edgeJson({ ok: false, error: "Method Not Allowed" }, 405);
+    }
+    const b = await request.json().catch(() => null);
+    if (!b || typeof b !== "object" || Array.isArray(b)) {
+      return edgeJson({ ok: false, error: "Geçersiz tercih verisi." }, 400);
+    }
+    const inc = b.preferences && typeof b.preferences === "object" && !Array.isArray(b.preferences) ? b.preferences : b;
+    const nextPrefs = { ...curPrefs };
+    if ("theme" in inc) nextPrefs.theme = cleanStr(inc.theme || "dark", 24) || "dark";
+    if ("ambient" in inc) nextPrefs.ambient = Boolean(inc.ambient);
+    if ("density" in inc) nextPrefs.density = cleanStr(inc.density || "comfortable", 24) || "comfortable";
+    if ("cardStyle" in inc) nextPrefs.cardStyle = cleanStr(inc.cardStyle || "poster", 24) || "poster";
+    if ("subSize" in inc) nextPrefs.subSize = cleanStr(inc.subSize || "md", 16) || "md";
+    if ("subColor" in inc) nextPrefs.subColor = /^#[0-9a-fA-F]{3,8}$/.test(String(inc.subColor || "").trim()) ? String(inc.subColor).trim() : curPrefs.subColor;
+    if ("subDual" in inc) nextPrefs.subDual = Boolean(inc.subDual);
+    if ("subOffsetSec" in inc) nextPrefs.subOffsetSec = Math.max(-120, Math.min(120, Number(inc.subOffsetSec || 0) || 0));
+    if ("subLang" in inc) nextPrefs.subLang = cleanStr(inc.subLang || "tr", 12) || "tr";
+    if ("audioLang" in inc) nextPrefs.audioLang = cleanStr(inc.audioLang || "tr", 12) || "tr";
+    if ("voiceDucking" in inc) nextPrefs.voiceDucking = Boolean(inc.voiceDucking);
+    if ("notifSoundMuted" in inc) nextPrefs.notifSoundMuted = Boolean(inc.notifSoundMuted);
+    if ("danmaku" in inc) nextPrefs.danmaku = Boolean(inc.danmaku);
+    if ("ambilight" in inc) nextPrefs.ambilight = Boolean(inc.ambilight);
+    if ("brightness" in inc) nextPrefs.brightness = Math.max(0, Math.min(200, Number(inc.brightness ?? 100) || 0));
+    if ("videoFit" in inc) nextPrefs.videoFit = cleanStr(inc.videoFit || "contain", 16) || "contain";
+    nextPrefs.updatedAt = Math.floor(Date.now() / 1000);
+    if (env?.WATCHLIVO_KV) {
+      await env.WATCHLIVO_KV.put(prefKey, JSON.stringify(nextPrefs)).catch(() => {});
+    }
+    return edgeJson({ ok: true, authenticated: true, uid: user.uid || user.id, preferences: nextPrefs });
+  }
+  if (safePath === "/api/user/watch-minutes" && request.method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const authRes = await resolveMemberUser(request, env, b);
+    if (authRes.storageError) return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    const { user } = authRes;
+    if (!user) return edgeJson({ ok: false, error: "Oturum gerekli." }, 401);
+    const delta = Math.max(1, Math.min(60, Math.floor(Number(b?.minutes || 1) || 1)));
+    const u = await ensureUserSocial(env, user.uid || user.id, user, true);
+    u.watchMinutes = Math.max(0, Math.floor(Number(u.watchMinutes || 0) || 0)) + delta;
+    u.medal = computeWatchMedal(u.watchMinutes);
+    await saveUserSocial(env, u);
+    if (user.email) {
+      await syncAccountWatchMinutes(env, user.email, u.watchMinutes);
+    }
+    return edgeJson({ ok: true, uid: user.uid || user.id, watchMinutes: u.watchMinutes, medal: u.medal });
+  }
   if (safePath === "/api/user/progress" || safePath === "/api/user/watchlist" || safePath === "/api/user/music-history") {
-    const { user } = await resolveMemberUser(request, env);
+    const authRes = await resolveMemberUser(request, env);
+    if (authRes.storageError) return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    const { user } = authRes;
     if (!user) return edgeJson({ ok: false, authenticated: false, error: "Oturum gerekli." }, 401);
     const kvKey = `ulist:${user.id}:${safePath.split("/").pop()}`;
     const readList = async () => {
@@ -3977,7 +4939,9 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     return edgeJson({ ok: true, authenticated: true, uid: user.id, items: next, ...(saved ? {} : { kvBusy: true }) });
   }
   if (safePath === "/api/user/yt-preferences") {
-    const { user } = await resolveMemberUser(request, env);
+    const authRes = await resolveMemberUser(request, env);
+    if (authRes.storageError) return edgeJson({ ok: false, error: "Depolama servisi geçici olarak kullanılamıyor.", storageError: true }, 503);
+    const { user } = authRes;
     if (!user) {
       return edgeJson({ ok: false, authenticated: false, uid: "", prefs: defaultYtPrefs() }, 401);
     }
@@ -4116,6 +5080,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   if (safePath === "/api/rave/social/guest" && request.method === "POST") {
     const b = await request.json().catch(() => ({}));
     const caller = await resolveSocialCaller(request, env, b?.uid || b?.id, b);
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
     const reuseCallerGuest = Boolean(caller.authenticated && caller.isGuest === true);
     let uid = reuseCallerGuest ? caller.uid : cleanStr(b?.uid || b?.id, 64);
     if (
@@ -4130,31 +5095,48 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     let rawHandle = cleanStr(b?.handle, 32);
     const color = sanitizeColor(b?.color);
     const avatarUrl = safeAvatarForCard(b?.avatarUrl);
-    if (rawHandle) {
-      let candH = foldHandleBase(rawHandle);
-      if (candH.length < 2) {
-        return edgeJson({ ok: false, error: "Kullanıcı adı en az 2 geçerli harf veya rakam içermelidir." }, 400);
-      }
-      if (env?.WATCHLIVO_KV) {
-        const regEmail = await env.WATCHLIVO_KV.get(`acct_handle:${candH}`).catch(() => null);
-        if (regEmail) {
-          const regAcct = await env.WATCHLIVO_KV.get(`acct:${regEmail}`, "json").catch(() => null);
-          if (regAcct?.user?.uid && regAcct.user.uid !== uid) {
-            return edgeJson({ ok: false, error: `Bu kullanıcı adı (@${candH}) kayıtlı bir üyeye ait.` }, 409);
-          }
-        }
-      }
+    const strictHandle = b?.strictHandle === true;
+    const explicitHandleProvided = Boolean(rawHandle);
+    let candH = explicitHandleProvided ? foldHandleBase(rawHandle) : normalizeHandle("", name);
+    if (explicitHandleProvided && candH.length < 2) {
+      return edgeJson({ ok: false, error: "Kullanıcı adı en az 2 geçerli harf veya rakam içermelidir." }, 400);
+    }
+    if (candH.length >= 2) {
       const dir = await getSocialDir(env);
-      for (const [dUid, dCard] of Object.entries(dir)) {
-        if (!dUid || dUid === uid || !dCard) continue;
-        if (foldHandleBase(dCard.handle || "") === candH) {
-          if (uid.startsWith("guest_") && /^(?:misafir|guest)[a-z0-9_.-]{0,14}$/i.test(candH)) {
-            candH = `${candH.slice(0, 15)}_${uid.replace(/[^a-z0-9]/gi, "").toLowerCase().slice(-6)}`;
-            rawHandle = candH;
-            break;
+      const isHandleTaken = async (h) => {
+        if (env?.WATCHLIVO_KV) {
+          const regEmail = await env.WATCHLIVO_KV.get(`acct_handle:${h}`).catch(() => null);
+          if (regEmail) {
+            const regAcct = await env.WATCHLIVO_KV.get(`acct:${regEmail}`, "json").catch(() => null);
+            if (regAcct?.user?.uid && regAcct.user.uid !== uid) return { taken: true, registered: true };
           }
-          return edgeJson({ ok: false, error: `Bu kullanıcı adı (@${candH}) zaten kullanımda.` }, 409);
+          const socHandleUid = await env.WATCHLIVO_KV.get(`soc:handle:${h}`).catch(() => null);
+          if (socHandleUid && socHandleUid !== uid) return { taken: true, registered: false };
         }
+        for (const [dUid, dCard] of Object.entries(dir)) {
+          if (!dUid || dUid === uid || !dCard) continue;
+          if (foldHandleBase(dCard.handle || "") === h) return { taken: true, registered: false };
+        }
+        return { taken: false, registered: false };
+      };
+      const chk = await isHandleTaken(candH);
+      if (chk.taken) {
+        if (explicitHandleProvided && strictHandle && (chk.registered || !/^(?:misafir|guest)[a-z0-9_.-]{0,14}$/i.test(candH))) {
+          return edgeJson({
+            ok: false,
+            error: chk.registered
+              ? `Bu kullanıcı adı (@${candH}) kayıtlı bir üyeye ait.`
+              : `Bu kullanıcı adı (@${candH}) zaten kullanımda.`,
+          }, 409);
+        }
+        const uidSuf = uid.replace(/[^a-z0-9]/gi, "").toLowerCase().slice(-6) || makeNonce().slice(0, 4).toLowerCase();
+        let recH = `${candH.slice(0, 15)}_${uidSuf}`;
+        const chk2 = await isHandleTaken(recH);
+        if (chk2.taken) {
+          recH = `${candH.slice(0, 12)}_${makeNonce().replace(/[^a-z0-9]/gi, "").toLowerCase().slice(0, 6)}`;
+        }
+        candH = recH;
+        rawHandle = recH;
       }
     }
     const u = await ensureUserSocial(env, uid, {
@@ -4208,8 +5190,187 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     });
   }
 
+  if (safePath === "/api/rave/social/claim-guest" && request.method === "POST") {
+    const b = await request.json().catch(() => null);
+    if (!b || typeof b !== "object" || Array.isArray(b)) {
+      return edgeJson({ ok: false, error: "Geçersiz JSON verisi." }, 400);
+    }
+    const authRes = await resolveMemberUser(request, env, b);
+    if (authRes.storageError) {
+      return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    }
+    const { user } = authRes;
+    if (!user) return edgeJson({ ok: false, error: "Oturum gerekli." }, 401);
+    const guestUid = cleanStr(b.guestUid, 64);
+    if (!guestUid || !GUEST_UID_RE.test(guestUid) || guestUid === "guest_default" || guestUid === "guest_local") {
+      return edgeJson({ ok: false, error: "Geçerli bir misafir kimliği (guestUid) gerekli." }, 400);
+    }
+    const memberUid = String(user.uid || user.id || "");
+    const gClaimKey = `soc:gclaim:${guestUid.toLowerCase()}`;
+    const [gClaimRes, gSocRes] = env?.WATCHLIVO_KV
+      ? await Promise.all([
+          kvReadStrict(env.WATCHLIVO_KV, gClaimKey),
+          kvReadStrict(env.WATCHLIVO_KV, `soc:u:${guestUid}`, "json"),
+        ])
+      : [{ value: null, storageError: false }, { value: null, storageError: false }];
+    if (gClaimRes.storageError || gSocRes.storageError) {
+      return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    }
+    const gClaimVal = gClaimRes.value;
+    const gSoc = gSocRes.value;
+    if (gClaimVal && String(gClaimVal).startsWith("claimed:")) {
+      if (gClaimVal !== `claimed:${memberUid}`) {
+        return edgeJson({ ok: false, error: "Bu misafir profili başka bir hesap tarafından devralınmış." }, 409);
+      }
+      const mSocAlready = await ensureUserSocial(env, memberUid, user, false);
+      return edgeJson({
+        ok: true,
+        claimed: true,
+        alreadyClaimed: true,
+        guestUid,
+        uid: memberUid,
+        watchMinutes: mSocAlready.watchMinutes || 0,
+        medal: mSocAlready.medal || computeWatchMedal(mSocAlready.watchMinutes),
+        mergedFriends: 0,
+        user: normalizeMemberUserObj(user),
+      });
+    }
+    const guestToken = cleanStr(b.guestToken, 240);
+    if (gClaimVal === "1" || Boolean(gSoc && typeof gSoc === "object")) {
+      const gSessRes = guestToken && env?.WATCHLIVO_KV ? await kvReadStrict(env.WATCHLIVO_KV, `session:${guestToken}`, "json") : { value: null, storageError: false };
+      if (gSessRes.storageError) {
+        return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+      }
+      const gSess = gSessRes.value;
+      if (!gSess || String(gSess.uid || gSess.id || "") !== guestUid) {
+        return edgeJson({ ok: false, error: "Misafir oturum doğrulaması geçersiz." }, 403);
+      }
+    }
+
+    const mSoc = await ensureUserSocial(env, memberUid, user, true);
+    let mergedFriends = 0;
+    if (gSoc && typeof gSoc === "object") {
+      mSoc.watchMinutes = Math.max(0, Math.floor(Number(mSoc.watchMinutes || 0) || 0)) + Math.max(0, Math.floor(Number(gSoc.watchMinutes || 0) || 0));
+      mSoc.medal = computeWatchMedal(mSoc.watchMinutes);
+      const friendSet = new Set((mSoc.friends || []).map((f) => f?.uid).filter(Boolean));
+      for (const fr of Array.isArray(gSoc.friends) ? gSoc.friends : []) {
+        const fUid = cleanStr(fr?.uid, 64);
+        if (!fUid || fUid === memberUid || fUid === guestUid) continue;
+        if (!friendSet.has(fUid)) {
+          friendSet.add(fUid);
+          mSoc.friends.push(fr);
+          mergedFriends += 1;
+        }
+        // Rewrite peer social friend record & migrate DM thread
+        if (env?.WATCHLIVO_KV) {
+          const pU = await env.WATCHLIVO_KV.get(`soc:u:${fUid}`, "json").catch(() => null);
+          if (pU && typeof pU === "object") {
+            const pFriends = Array.isArray(pU.friends) ? pU.friends : [];
+            const alreadyPeer = pFriends.some((pf) => pf?.uid === memberUid);
+            pU.friends = pFriends
+              .filter((pf) => !(alreadyPeer && pf?.uid === guestUid))
+              .map((pf) => (pf?.uid === guestUid ? { ...pf, uid: memberUid, name: mSoc.name, handle: mSoc.handle, color: mSoc.color, avatarUrl: mSoc.avatarUrl } : pf));
+            await saveUserSocial(env, pU);
+          }
+          const oldTk = dmThreadKey(guestUid, fUid);
+          const newTk = dmThreadKey(memberUid, fUid);
+          if (oldTk !== newTk) {
+            const oldMsgs = await env.WATCHLIVO_KV.get(`soc:dm:${oldTk}`, "json").catch(() => null);
+            if (Array.isArray(oldMsgs) && oldMsgs.length) {
+              const curMsgs = (await env.WATCHLIVO_KV.get(`soc:dm:${newTk}`, "json").catch(() => null)) || [];
+              const seenMsgIds = new Set((Array.isArray(curMsgs) ? curMsgs : []).map((m) => m?.id).filter(Boolean));
+              const combined = [...(Array.isArray(curMsgs) ? curMsgs : [])];
+              for (const m of oldMsgs) {
+                if (!m || (m.id && seenMsgIds.has(m.id))) continue;
+                combined.push(m.fromUid === guestUid ? { ...m, fromUid: memberUid, fromName: mSoc.name } : m);
+              }
+              combined.sort((a, b2) => Number(a?.ts || 0) - Number(b2?.ts || 0));
+              await env.WATCHLIVO_KV.put(`soc:dm:${newTk}`, JSON.stringify(combined.slice(-100)), { expirationTtl: 2592000 }).catch(() => {});
+              await env.WATCHLIVO_KV.delete(`soc:dm:${oldTk}`).catch(() => {});
+            }
+          }
+        }
+      }
+      const reqSet = new Set((mSoc.requests || []).map((r) => r?.fromUid).filter(Boolean));
+      for (const rq of Array.isArray(gSoc.requests) ? gSoc.requests : []) {
+        if (rq?.fromUid && rq.fromUid !== memberUid && !reqSet.has(rq.fromUid) && !friendSet.has(rq.fromUid)) {
+          reqSet.add(rq.fromUid);
+          mSoc.requests.push(rq);
+        }
+      }
+      const outSet = new Set((mSoc.outgoingRequests || []).map((r) => r?.toUid).filter(Boolean));
+      for (const rq of Array.isArray(gSoc.outgoingRequests) ? gSoc.outgoingRequests : []) {
+        if (rq?.toUid && rq.toUid !== memberUid && !outSet.has(rq.toUid) && !friendSet.has(rq.toUid)) {
+          outSet.add(rq.toUid);
+          mSoc.outgoingRequests.push(rq);
+        }
+      }
+      const blkSet = new Set((mSoc.blocked || []).map((x) => x?.uid).filter(Boolean));
+      for (const bl of Array.isArray(gSoc.blocked) ? gSoc.blocked : []) {
+        if (bl?.uid && bl.uid !== memberUid && !blkSet.has(bl.uid)) {
+          blkSet.add(bl.uid);
+          mSoc.blocked.push(bl);
+        }
+      }
+      if (gSoc.unread && typeof gSoc.unread === "object") {
+        for (const [k, v] of Object.entries(gSoc.unread)) {
+          mSoc.unread[k] = Math.max(0, Number(mSoc.unread[k] || 0) || 0) + Math.max(0, Number(v || 0) || 0);
+        }
+      }
+      await saveUserSocial(env, mSoc);
+    }
+
+    const mergeUserList = async (suffix, incoming) => {
+      if (!Array.isArray(incoming) || !incoming.length || !env?.WATCHLIVO_KV) return;
+      const listKey = `ulist:${memberUid}:${suffix}`;
+      const raw = await env.WATCHLIVO_KV.get(listKey, "json").catch(() => null);
+      const cur = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
+      const seenK = new Set(cur.map((x) => String(x?.key || x?.videoId || x?.tmdbId || x?.id || "")).filter(Boolean));
+      const merged = [...cur];
+      for (const it of incoming.slice(0, 50)) {
+        if (!it || typeof it !== "object") continue;
+        const ik = String(it.key || it.videoId || it.tmdbId || it.id || "");
+        if (!ik || seenK.has(ik)) continue;
+        seenK.add(ik);
+        merged.push({ ...it, key: ik });
+      }
+      await env.WATCHLIVO_KV.put(listKey, JSON.stringify(merged.slice(0, 100))).catch(() => {});
+    };
+    await Promise.all([
+      mergeUserList("progress", b.progress),
+      mergeUserList("watchlist", b.watchlist),
+      mergeUserList("music-history", b.musicHistory),
+    ]);
+
+    if (env?.WATCHLIVO_KV) {
+      await Promise.allSettled([
+        env.WATCHLIVO_KV.put(gClaimKey, `claimed:${memberUid}`, { expirationTtl: 2592000 }),
+        env.WATCHLIVO_KV.delete(`soc:u:${guestUid}`),
+        env.WATCHLIVO_KV.delete(`soc:pres:${guestUid}`),
+        guestToken ? env.WATCHLIVO_KV.delete(`session:${guestToken}`) : Promise.resolve(),
+        removeSocialDir(env, guestUid),
+      ]);
+    }
+    if (user.email) {
+      await syncAccountWatchMinutes(env, user.email, mSoc.watchMinutes || 0);
+    }
+    const updatedUser = normalizeMemberUserObj({ ...user, watchMinutes: mSoc.watchMinutes || 0, medal: mSoc.medal || computeWatchMedal(mSoc.watchMinutes) }, user.email);
+    return edgeJson({
+      ok: true,
+      claimed: true,
+      guestUid,
+      uid: memberUid,
+      watchMinutes: updatedUser.watchMinutes,
+      medal: updatedUser.medal,
+      mergedFriends,
+      user: updatedUser,
+    });
+  }
+
   if (safePath === "/api/rave/notifications/poll") {
     const caller = await resolveSocialCaller(request, env, url.searchParams.get("uid"));
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
     const uid = caller.uid.toLowerCase();
     const nowS = Math.floor(Date.now() / 1000);
     const since = Number(url.searchParams.get("since")) || (nowS - 30);
@@ -4247,6 +5408,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   if (safePath === "/api/rave/notifications/subscribe" && request.method === "POST") {
     const b = await request.json().catch(() => ({}));
     const caller = await resolveSocialCaller(request, env, b?.uid || b?.name, b);
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
     const uid = caller.uid.toLowerCase();
     if (env?.WATCHLIVO_KV) {
       await env.WATCHLIVO_KV.put(`soc:push:${uid}`, JSON.stringify({
@@ -4263,6 +5426,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const b = await request.json().catch(() => ({}));
     const rawFrom = cleanStr(b?.fromUid || b?.uid, 64).toLowerCase();
     const caller = await resolveSocialCaller(request, env, rawFrom, b);
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
     if (!caller.authenticated || caller.uid === "guest_default") {
       return edgeJson({ ok: false, error: "Oturum doğrulaması gerekli." }, 401);
     }
@@ -4322,6 +5487,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
 
   if (safePath === "/api/rave/social/state") {
     const caller = await resolveSocialCaller(request, env, url.searchParams.get("uid"));
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
     const uid = caller.uid;
     const u = await ensureUserSocial(env, uid, {
       name: url.searchParams.get("name"),
@@ -4349,6 +5516,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       uid,
       name: u.name || "İzleyici",
       handle: u.handle || "@izleyici",
+      watchMinutes: Math.max(0, Math.floor(Number(u.watchMinutes || 0) || 0)),
+      medal: u.medal || computeWatchMedal(u.watchMinutes),
       selfPresence,
       privacy: u.privacy || { presenceVisibility: "friends", hideWatching: false, allowInvites: "friends" },
       friends: enrichedFriends,
@@ -4366,6 +5535,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   if (safePath === "/api/rave/social/presence") {
     if (request.method === "GET") {
       const caller = await resolveSocialCaller(request, env, url.searchParams.get("callerUid") || url.searchParams.get("uid"));
+      if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+      if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
       let targetUid = cleanStr(url.searchParams.get("targetUid") || url.searchParams.get("uid") || caller.uid, 64);
       if (targetUid.startsWith("@") || (!targetUid.startsWith("u_") && !targetUid.startsWith("guest_"))) {
         const tc = await resolveSocialTarget(env, targetUid);
@@ -4374,11 +5545,13 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       const targetU = await ensureUserSocial(env, targetUid, {}, false);
       const isFr = (targetU.friends || []).some((f) => String(f?.uid || "").toLowerCase() === caller.uid.toLowerCase());
       const pres = await computeLivePresence(env, targetUid, caller.uid, isFr);
-      const card = { uid: targetUid, name: targetU.name || "İzleyici", handle: targetU.handle || "@izleyici", color: targetU.color || "#27DCC8", avatarUrl: targetU.avatarUrl || "", ...pres };
+      const card = { uid: targetUid, name: targetU.name || "İzleyici", handle: targetU.handle || "@izleyici", color: targetU.color || "#27DCC8", avatarUrl: targetU.avatarUrl || "", watchMinutes: targetU.watchMinutes || 0, medal: targetU.medal || computeWatchMedal(targetU.watchMinutes), ...pres };
       return edgeJson({ ok: true, uid: targetUid, presence: card, user: card, mode: "cf-autonomous-edge" });
     }
     const b = await request.json().catch(() => ({}));
     const caller = await resolveSocialCaller(request, env, b?.uid, b);
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
     const uid = caller.uid;
     const u = await ensureUserSocial(env, uid, {
       name: b?.name,
@@ -4395,6 +5568,26 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     let vis = cleanStr(b?.visibility || u.privacy?.presenceVisibility || "friends", 16).toLowerCase();
     if (!["everyone", "friends", "nobody"].includes(vis)) vis = "friends";
     const hideW = "hideWatching" in b ? Boolean(b.hideWatching) : Boolean(u.privacy?.hideWatching);
+    const prevPres = env?.WATCHLIVO_KV ? await env.WATCHLIVO_KV.get(`soc:pres:${uid}`, "json").catch(() => null) : null;
+    if (rawSt === "watching") {
+      if (prevPres?.state === "watching" && Number(prevPres.lastSeen || 0) > 0) {
+        const elapsed = Math.max(0, Math.min(120, nowS - Number(prevPres.lastSeen)));
+        u._watchSec = Math.max(0, Number(u._watchSec || 0)) + elapsed;
+      }
+      const extraMins = Math.max(0, Math.min(15, Number(b?.watchMinutesDelta || 0) || 0));
+      if (extraMins > 0) {
+        u._watchSec = Math.max(0, Number(u._watchSec || 0)) + extraMins * 60;
+      }
+      if (u._watchSec >= 60) {
+        const addMins = Math.floor(u._watchSec / 60);
+        u._watchSec = u._watchSec % 60;
+        u.watchMinutes = Math.max(0, Math.floor(Number(u.watchMinutes || 0) || 0)) + addMins;
+        u.medal = computeWatchMedal(u.watchMinutes);
+        if (caller.user?.email) {
+          await syncAccountWatchMinutes(env, caller.user.email, u.watchMinutes);
+        }
+      }
+    }
     const rec = {
       uid,
       state: rawSt,
@@ -4421,6 +5614,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     return edgeJson({
       ok: true,
       uid,
+      watchMinutes: Math.max(0, Math.floor(Number(u.watchMinutes || 0) || 0)),
+      medal: u.medal || computeWatchMedal(u.watchMinutes),
       presence: { uid, name: u.name, handle: u.handle, color: u.color, avatarUrl: u.avatarUrl, ...pres },
       requestCount: (u.requests || []).length,
       totalUnread: Object.values(u.unread || {}).reduce((acc, v) => acc + Math.max(0, Number(v) || 0), 0),
@@ -4430,6 +5625,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
 
   if (safePath === "/api/rave/social/search") {
     const caller = await resolveSocialCaller(request, env, url.searchParams.get("uid"));
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
     const uid = caller.uid;
     const rawQ = cleanStr(url.searchParams.get("q") || url.searchParams.get("query"), 64);
     if (!rawQ) return edgeJson({ ok: true, users: [] });
@@ -4470,6 +5667,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   if (safePath === "/api/rave/social/friends" && request.method === "POST") {
     const b = await request.json().catch(() => ({}));
     const caller = await resolveSocialCaller(request, env, b?.uid || b?.callerUid, b);
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
     const uid = caller.uid;
     const u = await ensureUserSocial(env, uid, {
       name: cleanStr(b?.fromName || b?.name, 32) || "İzleyici",
@@ -4672,7 +5871,9 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       u.privacy = u.privacy || { presenceVisibility: "friends", hideWatching: false, allowInvites: "friends" };
       if (["everyone", "friends", "nobody"].includes(b?.presenceVisibility)) u.privacy.presenceVisibility = b.presenceVisibility;
       if ("hideWatching" in b) u.privacy.hideWatching = Boolean(b.hideWatching);
-      if (["everyone", "friends"].includes(b?.allowInvites)) u.privacy.allowInvites = b.allowInvites;
+      if ("hideFriends" in b) u.privacy.hideFriends = Boolean(b.hideFriends);
+      if ("hideLocation" in b) u.privacy.hideLocation = Boolean(b.hideLocation);
+      if (["everyone", "friends", "nobody"].includes(b?.allowInvites)) u.privacy.allowInvites = b.allowInvites;
       await saveUserSocial(env, u);
       return mkResp();
     }
@@ -4683,10 +5884,16 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
       for (const f of u.friends || []) {
         if (!targetUid || f.uid === targetUid) {
           f.watchMinutes = Math.max(0, Number(f.watchMinutes || 0) || 0) + delta;
+          f.medal = computeWatchMedal(f.watchMinutes);
         }
       }
+      u.watchMinutes = Math.max(0, Math.floor(Number(u.watchMinutes || 0) || 0)) + delta;
+      u.medal = computeWatchMedal(u.watchMinutes);
       await saveUserSocial(env, u);
-      return mkResp();
+      if (caller.user?.email) {
+        await syncAccountWatchMinutes(env, caller.user.email, u.watchMinutes);
+      }
+      return mkResp({ watchMinutes: u.watchMinutes, medal: u.medal });
     }
 
     return mkResp();
@@ -4695,6 +5902,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   if (safePath === "/api/rave/social/invite" && request.method === "POST") {
     const b = await request.json().catch(() => ({}));
     const caller = await resolveSocialCaller(request, env, b?.uid, b);
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
     const uid = caller.uid;
     const u = await ensureUserSocial(env, uid, { name: cleanStr(b?.fromName || b?.name, 32) || "İzleyici" }, true);
     const action = cleanStr(b?.action || "send", 24).toLowerCase();
@@ -4756,8 +5965,23 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     if (syncTok) qParts.push(`r_tok=${encodeURIComponent(syncTok)}`);
     const joinUrl = `/#/mesh/${encodeURIComponent(roomId)}${qParts.length ? `?${qParts.join("&")}` : ""}`;
     const sentInvites = [];
+    const rejected = [];
     for (const tUid of targets.slice(0, 25)) {
-      if (!tUid || tUid === uid || getFriendshipState(u, tUid) !== "FRIENDS") continue;
+      if (!tUid || tUid === uid) continue;
+      const tU = await ensureUserSocial(env, tUid, {}, false);
+      if ((u.blocked || []).some((x) => x.uid === tUid) || (tU.blocked || []).some((x) => x.uid === uid)) {
+        rejected.push({ uid: tUid, reason: "blocked" });
+        continue;
+      }
+      const tAllow = String(tU?.privacy?.allowInvites || "friends").toLowerCase();
+      if (tAllow === "nobody") {
+        rejected.push({ uid: tUid, reason: "invites_disabled" });
+        continue;
+      }
+      if (tAllow !== "everyone" && getFriendshipState(u, tUid) !== "FRIENDS") {
+        rejected.push({ uid: tUid, reason: "friends_only" });
+        continue;
+      }
       const invId = `inv_${makeNonce().slice(0, 10)}`;
       const ntf = await queueSocialNotification(env, tUid, {
         id: invId,
@@ -4795,18 +6019,29 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
           roomInviteCard: { roomId, roomName, mediaTitle, mediaPoster, poster: mediaPoster, mediaProvider, url: joinUrl },
         });
         await env.WATCHLIVO_KV.put(`soc:dm:${tk}`, JSON.stringify(dmList.slice(-100)), { expirationTtl: 2592000 }).catch(() => {});
-        const tU = await ensureUserSocial(env, tUid, {}, true);
+        tU.unread = tU.unread || {};
         tU.unread[uid] = Math.max(0, Number(tU.unread?.[uid] || 0) || 0) + 1;
         await saveUserSocial(env, tU);
       }
       if (ntf) sentInvites.push(ntf);
     }
-    return edgeJson({ ok: true, sentCount: sentInvites.length, invites: sentInvites });
+    if (action !== "invite_all_online" && targets.length === 1 && sentInvites.length === 0 && rejected.length > 0) {
+      const reason = rejected[0].reason;
+      const errMsg = reason === "invites_disabled"
+        ? "Bu kullanıcı oda davetlerini devre dışı bıraktı."
+        : reason === "blocked"
+          ? "Bu kullanıcıya davet gönderilemiyor."
+          : "Yalnızca arkadaşlar oda daveti gönderebilir.";
+      return edgeJson({ ok: false, error: errMsg, code: reason }, 403);
+    }
+    return edgeJson({ ok: true, sentCount: sentInvites.length, invites: sentInvites, ...(rejected.length ? { skippedCount: rejected.length, rejected } : {}) });
   }
 
   if (safePath === "/api/rave/social/dm") {
     if (request.method === "GET") {
       const caller = await resolveSocialCaller(request, env, url.searchParams.get("uid"));
+      if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+      if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
       const uid = caller.uid;
       const rawPeer = cleanStr(url.searchParams.get("peerId"), 64);
       let peerId = rawPeer;
@@ -4875,6 +6110,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     }
     const b = await request.json().catch(() => ({}));
     const caller = await resolveSocialCaller(request, env, b?.uid, b);
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
     const uid = caller.uid;
     let peerId = cleanStr(b?.peerId || b?.peerUid || b?.targetUid, 64);
     if (peerId && (peerId.startsWith("@") || (!peerId.startsWith("u_") && !peerId.startsWith("guest_")))) {
@@ -5079,6 +6316,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
 
   if (safePath === "/api/rave/accounts/status") {
     const caller = await resolveSocialCaller(request, env, url.searchParams.get("uid"));
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
     const provider = cleanStr(url.searchParams.get("provider"), 32).toLowerCase().replace(/^hbomax$/, "max");
     if (!caller.authenticated && !url.searchParams.get("uid")) {
       return edgeJson({ ok: true, authenticated: false, userId: "", provider: provider || "max", hasActiveConnection: false, loginSatisfied: false });
@@ -5096,6 +6335,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   if (safePath === "/api/rave/accounts/verify" && request.method === "POST") {
     const b = await request.json().catch(() => ({}));
     const caller = await resolveSocialCaller(request, env, b?.uid, b);
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
     const uid = caller.uid === "guest_default" ? `guest_wl_${makeNonce().slice(0, 10)}` : caller.uid;
     let provider = cleanStr(b?.provider || "max", 32).toLowerCase();
     if (provider === "hbomax") provider = "max";
@@ -5126,6 +6367,8 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   if (safePath === "/api/rave/accounts/logout" && request.method === "POST") {
     const b = await request.json().catch(() => ({}));
     const caller = await resolveSocialCaller(request, env, b?.uid, b);
+    if (caller.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    if (caller.invalidToken) return edgeJson({ ok: false, error: "invalid_session", invalidToken: true }, 401);
     let provider = cleanStr(b?.provider, 32).toLowerCase();
     if (provider === "hbomax") provider = "max";
     if (caller.uid && provider && env?.WATCHLIVO_KV) {
@@ -5215,7 +6458,9 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
   }
 
   if (safePath === "/api/rave/yt-personalized-feed") {
-    const { user } = await resolveMemberUser(request, env);
+    const authRes = await resolveMemberUser(request, env);
+    if (authRes.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    const { user } = authRes;
     const b = request.method === "POST" ? await request.json().catch(() => ({})) : {};
     const params = { ...Object.fromEntries(url.searchParams.entries()), ...(b && typeof b === "object" ? b : {}) };
     const chip = cleanStr(params.chip || "all", 80);
@@ -5713,7 +6958,9 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     return edgeJson({ ok: true, engines: [{ id: "edge-local", name: "Edge Local", configured: false }], mode: "cf-autonomous-edge" });
   }
   if (safePath === "/api/upload" || safePath === "/api/rave/ai-chat" || safePath === "/api/rave/suno-generate") {
-    const { user } = await resolveMemberUser(request, env);
+    const authRes = await resolveMemberUser(request, env);
+    if (authRes.storageError) return edgeJson({ ok: false, error: "storage_unavailable", storageError: true }, 503);
+    const { user } = authRes;
     if (!user) return edgeJson({ ok: false, error: "Oturum gerekli." }, 401);
     return edgeJson({ ok: false, error: "not_implemented_on_edge" }, 501);
   }

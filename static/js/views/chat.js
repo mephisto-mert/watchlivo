@@ -1,11 +1,11 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261122_v238';
-import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261122_v238';
-import { avatar } from '../profile.js?v=20261122_v238';
-import { api, qs, humanApiError } from '../api.js?v=20261122_v238';
-import { resolveMusicItem } from './selection-kinds.js?v=20261122_v238';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261122_v238';
-import { ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261122_v238';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261124_v239';
+import { state, set, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261124_v239';
+import { avatar } from '../profile.js?v=20261124_v239';
+import { api, qs, humanApiError } from '../api.js?v=20261124_v239';
+import { resolveMusicItem } from './selection-kinds.js?v=20261124_v239';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261124_v239';
+import { ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261124_v239';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -280,14 +280,14 @@ const PRIVACY = [
   ['private', 'Gizli', 'lock', 'Yalnızca davet edilenler katılabilir'],
 ];
 
-export const inviteUrl = () => {
+export const inviteUrl = ({ includePwd = false } = {}) => {
   const rid = state.mesh?.id || state.route.params.id || '';
   const qp = new URLSearchParams();
   let pwd = state.route?.params?.pwd || '';
   if (!pwd && rid) {
     try { pwd = sessionStorage.getItem('vortex_pwd_' + rid) || ''; } catch (_) {}
   }
-  if (pwd) qp.set('pwd', pwd);
+  if (includePwd && pwd) qp.set('pwd', pwd);
   const m = state.mesh?.media;
   if (m?.title) qp.set('t', m.title);
   if (m?.tmdbId) qp.set('tmdbId', String(m.tmdbId));
@@ -298,8 +298,8 @@ export const inviteUrl = () => {
   return `${location.origin}/r/${encodeURIComponent(rid)}${qs ? '?' + qs : ''}`;
 };
 
-export async function copyInvite() {
-  const url = inviteUrl();
+export async function copyInvite({ includePwd = false } = {}) {
+  const url = inviteUrl({ includePwd });
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(url);
@@ -329,7 +329,11 @@ export function buildChat(ctx) {
   const { actions } = ctx;
   const list = h('div', { class: 'chat-list', id: 'chat-list', role: 'log', 'aria-live': 'polite', 'aria-relevant': 'additions' });
   const typing = h('div', { class: 'typing', 'aria-live': 'polite' });
-  const input = h('input', { placeholder: 'Sohbete mesaj yazın...', maxlength: '1000', enterkeyhint: 'send', autocomplete: 'off', 'aria-label': 'Mesaj', id: 'chat-input' });
+  const input = h('textarea', { rows: '1', placeholder: 'Sohbete mesaj yazın...', maxlength: '1000', enterkeyhint: 'send', autocomplete: 'off', 'aria-label': 'Mesaj', id: 'chat-input' });
+  const syncInputHeight = () => {
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(92, Math.max(22, input.scrollHeight || 22))}px`;
+  };
   const gifBtn = h('button', { type: 'button', class: 'ctl-action', id: 'btn-chat-gif', 'aria-label': 'GIF', title: 'GIF Ara ve Gönder', onclick: () => toggleGif() }, h('span', { html: icons.gif, style: { display: 'contents' } }));
   const sendBtn = h('button', {
     type: 'button',
@@ -385,7 +389,10 @@ export function buildChat(ctx) {
       closeToolsPopover();
       const cap = input.value.trim();
       const res = window.vortexCaptureSceneToChat?.(cap);
-      if (res && cap) input.value = '';
+      if (res && cap) {
+        input.value = '';
+        syncInputHeight();
+      }
     },
   }, h('span', { html: icons.cameraSnap, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Sahne');
   const stampTimeBtn = h('button', {
@@ -398,6 +405,7 @@ export function buildChat(ctx) {
       const sec = Number(window.vortexGetVideoPosition?.() || 0);
       const stamp = fmtTime(sec);
       input.value = `${input.value ? input.value.trimEnd() + ' ' : ''}${stamp} `;
+      syncInputHeight();
       input.focus();
     },
   }, h('span', { html: icons.clock, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'An');
@@ -442,8 +450,8 @@ export function buildChat(ctx) {
         },
         'aria-label': `Tepki ${e}`,
         title: `Sahneye ${e} gönder`,
-      }, e)),
-      breakBarBtn));
+      }, e))),
+    breakBarBtn);
 
   toolsPopover = h('div', { class: 'chat-tools-popover acrylic hidden', id: 'chat-tools-popover' },
     h('div', { class: 'chat-tools-sec-title' }, '⚡ Oda Araçları & Hızlı Paylaşım'),
@@ -594,6 +602,7 @@ export function buildChat(ctx) {
         btnVinylToggle.classList.toggle('active', nextVinyl);
       } else {
         setView('left', 'Search');
+        ctx.layout?.update?.();
       }
     },
   }, '💿 Plak');
@@ -621,6 +630,21 @@ export function buildChat(ctx) {
   const gifPanel = h('div', { class: 'gif-panel acrylic hidden' });
   const replyDraftBar = h('div', { class: 'reply-draft-bar hidden', id: 'chat-reply-draft' });
   const quickAccessZone = h('div', { class: 'chat-access-zone hidden', id: 'chat-access-zone' });
+  let unseenInList = 0;
+  let hasRenderedInitialChat = false;
+  const newMsgPill = h('button', {
+    type: 'button',
+    class: 'chat-new-msg-pill hidden',
+    id: 'btn-chat-scroll-bottom',
+    onclick: (e) => {
+      e.stopPropagation();
+      list.scrollTop = list.scrollHeight;
+      unseenInList = 0;
+      newMsgPill.textContent = 'Yeni Mesajlar ↓';
+      newMsgPill.classList.add('hidden');
+      if ((state.unseenChat || 0) > 0) set({ unseenChat: 0 });
+    },
+  }, 'Yeni Mesajlar ↓');
   let voiceRecState = null;
   let voiceRecStarting = false;
   const voiceRecOverlay = h('div', { class: 'voice-rec-overlay hidden', id: 'chat-voice-rec-overlay' });
@@ -633,11 +657,25 @@ export function buildChat(ctx) {
     onclick: () => toggleVoiceNoteRecording(),
   }, h('span', { html: icons.mic, style: { display: 'contents' } }));
   const bar = h('div', { class: 'chatbar' }, h('div', { class: 'chat-input' }, toolsBtn, input, voiceRecOverlay, voiceRecBtn, gifBtn, sendBtn), toolsPopover, gifPanel);
-  const el = h('div', { class: 'chat' }, discordCallBar, quickAccessZone, musicSimilarBar, list, typing, reactions, replyDraftBar, bar);
+  const el = h('div', { class: 'chat' }, discordCallBar, quickAccessZone, musicSimilarBar, list, newMsgPill, typing, reactions, replyDraftBar, bar);
   const rendered = new Set();
   let lastUser = null;
   let onboarding = false;
   let activeReply = null;
+  const isChatCollapsed = () => Boolean(
+    ctx.isTheaterMode?.()
+    || state.chatVisible === false
+    || (typeof document !== 'undefined' && document.body?.classList?.contains('theater-mode'))
+  );
+  list.addEventListener('scroll', () => {
+    const nearBot = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+    if (nearBot) {
+      unseenInList = 0;
+      newMsgPill.textContent = 'Yeni Mesajlar ↓';
+      newMsgPill.classList.add('hidden');
+      if (!isChatCollapsed() && (state.unseenChat || 0) > 0) set({ unseenChat: 0 });
+    }
+  }, { passive: true });
 
   function clearReply() {
     activeReply = null;
@@ -685,9 +723,11 @@ export function buildChat(ctx) {
     const cancelBtn = h('button', { type: 'button', class: 'voice-rec-cancel', onclick: (e) => { e.stopPropagation(); stopVoiceRecorder(false); } }, 'İptal');
     const doneBtn = h('button', { type: 'button', class: 'voice-rec-send', onclick: (e) => { e.stopPropagation(); stopVoiceRecorder(true); } }, 'Gönder ➤');
     let handle = null;
+    let recFailed = false;
     try {
       handle = await startUniversalVoiceRecorder({
         maxSeconds: 24,
+        timeoutMs: 9000,
         apiFn: api,
         onTick: (elapsed) => {
           timerLbl.textContent = `🔴 0:${String(elapsed).padStart(2, '0')}`;
@@ -704,6 +744,7 @@ export function buildChat(ctx) {
           clearReply();
         },
         onError: (msg) => {
+          recFailed = true;
           voiceRecState = null;
           restoreLiveCallMicAfterVoiceNote();
           voiceRecBtn.classList.remove('recording');
@@ -712,16 +753,21 @@ export function buildChat(ctx) {
           toast(msg || 'Sesli mesaj için mikrofon izni gerekli');
         },
       });
+    } catch (_) {
+      recFailed = true;
+      toast('Sesli mesaj kaydı başlatılamadı');
     } finally {
       voiceRecStarting = false;
+      if (!handle || destroyed || recFailed) {
+        restoreLiveCallMicAfterVoiceNote();
+        voiceRecBtn.classList.remove('recording');
+        voiceRecOverlay.classList.add('hidden');
+        input.classList.remove('hidden');
+      }
     }
-    if (!handle) {
-      restoreLiveCallMicAfterVoiceNote();
-      return;
-    }
+    if (!handle || recFailed) return;
     if (destroyed) {
       handle.stop?.(false);
-      restoreLiveCallMicAfterVoiceNote();
       return;
     }
     voiceRecState = handle;
@@ -753,11 +799,47 @@ export function buildChat(ctx) {
     const nowMs = Date.now();
     if (nowMs - lastSendAt < 80) return;
     const v = input.value;
-    if (!v.trim()) return;
+    const trimmed = v.trim();
+    if (!trimmed) return;
+    if (trimmed.startsWith('/')) {
+      const [rawCmd, ...argParts] = trimmed.split(/\s+/);
+      const cmd = rawCmd.toLowerCase();
+      if (cmd === '/yardim' || cmd === '/help') {
+        toast('Komutlar: /mola · /temizle · /hiz 1.5 · @isim ile bahset');
+        input.value = '';
+        syncInputHeight();
+        return;
+      }
+      if (cmd === '/mola' || cmd === '/break') {
+        actions.requestBreak?.();
+        input.value = '';
+        syncInputHeight();
+        return;
+      }
+      if (cmd === '/temizle' || cmd === '/clear') {
+        actions.clearChat?.();
+        input.value = '';
+        syncInputHeight();
+        return;
+      }
+      if (cmd === '/hiz' || cmd === '/speed') {
+        const rateVal = Number(argParts[0]);
+        if (Number.isFinite(rateVal) && rateVal >= 0.25 && rateVal <= 3) {
+          actions.setRate?.(rateVal);
+          toast(`⚡ Oynatma hızı: ${rateVal}x`);
+        } else {
+          toast('Kullanım: /hiz 1.25 (0.25 – 3.0 arası)');
+        }
+        input.value = '';
+        syncInputHeight();
+        return;
+      }
+    }
     lastSendAt = nowMs;
     const extra = activeReply ? { replyTo: activeReply } : {};
     actions.sendChat(v, extra);
     input.value = '';
+    syncInputHeight();
     clearReply();
     list.querySelectorAll('.sys-card').forEach((c) => c.remove());
   }
@@ -768,12 +850,15 @@ export function buildChat(ctx) {
       e.stopPropagation();
       return;
     }
-    if (e.key === 'Enter' || e.keyCode === 13) {
+    if ((e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       send();
     }
   });
-  input.addEventListener('input', () => { if (Date.now() - lastTyping > 2000) { lastTyping = Date.now(); actions.typing(); } });
+  input.addEventListener('input', () => {
+    syncInputHeight();
+    if (Date.now() - lastTyping > 2000) { lastTyping = Date.now(); actions.typing(); }
+  });
   const isVirtualKbDevice = () => Boolean(
     (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches) ||
     (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && typeof window !== 'undefined' && window.innerWidth <= 960 && !window.matchMedia?.('(pointer: fine)')?.matches)
@@ -783,6 +868,7 @@ export function buildChat(ctx) {
       const curW = window.innerWidth || document.documentElement.clientWidth || 0;
       const curH = window.innerHeight || document.documentElement.clientHeight || 0;
       if (curW > 0 && curH > 0) {
+        preKbW = curW;
         preKbPortrait = curH >= curW;
         if (preKbPortrait) maxPortraitH = Math.max(maxPortraitH, curH);
         else maxLandscapeH = Math.max(maxLandscapeH, curH);
@@ -835,11 +921,12 @@ export function buildChat(ctx) {
       dScreenPill.setAttribute('aria-pressed', String(screenOn));
       dStageBtn.setAttribute('aria-pressed', String(stageOn));
       dStripBtn.setAttribute('aria-pressed', String(stripOn));
-      dJoinBtn.replaceChildren(
+      const joinChildren = [
         h('span', { class: 'd-btn-ico', html: inCall ? icons.phoneOff : icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }),
         inCall ? h('span', { class: 'd-join-active' }, 'Ayrıl') : h('span', { class: 'd-join-full' }, 'Sesliye Katıl'),
-        inCall ? null : h('span', { class: 'd-join-short' }, 'Katıl'),
-      );
+      ];
+      if (!inCall) joinChildren.push(h('span', { class: 'd-join-short' }, 'Katıl'));
+      dJoinBtn.replaceChildren(...joinChildren);
       dStageBtn.classList.toggle('on', stageOn);
       dStripBtn.classList.toggle('on', stripOn);
       dMicPill.classList.toggle('on', micOn);
@@ -1035,10 +1122,27 @@ export function buildChat(ctx) {
     syncVoiceUi();
   }
 
+  let gifDebounceTimer = null;
   async function toggleGif() {
     closeToolsPopover();
-    if (!gifPanel.classList.contains('hidden')) { gifPanel.classList.add('hidden'); return; }
+    if (!gifPanel.classList.contains('hidden')) {
+      clearTimeout(gifDebounceTimer);
+      gifPanel.classList.add('hidden');
+      return;
+    }
     const q = h('input', { class: 'input', placeholder: 'GIF ara...' });
+    const closeGifBtn = h('button', {
+      type: 'button',
+      class: 'gif-panel-close',
+      'aria-label': 'GIF Panelini Kapat',
+      title: 'GIF Panelini Kapat',
+      onclick: (e) => {
+        e.stopPropagation();
+        clearTimeout(gifDebounceTimer);
+        gifPanel.classList.add('hidden');
+      },
+    }, '✕');
+    const head = h('div', { class: 'gif-panel-head' }, q, closeGifBtn);
     const grid = h('div', { class: 'gif-grid' });
     let gifSeq = 0;
     const load = async () => {
@@ -1070,8 +1174,17 @@ export function buildChat(ctx) {
         grid.replaceChildren(h('div', { class: 'lobby-empty', style: { gridColumn: '1 / -1', padding: '14px 8px', textAlign: 'center' } }, errMsg));
       }
     };
-    q.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
-    gifPanel.replaceChildren(q, grid);
+    q.addEventListener('input', () => {
+      clearTimeout(gifDebounceTimer);
+      gifDebounceTimer = setTimeout(() => load(), 300);
+    });
+    q.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        clearTimeout(gifDebounceTimer);
+        load();
+      }
+    });
+    gifPanel.replaceChildren(head, grid);
     gifPanel.classList.remove('hidden');
     load();
   }
@@ -1305,7 +1418,9 @@ export function buildChat(ctx) {
   function renderRichMessageText(rawText) {
     const text = String(rawText || '');
     if (!text) return [];
-    const re = /\b((?:\d{1,2}:)?\d{1,2}:\d{2})\b/g;
+    const re = /(https?:\/\/[^\s<>"'`]+)|(\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b)|((?:^|[^\w@])@[a-zA-Z0-9_.\-]{2,32})/g;
+    const normSelfHandle = String(state.self?.handle || '').replace(/^@/, '').trim().toLowerCase();
+    const normSelfName = String(state.self?.name || '').trim().toLowerCase();
     const out = [];
     let lastIdx = 0;
     let match;
@@ -1313,20 +1428,57 @@ export function buildChat(ctx) {
       if (match.index > lastIdx) {
         out.push(text.slice(lastIdx, match.index));
       }
-      const stamp = match[1];
-      const sec = parseStampToSec(stamp);
-      if (sec !== null) {
-        out.push(h('button', {
-          type: 'button',
-          class: 'chat-ts-badge',
-          title: `${stamp} sahnesine git`,
-          onclick: (e) => {
-            e.stopPropagation();
-            window.vortexSeekToTimestamp?.(sec);
-          },
-        }, `⏱️ ${stamp}`));
-      } else {
-        out.push(stamp);
+      if (match[1]) {
+        const rawUrl = match[1];
+        let safeUrl = rawUrl;
+        let trailing = '';
+        const punctM = rawUrl.match(/([.,!?;:)\]]+)$/);
+        if (punctM) {
+          safeUrl = rawUrl.slice(0, -punctM[1].length);
+          trailing = punctM[1];
+        }
+        if (/^https?:\/\//i.test(safeUrl) && safeUrl.length > 8) {
+          out.push(h('a', {
+            class: 'chat-link',
+            href: safeUrl,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            onclick: (e) => e.stopPropagation(),
+          }, safeUrl));
+          if (trailing) out.push(trailing);
+        } else {
+          out.push(rawUrl);
+        }
+      } else if (match[2]) {
+        const stamp = match[2];
+        const sec = parseStampToSec(stamp);
+        if (sec !== null) {
+          out.push(h('button', {
+            type: 'button',
+            class: 'chat-ts-badge',
+            title: `${stamp} sahnesine git`,
+            onclick: (e) => {
+              e.stopPropagation();
+              window.vortexSeekToTimestamp?.(sec);
+            },
+          }, `⏱️ ${stamp}`));
+        } else {
+          out.push(stamp);
+        }
+      } else if (match[3]) {
+        const fullMent = match[3];
+        const atPos = fullMent.indexOf('@');
+        const prefix = atPos > 0 ? fullMent.slice(0, atPos) : '';
+        const mentionTok = fullMent.slice(atPos);
+        const mentionKey = mentionTok.slice(1).toLowerCase();
+        const isSelfMention = Boolean(
+          (normSelfHandle && mentionKey === normSelfHandle)
+          || (normSelfName && mentionKey === normSelfName)
+        );
+        if (prefix) out.push(prefix);
+        out.push(h('span', {
+          class: `chat-mention${isSelfMention ? ' is-self' : ''}`,
+        }, mentionTok));
       }
       lastIdx = re.lastIndex;
     }
@@ -1406,7 +1558,92 @@ export function buildChat(ctx) {
     lastUser = (m.pollId || m.snapshot || m.audioNote) ? null : msgAuthorKey;
     const reactWrap = h('div', { class: 'msg-reactions empty', 'data-react-for': m.id });
     fillReactionBadges(reactWrap, m.id);
+    const normHandle = (v) => String(v || '').replace(/^@/, '').trim().toLowerCase();
+    const mHandle = normHandle(m.handle);
+    const isSelfMsg = Boolean(
+      (m.cid && state.clientId && m.cid === state.clientId) ||
+      (m.uid && (state.self?.uid || state.self?.id) && m.uid === (state.self?.uid || state.self?.id)) ||
+      (!m.cid && !m.uid && m.user && state.self?.name && m.user === state.self.name)
+    );
+    const isBotMsg = String(m.cid || m.uid || '').startsWith('bot_') || m.cid === 'kinox_bot';
+    const canDeleteMsg = Boolean(m.id && !m.system && (isSelfMsg || canClearChat()));
+    const copyPayload = String(m.text || m.gif || '').trim();
     let row = null;
+    let actIdx = MSG_QUICK_EMOJIS.length;
+    const extraMsgBtns = [];
+    if (copyPayload) {
+      extraMsgBtns.push(h('button', {
+        type: 'button',
+        class: 'msg-act-btn msg-act-copy',
+        style: { '--i': String(++actIdx) },
+        title: 'Mesajı kopyala',
+        'aria-label': 'Mesajı kopyala',
+        onclick: async (e) => {
+          e.stopPropagation();
+          e.currentTarget?.blur?.();
+          closeAllMsgActions(row);
+          try {
+            if (navigator.clipboard?.writeText) {
+              await navigator.clipboard.writeText(copyPayload);
+            } else {
+              const ta = document.createElement('textarea');
+              ta.value = copyPayload;
+              ta.setAttribute('readonly', '');
+              ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              ta.remove();
+            }
+            toast('📋 Mesaj kopyalandı');
+          } catch (_) {
+            toast('Mesaj kopyalanamadı');
+          }
+        },
+      }, h('span', { html: icons.copy, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Kopyala'));
+    }
+    if (canDeleteMsg) {
+      extraMsgBtns.push(h('button', {
+        type: 'button',
+        class: 'msg-act-btn msg-act-delete',
+        style: { '--i': String(++actIdx) },
+        title: 'Mesajı sil',
+        'aria-label': 'Mesajı sil',
+        onclick: (e) => {
+          e.stopPropagation();
+          e.currentTarget?.blur?.();
+          closeAllMsgActions(row);
+          actions.deleteMsg?.(m.id);
+        },
+      }, h('span', { html: icons.trash, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Sil'));
+    }
+    if (!isSelfMsg && !isBotMsg) {
+      extraMsgBtns.push(h('button', {
+        type: 'button',
+        class: 'msg-act-btn msg-act-report',
+        style: { '--i': String(++actIdx) },
+        title: 'Mesajı şikayet et',
+        'aria-label': 'Mesajı şikayet et',
+        onclick: (e) => {
+          e.stopPropagation();
+          e.currentTarget?.blur?.();
+          closeAllMsgActions(row);
+          if (typeof window.vortexOpenReportModal === 'function') {
+            window.vortexOpenReportModal({
+              targetType: 'message',
+              targetId: m.id,
+              targetLabel: m.user || 'Mesaj',
+              targetUid: m.uid || '',
+              targetName: m.user || '',
+              messageId: m.id,
+              reasonContext: String(m.text || m.gif || '').slice(0, 160),
+            });
+          } else {
+            toast('Şikayet penceresi şu an açılamadı');
+          }
+        },
+      }, '🚩 Şikayet'));
+    }
     const actionBar = h('div', { class: 'msg-actions' },
       ...MSG_QUICK_EMOJIS.map((em, idx) => h('button', {
         type: 'button',
@@ -1434,24 +1671,33 @@ export function buildChat(ctx) {
           closeAllMsgActions(row);
           setReplyTo(m);
         },
-      }, h('span', { html: icons.reply, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Yanıtla'));
+      }, h('span', { html: icons.reply, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Yanıtla'),
+      ...extraMsgBtns);
 
-    const isSelfMsg = Boolean(
-      (m.cid && state.clientId && m.cid === state.clientId) ||
-      (m.uid && (state.self?.uid || state.self?.id) && m.uid === (state.self?.uid || state.self?.id)) ||
-      (!m.cid && !m.uid && m.user && state.self?.name && m.user === state.self.name)
-    );
-    const isBotMsg = String(m.cid || m.uid || '').startsWith('bot_') || m.cid === 'kinox_bot';
+    const hasStrongMsgIdentity = Boolean(m.uid || mHandle);
     const isAlreadyFriend = (state.social?.friends || []).some((f) =>
       (f.uid && m.uid && f.uid === m.uid) ||
-      (f.handle && m.handle && f.handle.toLowerCase() === m.handle.toLowerCase()) ||
-      f.name === m.user
+      (normHandle(f.handle) && mHandle && normHandle(f.handle) === mHandle) ||
+      (!hasStrongMsgIdentity && !f.uid && !normHandle(f.handle) && f.name && f.name === m.user)
     );
     const incomingFriendReq = (state.social?.requests || []).find((r) =>
       (r.fromUid && m.uid && r.fromUid === m.uid) ||
-      (r.fromHandle && m.handle && r.fromHandle.toLowerCase() === m.handle.toLowerCase()) ||
-      r.fromName === m.user
+      (normHandle(r.fromHandle) && mHandle && normHandle(r.fromHandle) === mHandle) ||
+      (!hasStrongMsgIdentity && !r.fromUid && !normHandle(r.fromHandle) && r.fromName && r.fromName === m.user)
     );
+    const resolveMsgPeer = () => (state.mesh?.participants || []).find((x) =>
+      (m.cid && x.id === m.cid) ||
+      (m.uid && x.uid && x.uid === m.uid) ||
+      (mHandle && normHandle(x.handle) && normHandle(x.handle) === mHandle) ||
+      (!m.cid && !m.uid && !mHandle && m.user && x.name === m.user)
+    ) || {
+      id: m.cid || '',
+      uid: m.uid || '',
+      name: m.user,
+      handle: m.handle || '',
+      color: m.color,
+      avatarUrl: m.avatarUrl || '',
+    };
     const addFriendInlineBtn = (!isSelfMsg && !isBotMsg && !isAlreadyFriend) ? h('button', {
       type: 'button',
       class: 'chat-inline-friend-btn',
@@ -1503,17 +1749,7 @@ export function buildChat(ctx) {
       },
     },
       (() => {
-        const msgPeer = (state.mesh?.participants || []).find((x) =>
-          (m.cid && x.id === m.cid) ||
-          (m.uid && x.uid && x.uid === m.uid) ||
-          (m.user && x.name === m.user)
-        ) || {
-          uid: m.uid || '',
-          name: m.user,
-          handle: m.handle || '',
-          color: m.color,
-          avatarUrl: m.avatarUrl || '',
-        };
+        const msgPeer = resolveMsgPeer();
         const msgAv = avatar(msgPeer, 30);
         if (!String(msgPeer.id || '').startsWith('bot_')) {
           msgAv.style.cursor = 'pointer';
@@ -1533,18 +1769,7 @@ export function buildChat(ctx) {
               title: `${m.user} profilini aç / arkadaş ekle`,
               onclick: (ev) => {
                 ev.stopPropagation();
-                const msgPeer = (state.mesh?.participants || []).find((x) =>
-                  (m.cid && x.id === m.cid) ||
-                  (m.uid && x.uid && x.uid === m.uid) ||
-                  (m.user && x.name === m.user)
-                ) || {
-                  uid: m.uid || '',
-                  name: m.user,
-                  handle: m.handle || '',
-                  color: m.color,
-                  avatarUrl: m.avatarUrl || '',
-                };
-                window.vortexOpenUserProfile?.(msgPeer);
+                window.vortexOpenUserProfile?.(resolveMsgPeer());
               },
             }, m.user),
             addFriendInlineBtn,
@@ -1630,7 +1855,18 @@ export function buildChat(ctx) {
       list.firstElementChild?.remove();
       list.firstElementChild?.classList?.remove('cont');
     }
-    if (atBottom) list.scrollTop = list.scrollHeight;
+    if (atBottom) {
+      list.scrollTop = list.scrollHeight;
+      unseenInList = 0;
+      newMsgPill.classList.add('hidden');
+    } else if (!m.system && hasRenderedInitialChat) {
+      unseenInList += 1;
+      newMsgPill.textContent = unseenInList > 1 ? `Yeni Mesajlar (${unseenInList}) ↓` : 'Yeni Mesajlar ↓';
+      newMsgPill.classList.remove('hidden');
+    }
+    if (!m.system && hasRenderedInitialChat && isChatCollapsed() && (!m.cid || m.cid !== state.clientId)) {
+      set({ unseenChat: (state.unseenChat || 0) + 1 });
+    }
   }
 
   function quickRoomBar() {
@@ -1741,6 +1977,9 @@ export function buildChat(ctx) {
     rendered.clear();
     recentSysMap.clear();
     lastUser = null;
+    unseenInList = 0;
+    newMsgPill.textContent = 'Yeni Mesajlar ↓';
+    newMsgPill.classList.add('hidden');
     clearReply();
     list.querySelectorAll('.msg, .sysmsg, .chat-msg, .chat-sys, .chat-poll-card').forEach((n) => n.remove());
   }
@@ -1748,6 +1987,7 @@ export function buildChat(ctx) {
   let maxPortraitH = (typeof window !== 'undefined' && window.innerHeight >= window.innerWidth) ? window.innerHeight : 0;
   let maxLandscapeH = (typeof window !== 'undefined' && window.innerWidth > window.innerHeight) ? window.innerHeight : 0;
   let preKbPortrait = typeof window !== 'undefined' ? (window.innerHeight >= window.innerWidth) : true;
+  let preKbW = typeof window !== 'undefined' ? (window.innerWidth || 0) : 0;
   let destroyed = false;
   const onVisualViewportResize = () => {
     if (destroyed) return;
@@ -1760,10 +2000,23 @@ export function buildChat(ctx) {
     const isChatFocused = Boolean(activeEl && (activeEl === input || (el.contains(activeEl) && isInputTag)));
     const isRoomOrPopupInput = Boolean(isChatFocused || (isInputTag && activeEl.closest?.('#mesh-root, #popup-root')));
     const kbWasOpen = document.body.classList.contains('kb-open');
+    const screenOrient = typeof screen !== 'undefined' ? String(screen.orientation?.type || '') : '';
+    const flippedToLandscape = preKbPortrait && rawW > rawH * 1.08 && (screenOrient.startsWith('landscape') || (preKbW > 0 && rawW > preKbW * 1.25));
+    const flippedToPortrait = !preKbPortrait && rawH >= rawW && (screenOrient.startsWith('portrait') || (preKbW > 0 && rawW < preKbW * 0.8));
+    if (flippedToLandscape) {
+      preKbPortrait = false;
+      preKbW = rawW;
+    } else if (flippedToPortrait) {
+      preKbPortrait = true;
+      preKbW = rawW;
+    }
     const physicalPortrait = (kbWasOpen || isRoomOrPopupInput)
       ? preKbPortrait
       : ((rawW > 0 && rawH > 0) ? (rawH >= rawW) : preKbPortrait);
-    if (!isRoomOrPopupInput && !kbWasOpen) preKbPortrait = physicalPortrait;
+    if (!isRoomOrPopupInput && !kbWasOpen) {
+      preKbPortrait = physicalPortrait;
+      if (rawW > 0) preKbW = rawW;
+    }
     const isLandscape = !physicalPortrait && (rawW > rawH * 1.08);
     if (!isRoomOrPopupInput) {
       if (isLandscape) maxLandscapeH = Math.max(maxLandscapeH, rawH, vvH || 0);
@@ -1836,7 +2089,32 @@ export function buildChat(ctx) {
         if (ts > 0 && nowSec - ts > 1800) node.remove();
       });
       const chatArr = state.mesh?.chat || [];
+      const activeIds = new Set(chatArr.map((x) => x?.id).filter(Boolean));
+      let removedAny = false;
+      list.querySelectorAll('.msg[data-id]').forEach((node) => {
+        const nid = node.dataset.id;
+        if (nid && !activeIds.has(nid)) {
+          node.remove();
+          rendered.delete(nid);
+          removedAny = true;
+        }
+      });
+      if (removedAny) {
+        let prevKey = null;
+        list.querySelectorAll('.msg').forEach((node) => {
+          const k = node.dataset.authorKey || '';
+          const hasSpecial = Boolean(node.querySelector('.msg-quote, .chat-poll-card, .chat-voice-note, .chat-snapshot-card'));
+          const isC = Boolean(k && prevKey === k && !hasSpecial);
+          node.classList.toggle('cont', isC);
+          prevKey = hasSpecial ? null : k;
+        });
+        lastUser = prevKey;
+      }
       for (const m of chatArr) append(m);
+      hasRenderedInitialChat = true;
+      if (!isChatCollapsed() && (state.unseenChat || 0) > 0 && (list.scrollHeight - list.scrollTop - list.clientHeight < 60)) {
+        set({ unseenChat: 0 });
+      }
       renderPolls();
       renderReactions();
       if (!onboarding && state.mesh) {
@@ -1878,6 +2156,7 @@ export function buildChat(ctx) {
     },
     destroy() {
       destroyed = true;
+      clearTimeout(gifDebounceTimer);
       stopVoiceRecorder(false);
       if (typeof window !== 'undefined') {
         window.__vortexCancelChatVoiceRec = null;

@@ -1,6 +1,7 @@
 import AuthenticationServices
 import AVFoundation
 import AVKit
+import MediaPlayer
 import SafariServices
 import SwiftUI
 import UIKit
@@ -77,6 +78,7 @@ struct WatchlivoWebView: UIViewRepresentable {
         "watchlivoHaptic",
         "watchlivoPiP",
         "watchlivoAudioSession",
+        "watchlivoVolume",
         "watchlivoShare",
         "watchlivoGoogleAuth"
     ]
@@ -624,6 +626,24 @@ struct WatchlivoWebView: UIViewRepresentable {
             case "watchlivoHaptic":
                 let style = (message.body as? String) ?? "medium"
                 triggerHaptic(style: style)
+
+            case "watchlivoVolume":
+                let rawVol: Float
+                if let num = message.body as? NSNumber {
+                    rawVol = num.floatValue
+                } else if let dict = message.body as? [String: Any], let num = dict["volume"] as? NSNumber {
+                    rawVol = num.floatValue
+                } else {
+                    return
+                }
+                let clamped = max(0.0, min(1.0, rawVol))
+                DispatchQueue.main.async { [weak self] in
+                    self?.pipPlayer.volume = clamped
+                    let volView = MPVolumeView(frame: .zero)
+                    if let slider = volView.subviews.first(where: { $0 is UISlider }) as? UISlider {
+                        slider.value = clamped
+                    }
+                }
 
             case "watchlivoPiP":
                 guard let body = message.body as? [String: Any] else { return }

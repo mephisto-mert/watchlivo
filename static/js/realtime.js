@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261122_v238';
-import { api } from './api.js?v=20261122_v238';
-import { state } from './store.js?v=20261122_v238';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261122_v238';
+import { clock } from './sync.js?v=20261124_v239';
+import { api } from './api.js?v=20261124_v239';
+import { state } from './store.js?v=20261124_v239';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261124_v239';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -338,7 +338,7 @@ export class MeshConnection {
 
   _dispatchHttpEvents(room, isInit) {
     if (!room) return;
-    const selfAllowedTypes = new Set(['chat', 'break_request', 'media_changed', 'poll_updated', 'msg_reacted', 'chat_cleared', 'skip_votes', 'hand_raised', 'queue_updated', 'vote_updated']);
+    const selfAllowedTypes = new Set(['chat', 'break_request', 'media_changed', 'poll_updated', 'msg_reacted', 'msg_deleted', 'profile_updated', 'chat_cleared', 'skip_votes', 'hand_raised', 'queue_updated', 'vote_updated']);
     for (const ev of room.events || []) {
       if (!ev.id || this.seenEventIds.has(ev.id)) continue;
       this._addBounded(this.seenEventIds, ev.id);
@@ -366,7 +366,7 @@ export class MeshConnection {
         const ok = await this.httpSend(payload, false);
         if (!ok && !this.closed) {
           const retryTypes = [
-            'chat', 'clear_chat', 'msg_react', 'poll_create', 'poll_vote',
+            'chat', 'clear_chat', 'delete_msg', 'msg_react', 'poll_create', 'poll_vote', 'profile_update',
             'change_media', 'play', 'pause', 'seek', 'rate', 'resolve_media', 'host_action',
             'voice_state', 'webrtc_offer', 'webrtc_answer', 'webrtc_ice',
             'queue_add', 'queue_add_batch', 'queue_vote', 'vote_video', 'queue_play', 'queue_play_index', 'queue_remove',
@@ -440,13 +440,6 @@ export class MeshConnection {
         lastChatId,
         participantCount: partArr.length || this.participantCount || 0,
       };
-      if ((isInit || payload.type === 'init') && !reqBody.recentChat) {
-        try {
-          const savedC = JSON.parse(localStorage.getItem(`vortex_chat_${this.roomId}`) || sessionStorage.getItem(`vortex_chat_${this.roomId}`) || '[]');
-          const mergedInitChat = [...(Array.isArray(savedC) ? savedC : []), ...chatArr.filter((m) => m && !m.system)].slice(-35);
-          if (mergedInitChat.length) reqBody.recentChat = mergedInitChat;
-        } catch (e) { /* ignore */ }
-      }
       const initialCreatorSeed = Boolean(isInit && this.isCreator && this.lastRev === 0);
       if ((initialCreatorSeed || this.needsMediaPush || (this.lastMediaPushAt && Date.now() - this.lastMediaPushAt < 10000)) && curMedia && (curMedia.url || curMedia.videoId)) {
         reqBody.activeMedia = curMedia;
@@ -595,12 +588,23 @@ export class MeshConnection {
           this.lastRoom.queue = res.queue;
           stateMutated = true;
         }
-        if (stateMutated || this.lastRoom.participantCount !== newCnt || (res.host_id && res.host_id !== this.lastRoom.host_id) || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode) || (res.voipMode && res.voipMode !== this.lastRoom.voipMode)) {
+        const lockedChanged = typeof res.locked === 'boolean' && res.locked !== Boolean(this.lastRoom.locked);
+        const clearedChanged = Number(res.chatClearedAt || 0) > Number(this.lastRoom.chatClearedAt || 0);
+        if (stateMutated || lockedChanged || clearedChanged || this.lastRoom.participantCount !== newCnt || (res.host_id && res.host_id !== this.lastRoom.host_id) || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode) || (res.voipMode && res.voipMode !== this.lastRoom.voipMode)) {
           this.lastRoom.participantCount = newCnt;
           this.lastRoom.count = newCnt;
           if (res.privacy) this.lastRoom.privacy = res.privacy;
           if (res.playMode) this.lastRoom.playMode = res.playMode;
           if (res.voipMode) this.lastRoom.voipMode = res.voipMode;
+          if (typeof res.locked === 'boolean') this.lastRoom.locked = res.locked;
+          if (clearedChanged) {
+            const cSec = Number(res.chatClearedAt) > 1e11 ? Number(res.chatClearedAt) / 1000 : Number(res.chatClearedAt);
+            this.lastRoom.chatClearedAt = Number(res.chatClearedAt);
+            this.lastRoom.chat = (this.lastRoom.chat || []).filter((m) => {
+              const ms = Number(m?.ts || 0);
+              return (ms > 1e11 ? ms / 1000 : ms) > cSec;
+            });
+          }
           if (Array.isArray(res.stage_speakers)) this.lastRoom.stage_speakers = res.stage_speakers;
           if (Array.isArray(res.skip_votes)) this.lastRoom.skip_votes = res.skip_votes;
           if (res.name) this.lastRoom.name = res.name;
@@ -623,10 +627,19 @@ export class MeshConnection {
           this.syncToken = res.room.syncToken;
           try { sessionStorage.setItem(`vortex_st_${this.roomId}`, this.syncToken); } catch (e) { /* ignore */ }
         }
-        const srvLastChatId = Array.isArray(res.room.chat) && res.room.chat.length ? String(res.room.chat[res.room.chat.length - 1]?.id || '') : '';
-        const pVoiceSig = (res.room.participants || []).map((p) => `${p.id}:${p.muted}:${p.cam}:${p.screen}:${p.inCall}:${p.speaking}:${p.handRaised}:${p.isStageSpeaker}`).sort().join(',');
+        const chatArrRoom = Array.isArray(res.room.chat) ? res.room.chat : [];
+        const srvLastChatId = chatArrRoom.length ? String(chatArrRoom[chatArrRoom.length - 1]?.id || '') : '';
+        const chatIdsSig = chatArrRoom.map((m) => m?.id || '').join(',');
+        const reactSig = chatArrRoom.map((m) => {
+          const r = m?.reactions;
+          if (!r || typeof r !== 'object') return '';
+          const k = Object.keys(r).sort().map((em) => `${em}:${Array.isArray(r[em]) ? r[em].length : 0}`).join(',');
+          return k ? `${m.id || ''}:${k}` : '';
+        }).filter(Boolean).join('|');
+        const pollSig = (res.room.polls || []).map((pl) => `${pl?.id || ''}:${(pl?.options || []).map((o) => (Array.isArray(o?.votes) ? o.votes.length : 0)).join(',')}`).join(';');
+        const pVoiceSig = (res.room.participants || []).map((p) => `${p.id}:${p.name || ''}:${p.avatarUrl || ''}:${p.muted}:${p.cam}:${p.screen}:${p.inCall}:${p.speaking}:${p.handRaised}:${p.isStageSpeaker}`).sort().join(',');
         const mSpeed = Number(res.room.media?.meshStatePlaybackSpeed ?? res.room.media?.rate ?? 1).toFixed(2);
-        const stamp = `${res.room.privacy}|${res.room.playMode}|${res.room.voipMode}|${res.room.name}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateStatus}|${mSpeed}|${res.room.media?.url}|${res.room.media?.videoId || ''}|${res.room.media?.title || ''}|${res.room.chat?.length}|${srvLastChatId}|${res.room.host_id}|${(res.room.polls || []).length}|${(res.room.queue || []).length}|${(res.room.skip_votes || []).length}|${pVoiceSig}`;
+        const stamp = `${res.room.privacy}|${res.room.playMode}|${res.room.voipMode}|${Boolean(res.room.locked)}|${Number(res.room.chatClearedAt || 0)}|${res.room.name}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateStatus}|${mSpeed}|${res.room.media?.url}|${res.room.media?.videoId || ''}|${res.room.media?.title || ''}|${chatArrRoom.length}|${srvLastChatId}|${chatIdsSig}|${reactSig}|${pollSig}|${res.room.host_id}|${(res.room.polls || []).length}|${(res.room.queue || []).length}|${(res.room.skip_votes || []).length}|${pVoiceSig}`;
         if (isInit) {
           this.onMessage?.({ type: 'init', clientId: this.clientId, room: res.room });
         } else if (stamp !== this.lastRoomStamp) {
@@ -739,9 +752,13 @@ export class MeshConnection {
       }
       const p2pMsg = {
         id: obj.clientMsgId || `p2p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        cid: this.clientId || '',
+        uid: this.profile.uid || this.profile.id || '',
+        handle: this.profile.handle || '',
+        avatarUrl: this.profile.avatarUrl || this.profile.avatar || '',
         user: this.profile.name,
         color: this.profile.color,
-        text: String(obj.text || '').slice(0, 600),
+        text: String(obj.text || '').slice(0, 1000),
         gif: obj.gif || '',
         snapshot: obj.snapshot || '',
         videoTime: obj.videoTime ?? null,

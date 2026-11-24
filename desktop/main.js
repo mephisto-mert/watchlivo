@@ -1,8 +1,99 @@
 // VORTEX Desktop Shell (Rave Electron parity): persistent DRM partition + <webview> support for Netflix/Disney+/Prime/Max/Crunchyroll/Tubi.
 const { app, BrowserWindow, session, ipcMain, shell } = require('electron');
 const path = require('path');
+const http = require('http');
+const crypto = require('crypto');
 
 const SERVER_URL = process.env.VORTEX_URL || 'https://watchlivo.online';
+const OAUTH_LOOPBACK_PORT = 49223;
+let oauthServer = null;
+let oauthStateNonce = '';
+let oauthTimeoutTimer = null;
+
+function stopDesktopOAuthServer() {
+  if (oauthTimeoutTimer) {
+    clearTimeout(oauthTimeoutTimer);
+    oauthTimeoutTimer = null;
+  }
+  oauthStateNonce = '';
+  if (oauthServer) {
+    try { oauthServer.close(); } catch (_) {}
+    oauthServer = null;
+  }
+}
+
+function startDesktopOAuthFlow(loginHint = '') {
+  stopDesktopOAuthServer();
+  const state = crypto.randomBytes(16).toString('hex');
+  oauthStateNonce = state;
+  const appOrigin = (() => {
+    try { return new URL(SERVER_URL).origin; } catch (_) { return 'https://watchlivo.online'; }
+  })();
+
+  return new Promise((resolve, reject) => {
+    const srv = http.createServer((req, res) => {
+      const reqOrigin = String(req.headers.origin || '');
+      const allowOrigin = (reqOrigin === appOrigin || reqOrigin === 'https://watchlivo.online' || reqOrigin === 'https://www.watchlivo.online')
+        ? reqOrigin
+        : appOrigin;
+      res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      if (req.method === 'POST' && req.url === '/callback') {
+        let raw = '';
+        req.on('data', (chunk) => {
+          raw += chunk;
+          if (raw.length > 65536) req.destroy();
+        });
+        req.on('end', () => {
+          try {
+            const payload = JSON.parse(raw || '{}');
+            if (!payload || typeof payload !== 'object' || !oauthStateNonce || payload.state !== oauthStateNonce) {
+              res.writeHead(403, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: 'Geçersiz oturum state parametresi' }));
+              return;
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              if (mainWindow.isMinimized()) mainWindow.restore();
+              mainWindow.focus();
+              mainWindow.webContents.send('vortex:oauth-result', {
+                user: payload.user || null,
+                authToken: String(payload.authToken || ''),
+              });
+            }
+            setTimeout(stopDesktopOAuthServer, 500);
+          } catch (_) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Geçersiz JSON' }));
+          }
+        });
+        return;
+      }
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Not Found' }));
+    });
+    srv.on('error', (err) => {
+      stopDesktopOAuthServer();
+      reject(err);
+    });
+    srv.listen(OAUTH_LOOPBACK_PORT, '127.0.0.1', () => {
+      oauthServer = srv;
+      oauthTimeoutTimer = setTimeout(stopDesktopOAuthServer, 5 * 60 * 1000);
+      const q = new URLSearchParams({ port: String(OAUTH_LOOPBACK_PORT), state });
+      if (loginHint) q.set('login_hint', String(loginHint).trim());
+      const authUrl = `${appOrigin}/static/desktop-auth.html?${q.toString()}`;
+      shell.openExternal(authUrl).catch(() => {});
+      resolve({ ok: true, port: OAUTH_LOOPBACK_PORT, state });
+    });
+  });
+}
 
 function buildDesktopUserAgent() {
   if (process.platform === 'darwin') {
@@ -55,8 +146,8 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
-    minWidth: 960,
-    minHeight: 600,
+    minWidth: 480,
+    minHeight: 520,
     backgroundColor: '#0b0a12',
     autoHideMenuBar: true,
     webPreferences: {
@@ -151,6 +242,14 @@ ipcMain.handle('vortex:open-external', (_ev, url) => {
   return false;
 });
 
+ipcMain.handle('vortex:start-oauth', async (_ev, loginHint = '') => {
+  try {
+    return await startDesktopOAuthFlow(loginHint);
+  } catch (err) {
+    return { ok: false, error: String(err?.message || 'OAuth başlatılamadı') };
+  }
+});
+
 if (gotLock) {
   app.whenReady().then(() => {
     createWindow();
@@ -159,6 +258,10 @@ if (gotLock) {
     });
   });
 }
+app.on('before-quit', () => {
+  stopDesktopOAuthServer();
+});
 app.on('window-all-closed', () => {
+  stopDesktopOAuthServer();
   if (process.platform !== 'darwin') app.quit();
 });

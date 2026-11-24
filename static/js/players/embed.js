@@ -40,14 +40,48 @@ export class EmbedAdapter {
     const autoBool = shouldPlay ? 'true' : 'false';
     const autoBit = shouldPlay ? '1' : '0';
     if (media.provider === 'twitch') {
-      const id = String(media.videoId || '').trim();
-      if (!/^[A-Za-z0-9_]{1,64}$/.test(id)) return 'about:blank';
-      const isVod = /^\d+$/.test(id);
-      this.caps.live = !isVod;
-      this.caps.seek = isVod;
-      return isVod
-        ? `https://player.twitch.tv/?video=v${id}&parent=${encodeURIComponent(host)}&autoplay=${autoBool}`
-        : `https://player.twitch.tv/?channel=${encodeURIComponent(id)}&parent=${encodeURIComponent(host)}&autoplay=${autoBool}&muted=false`;
+      const rawEmbed = String(media.embedUrl || '').trim();
+      const rawUrl = String(media.url || '').trim();
+      const rawId = String(media.videoId || '').trim();
+      const extractTwitchClipSlug = (str) => {
+        const v = String(str || '').trim();
+        if (!v) return '';
+        const qm = v.match(/[?&]clip=([A-Za-z0-9_-]+)/i);
+        if (qm && qm[1]) return qm[1];
+        const pm = v.match(/(?:clips\.twitch\.tv\/|(?:[a-z0-9-]+\.)?twitch\.tv\/(?:[^/?#]+\/)?clip\/)([A-Za-z0-9_-]+)/i);
+        return (pm && pm[1] && pm[1].toLowerCase() !== 'embed') ? pm[1] : '';
+      };
+      const clipFromUrl = extractTwitchClipSlug(rawUrl);
+      const clipFromEmbed = extractTwitchClipSlug(rawEmbed);
+      const clipSlug = String(media.clip || (rawId.startsWith('clip:') ? rawId.slice(5) : '') || clipFromEmbed || clipFromUrl).trim();
+      if (clipSlug && /^[A-Za-z0-9_-]{2,96}$/.test(clipSlug)) {
+        this.caps.live = false;
+        this.caps.seek = false;
+        return `https://clips.twitch.tv/embed?clip=${encodeURIComponent(clipSlug)}&parent=${encodeURIComponent(host)}&autoplay=${autoBool}`;
+      }
+      const vodRaw = String(media.video || (rawId.startsWith('v') ? rawId.slice(1) : (/^\d+$/.test(rawId) ? rawId : ''))).replace(/^v/i, '').trim();
+      if (vodRaw && /^\d{4,20}$/.test(vodRaw)) {
+        this.caps.live = false;
+        this.caps.seek = true;
+        return `https://player.twitch.tv/?video=v${vodRaw}&parent=${encodeURIComponent(host)}&autoplay=${autoBool}`;
+      }
+      const chan = String(media.channel && media.channel !== 'Twitch' ? media.channel : rawId).trim();
+      if (/^[A-Za-z0-9_]{1,64}$/.test(chan)) {
+        this.caps.live = true;
+        this.caps.seek = false;
+        return `https://player.twitch.tv/?channel=${encodeURIComponent(chan)}&parent=${encodeURIComponent(host)}&autoplay=${autoBool}&muted=false`;
+      }
+      if (_isTrustedEmbedUrl(rawEmbed)) {
+        try {
+          const u = new URL(rawEmbed);
+          const parents = u.searchParams.getAll('parent');
+          if (!parents.includes(host)) u.searchParams.append('parent', host);
+          return u.toString();
+        } catch (_) {
+          return rawEmbed;
+        }
+      }
+      return 'about:blank';
     }
     if (media.provider === 'kick') {
       const id = String(media.videoId || '').trim();

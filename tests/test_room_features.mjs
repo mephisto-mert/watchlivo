@@ -221,7 +221,7 @@ test("rich chat (gif, snapshot, audioNote, replyTo), msg_react, live polls, and 
   assert.equal(pollVoteRes.data.room.polls[0].options[0].votes.length, 1);
   assert.ok(pollVoteRes.data.room.events.some((e) => e.type === "poll_updated"));
 
-  // 6. clear_chat clears both chat and polls and emits chat_cleared
+  // 6. clear_chat clears chat, records chatClearedAt, preserves active polls, and emits chat_cleared
   const clearRes = await syncPost(env, roomId, {
     type: "clear_chat",
     clientId: hostCid,
@@ -229,8 +229,8 @@ test("rich chat (gif, snapshot, audioNote, replyTo), msg_react, live polls, and 
     username: "HostAli",
   });
   assert.equal(clearRes.data.room.chat.length, 0);
-  assert.equal(clearRes.data.room.polls.length, 0);
-  assert.ok(clearRes.data.room.events.some((e) => e.type === "chat_cleared"));
+  assert.equal(clearRes.data.room.polls.length, 1, "active live polls must survive clear_chat (v239 fix)");
+  assert.ok(clearRes.data.room.events.some((e) => e.type === "chat_cleared" && Number(e.chatClearedAt || 0) > 0));
 });
 
 test("queue, voting, skip_votes, break_request, stage mode, hand_raise, WebRTC 60-signal buffer, and DO voice-relay", async () => {
@@ -892,4 +892,129 @@ test("v227: SyncEngine didInitialSync finite-attempt cap, edge_rooms msg_reacted
     if (origAudioSessionDesc) Object.defineProperty(globalThis.navigator, "audioSession", origAudioSessionDesc);
     else delete globalThis.navigator.audioSession;
   }
+});
+
+test("v239 M2 edge_rooms security & sync: malformed JSON 400, transfer_host revokes old creator kick, hideLocation masks country, delete_msg, GIF allowlist, set_rate persistence, and profile_update blocks SVG", async () => {
+  const env = makeMemEnv();
+
+  // 1. Malformed JSON / non-object body on create returns HTTP 400
+  const badJsonRes = await handleEdgeRoomCreate(
+    new Request("https://watchlivo.online/api/rooms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{not-valid-json",
+    }),
+    env,
+    jsonResp
+  );
+  assert.equal(badJsonRes.status, 400, "Malformed JSON on /api/rooms must return 400");
+
+  const arrBodyRes = await handleEdgeRoomCreate(
+    new Request("https://watchlivo.online/api/rooms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([1, 2, 3]),
+    }),
+    env,
+    jsonResp
+  );
+  assert.equal(arrBodyRes.status, 400, "Array body on /api/rooms must return 400");
+
+  // 2. Create room with hideLocation: true -> country masked
+  const created = await (await handleEdgeRoomCreate(
+    new Request("https://watchlivo.online/api/rooms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "CF-IPCountry": "TR" },
+      body: JSON.stringify({
+        name: "M2 Security Oda",
+        username: "HostAli",
+        clientId: "h_m2host",
+        privacy: "private",
+        hideLocation: true,
+        playMode: "cohost",
+        voipMode: "stage",
+      }),
+    }),
+    env,
+    jsonResp
+  )).json();
+  const roomId = created.room.id;
+  const hostCid = created.clientId;
+  const hostTok = created.clientToken;
+  assert.equal(created.room.playMode, "cohost");
+  assert.equal(created.room.voipMode, "stage");
+  const hostPart = created.room.participants.find((p) => p.id === hostCid);
+  assert.equal(hostPart?.country || "", "", "hideLocation: true must mask country");
+
+  // 3. Peer joins -> set_rate syncs meshStatePlaybackSpeed
+  const p2 = (await syncPost(env, roomId, { type: "init", clientId: "h_m2peer", username: "PeerVeli" })).data;
+  const p2Cid = p2.clientId;
+  const p2Tok = p2.clientToken;
+
+  const rateRes = await syncPost(env, roomId, {
+    type: "rate",
+    clientId: hostCid,
+    clientToken: hostTok,
+    username: "HostAli",
+    rate: 1.5,
+  });
+  assert.equal(rateRes.status, 200);
+  assert.equal(rateRes.data.room.media.rate, 1.5);
+  assert.equal(rateRes.data.room.media.meshStatePlaybackSpeed, 1.5, "rate must update meshStatePlaybackSpeed for reload persistence");
+
+  // 4. GIF allowlist: untrusted GIF host stripped, trusted Giphy allowed; delete_msg removes single message
+  const badGifRes = await syncPost(env, roomId, {
+    type: "chat",
+    clientId: p2Cid,
+    clientToken: p2Tok,
+    username: "PeerVeli",
+    text: "gif test",
+    gif: "https://evil-tracker.example/pixel.gif",
+  });
+  assert.equal(badGifRes.status, 200);
+  const badGifMsg = badGifRes.data.room.chat[badGifRes.data.room.chat.length - 1];
+  assert.ok(!badGifMsg.gif, "Untrusted GIF URL must be stripped");
+
+  const delRes = await syncPost(env, roomId, {
+    type: "delete_msg",
+    clientId: hostCid,
+    clientToken: hostTok,
+    username: "HostAli",
+    msgId: badGifMsg.id,
+  });
+  assert.equal(delRes.status, 200);
+  assert.equal(delRes.data.room.chat.some((m) => m.id === badGifMsg.id), false, "Host delete_msg must remove target message");
+
+  // 5. profile_update blocks .svg avatar
+  const svgProfRes = await syncPost(env, roomId, {
+    type: "profile_update",
+    clientId: p2Cid,
+    clientToken: p2Tok,
+    username: "PeerVeli",
+    avatarUrl: "https://cdn.example.com/xss.svg",
+  });
+  assert.equal(svgProfRes.status, 200);
+  const p2AfterSvg = svgProfRes.data.room.participants.find((p) => p.id === p2Cid);
+  assert.equal(p2AfterSvg?.avatarUrl || "", "", "profile_update must block .svg avatar URLs");
+
+  // 6. transfer_host transfers creatorCid so former host CANNOT kick the new host!
+  const xferRes = await syncPost(env, roomId, {
+    type: "host_action",
+    subAction: "transfer_host",
+    targetId: p2Cid,
+    clientId: hostCid,
+    clientToken: hostTok,
+    username: "HostAli",
+  });
+  assert.equal(xferRes.status, 200);
+
+  const oldHostKickRes = await syncPost(env, roomId, {
+    type: "host_action",
+    subAction: "kick",
+    targetId: p2Cid,
+    clientId: hostCid,
+    clientToken: hostTok,
+    username: "HostAli",
+  });
+  assert.equal(oldHostKickRes.status, 403, "Former host must NOT be able to kick new host after transfer_host");
 });

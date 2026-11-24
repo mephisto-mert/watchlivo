@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261122_v238';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261124_v239';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -461,6 +461,63 @@ export function setBackground(url) {
   img.src = cleanUrl;
 }
 
+const BAD_TMDB_POSTER_RE = /(?:4Mt7WHox67uJ1yErwTBFcV8KWgG|od5S7r2v306B2eR0E5t6vP8K2wG)/i;
+
+export function proxyPosterUrl(rawUrl, meta = null) {
+  const rawInput = String(rawUrl || '').trim();
+  const isYt = Boolean(meta?.provider === 'youtube' || /ytimg\.com|youtube\.com/i.test(rawInput));
+  if (isYt) {
+    return rawInput || '/static/watchlivo-poster.svg';
+  }
+  const tid = String(meta?.tid || meta?.tmdbId || meta?.id || '').trim();
+  const t = String(meta?.t || meta?.seriesTitle || meta?.title || '').trim();
+  const ot = String(meta?.ot || meta?.originalTitle || '').trim();
+  const y = String(meta?.y || meta?.year || '').trim();
+  const mt = (meta?.mt || meta?.mediaType) === 'tv' ? 'tv' : 'movie';
+  const buildLookup = () => {
+    if (!tid && !t && !ot) return '/static/watchlivo-poster.svg';
+    const p = new URLSearchParams();
+    if (tid) p.set('tid', tid);
+    if (t) p.set('t', t);
+    if (ot) p.set('ot', ot);
+    if (y) p.set('y', y);
+    p.set('mt', mt);
+    return `/api/rave/poster?${p.toString()}`;
+  };
+  const raw = BAD_TMDB_POSTER_RE.test(rawInput) ? '' : rawInput;
+  if (!raw || raw.includes('watchlivo-poster.svg')) {
+    return raw && !BAD_TMDB_POSTER_RE.test(rawInput) ? raw : buildLookup();
+  }
+  if (/^(?:data:|blob:|\/api\/|\/static\/)/i.test(raw)) return raw;
+  const norm = raw.startsWith('//') ? `https:${raw}` : raw;
+  if (/^https?:\/\/(?:[^/]+\.)?tmdb\.org\//i.test(norm)) {
+    const p = new URLSearchParams({ url: norm });
+    if (tid) p.set('tid', tid);
+    if (t) p.set('t', t);
+    if (ot) p.set('ot', ot);
+    if (y) p.set('y', y);
+    p.set('mt', mt);
+    return `/api/rave/poster?${p.toString()}`;
+  }
+  return norm;
+}
+
+export function healPosterError(el, meta = null) {
+  if (!el) return;
+  const src = String(el.getAttribute?.('src') || el.src || '');
+  const isYt = Boolean(meta?.provider === 'youtube' || /ytimg\.com/i.test(src));
+  const tid = String(meta?.tid || meta?.tmdbId || meta?.id || '').trim();
+  const t = String(meta?.t || meta?.seriesTitle || meta?.title || '').trim();
+  const ot = String(meta?.ot || meta?.originalTitle || '').trim();
+  if (!isYt && el.dataset?.healed !== '1' && !src.includes('/api/rave/poster') && (tid || t || ot)) {
+    if (el.dataset) el.dataset.healed = '1';
+    el.src = proxyPosterUrl('', meta);
+    return;
+  }
+  el.onerror = null;
+  el.src = '/static/watchlivo-poster.svg';
+}
+
 const DEFAULT_OPENAI_KEY = '';
 const DEFAULT_SUNO_KEY = '';
 
@@ -570,9 +627,29 @@ export function isNativeWatchlivoApp() {
   const ua = navigator.userAgent || '';
   return /WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua));
 }
+export function isIosBrowser() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /iP(hone|ad|od)/i.test(ua) || (navigator.platform === 'MacIntel' && Number(navigator.maxTouchPoints || 0) > 1);
+}
 if (typeof document !== 'undefined' && isNativeWatchlivoApp()) {
   document.documentElement.classList.add('is-native-apk');
 }
+
+export function initPwaInstallPrompt() {
+  if (typeof window === 'undefined' || window.__wlInstallPromptBound) return;
+  window.__wlInstallPromptBound = true;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    window.__deferredInstallPrompt = e;
+    try { window.dispatchEvent(new CustomEvent('wl:install-prompt-ready')); } catch (_) {}
+  });
+  window.addEventListener('appinstalled', () => {
+    window.__deferredInstallPrompt = null;
+    toast('🎉 Watchlivo uygulaması cihazına yüklendi!');
+  });
+}
+initPwaInstallPrompt();
 
 export async function handleWindowsAppDownload(ev) {
   ev?.preventDefault?.();
@@ -587,11 +664,19 @@ export async function handleWindowsAppDownload(ev) {
   } catch (_) {}
   if (typeof window !== 'undefined' && window.__deferredInstallPrompt) {
     try {
-      window.__deferredInstallPrompt.prompt();
-      await window.__deferredInstallPrompt.userChoice;
+      const promptEv = window.__deferredInstallPrompt;
+      promptEv.prompt();
+      const choice = await promptEv.userChoice;
       window.__deferredInstallPrompt = null;
+      if (choice?.outcome === 'accepted') {
+        toast('🎉 Watchlivo masaüstü uygulaması kuruluyor!');
+      } else {
+        toast('Kurulum penceresi kapatıldı. Dilediğiniz zaman adres çubuğundan yükleyebilirsiniz.');
+      }
       return;
-    } catch (_) {}
+    } catch (_) {
+      window.__deferredInstallPrompt = null;
+    }
   }
   popup({
     title: '💻 Watchlivo Windows Masaüstü Kurulumu',
@@ -602,6 +687,7 @@ export async function handleWindowsAppDownload(ev) {
 
 export function openThemeModal() {
   const inApk = isNativeWatchlivoApp();
+  const hasInstallPrompt = Boolean(typeof window !== 'undefined' && window.__deferredInstallPrompt);
   const box = h('div', { class: 'theme-modal-body' },
     buildThemeStudio(),
     !inApk ? h('div', { class: 'theme-sec-title', style: { marginTop: '1.2em' } }, '📲 Watchlivo Resmi Uygulamaları') : null,
@@ -611,24 +697,25 @@ export function openThemeModal() {
         href: '/download/ipa',
         download: 'Watchlivo.ipa',
         onclick: () => toast('🍎 iPhone IPA indiriliyor...', 4000)
-      }, '🍎 iPhone IPA İndir (v2.2.9)'),
+      }, '🍎 iPhone IPA İndir (v2.2.11)'),
       h('a', {
         class: 'btn wl-btn-apk-dl',
         href: '/download/Watchlivo-v2.0.apk',
         download: 'Watchlivo-v2.0.apk',
-        onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
-      }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android Native APK İndir (v2.0.2)'),
+        onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000)
+      }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android Native APK İndir (v2.0)'),
       h('a', {
         class: 'btn wl-btn-win-dl',
         href: '/download/windows',
         onclick: handleWindowsAppDownload
-      }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } }), 'Windows Masaüstü Kur')) : null
+      }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } }), hasInstallPrompt ? 'Uygulamayı Yükle (PWA / Masaüstü)' : 'Windows Masaüstü Kur')) : null
   );
   popup({ title: inApk ? 'Görünüm & Tema Ayarları' : 'Görünüm & Uygulama İndir', content: box, options: [{ label: 'Tamam', primary: true }] });
 }
 
 export function openDownloadModal() {
   const inApk = isNativeWatchlivoApp();
+  const hasInstallPrompt = Boolean(typeof window !== 'undefined' && window.__deferredInstallPrompt);
   const box = h('div', { class: 'wl-download-modal' },
     h('div', { class: 'wl-download-header' },
       h('p', {}, 'Tek tıkla, tam ekran, yüksek performans ve arkadaşlarınla sıfır gecikmeli izle.')
@@ -638,7 +725,7 @@ export function openDownloadModal() {
         h('div', { class: 'wl-download-icon' }, h('span', { style: { fontSize: '1.45rem' } }, '🍎')),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'iPhone & iPad (iOS IPA)'),
-          h('small', {}, 'v2.2.9 • iOS 16+ Native SwiftUI • PiP, Google Giriş & AltStore / SideStore / TrollStore'),
+          h('small', {}, 'v2.2.11 • iOS 16+ Native SwiftUI • PiP, Google Giriş & AltStore / SideStore / TrollStore'),
           h('p', {}, 'Uygulamadan çıkınca tam sistem PiP penceresi, kamera/mikrofon ve arka plan ses desteği.')
         ),
         h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
@@ -658,28 +745,28 @@ export function openDownloadModal() {
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.android, style: { display: 'flex' } })),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'Android Uygulaması (Native APK)'),
-          h('small', {}, 'v2.0.2 • Gerçek Native Oynatıcı, Otomatik PiP & Rave.io Otomatik Güncelleme'),
+          h('small', {}, 'v2.0 • Gerçek Native Oynatıcı, Otomatik PiP & Rave.io Otomatik Güncelleme'),
           h('p', {}, 'Tarayıcısız saf Android donanım oynatıcı, sistem PiP penceresi ve yeni sürüm çıktığında kendi kendini otomatik güncelleyen altyapı.')
         ),
         h('a', {
           class: 'btn primary wl-download-action',
           href: '/download/Watchlivo-v2.0.apk',
           download: 'Watchlivo-v2.0.apk',
-          onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
-        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Native APK İndir (v2.0.2)')
+          onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000)
+        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Native APK İndir (v2.0)')
       ) : null,
       h('div', { class: 'wl-download-card windows' },
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } })),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'Windows Masaüstü'),
-          h('small', {}, 'v1.2.0 • Windows 10 / 11 64-bit'),
+          h('small', {}, 'v2.0.0 • Windows 10 / 11 64-bit & PWA'),
           h('p', {}, 'Masaüstü donma önleyici, ultra düşük gecikme ve sistem bildirimleri.')
         ),
         h('a', {
           class: 'btn wl-download-action',
           href: '/download/windows',
           onclick: handleWindowsAppDownload
-        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Windows Masaüstü Kur')
+        }, h('span', { html: icons.download, style: { display: 'flex' } }), hasInstallPrompt ? '💻 Uygulamayı Yükle (PWA / Masaüstü)' : 'Windows Masaüstü Kur')
       )
     ),
     !inApk ? h('div', { class: 'wl-download-footer-note' },

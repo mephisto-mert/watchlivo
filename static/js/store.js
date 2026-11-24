@@ -1,5 +1,5 @@
 // Minimal reactive store (mirrors Rave's redux slices: self, view, mesh, selection, uiPrefs/theme schemas).
-import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261122_v238';
+import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261124_v239';
 const _STORE_SINGLETON = (typeof window !== 'undefined' && window.__wlStoreSingleton) || null;
 const listeners = _STORE_SINGLETON ? _STORE_SINGLETON.listeners : new Set();
 const UI_PREFS_KEY = 'vortex_ui_prefs_v1';
@@ -40,10 +40,19 @@ function loadUiPrefs() {
     subDual: false,
     subOffsetSec: 0,
     voiceDucking: true,
+    notifChime: true,
   };
   try {
     const raw = JSON.parse(localStorage.getItem(UI_PREFS_KEY) || '{}');
     const merged = { ...defaults, ...raw };
+    if (raw.voiceDucking === undefined) {
+      const vd = String(localStorage.getItem('vortex_voice_duck') || '').trim().toLowerCase();
+      if (['0', 'off', 'false'].includes(vd)) merged.voiceDucking = false;
+    }
+    if (raw.notifChime === undefined) {
+      const nc = String(localStorage.getItem('vortex_notif_chime') || '').trim().toLowerCase();
+      if (['0', 'off', 'false'].includes(nc)) merged.notifChime = false;
+    }
     merged.theme = normalizeThemeId(merged.theme);
     return merged;
   } catch (e) {
@@ -77,7 +86,10 @@ export function applyUiPrefs(prefs = state?.uiPrefs) {
   root.style.setProperty('--sub-bg', bgMap[prefs.subColor] || 'rgba(7, 8, 13, 0.75)');
   if (typeof window !== 'undefined') {
     window.__kinoxVoiceDuckEnabled = prefs.voiceDucking !== false;
-    try { localStorage.setItem('vortex_voice_duck', prefs.voiceDucking === false ? '0' : '1'); } catch (e) { /* ignore */ }
+    try {
+      localStorage.setItem('vortex_voice_duck', prefs.voiceDucking === false ? '0' : '1');
+      localStorage.setItem('vortex_notif_chime', prefs.notifChime === false ? '0' : '1');
+    } catch (e) { /* ignore */ }
   }
 }
 
@@ -101,7 +113,7 @@ export const state = _STORE_SINGLETON ? _STORE_SINGLETON.state : {
     outgoingRequests: [],
     blocked: [],
     totalUnread: 0,
-    privacy: { presenceVisibility: 'friends', hideWatching: false, allowInvites: 'friends' },
+    privacy: { presenceVisibility: 'friends', hideWatching: false, hideLocation: false, hideFriends: false, allowInvites: 'friends' },
     loaded: false,
   },
 };
@@ -114,40 +126,205 @@ applyUiPrefs(state.uiPrefs);
 let _activeAccountScope = '';
 
 export function set(patch) {
+  const prevSelf = state.self;
   const prevScope = _activeAccountScope || getAccountStorageScope();
   const resolvedPatch = typeof patch === 'function' ? patch(state) : patch;
   Object.assign(state, resolvedPatch);
   if (resolvedPatch && Object.prototype.hasOwnProperty.call(resolvedPatch, 'self')) {
+    const sObj = resolvedPatch.self;
+    if (sObj && typeof sObj === 'object' && state.social && !(resolvedPatch.social && resolvedPatch.social.privacy)) {
+      const nextPriv = { ...(state.social.privacy || { presenceVisibility: 'friends', hideWatching: false, hideLocation: false, hideFriends: false, allowInvites: 'friends' }) };
+      if (sObj.hideWatching !== undefined) nextPriv.hideWatching = Boolean(sObj.hideWatching);
+      if (sObj.hideLocation !== undefined) nextPriv.hideLocation = Boolean(sObj.hideLocation);
+      if (sObj.hideFriends !== undefined) nextPriv.hideFriends = Boolean(sObj.hideFriends);
+      state.social = { ...state.social, privacy: nextPriv };
+    }
     const nextScope = getAccountStorageScope();
     if (nextScope !== _activeAccountScope) {
       if (prevScope && prevScope.startsWith('guest_') && nextScope.startsWith('acct_')) {
+        const guestUid = (prevSelf?.isGuest ? (prevSelf.uid || prevSelf.id) : '') || prevScope.replace(/^guest_/, '');
+        const guestToken = (prevSelf?.isGuest ? prevSelf.guestToken : '') || (() => {
+          try { return JSON.parse(sessionStorage.getItem('vortex_temp_guest_v1') || 'null')?.guestToken || ''; } catch (_) { return ''; }
+        })();
         try {
           const nowTs = Date.now();
-          for (const keyFn of [_historyKey, _favKey, _musicKey, _ytPrefsKey]) {
-            const gKey = keyFn(prevScope);
-            const gVal = localStorage.getItem(gKey);
-            const aKey = keyFn(nextScope);
-            const aVal = localStorage.getItem(aKey);
-            if (gVal && gVal !== '[]' && gVal !== '{}' && (!aVal || aVal === '[]' || aVal === '{}')) {
-              if (keyFn === _historyKey || keyFn === _favKey) {
-                try {
-                  const parsed = JSON.parse(gVal);
-                  if (Array.isArray(parsed)) {
-                    const stamped = parsed.map((it) => (it && typeof it === 'object' ? { ...it, cloudSynced: false, updatedAt: nowTs } : it));
-                    localStorage.setItem(aKey, JSON.stringify(stamped));
-                  } else {
-                    localStorage.setItem(aKey, gVal);
-                  }
-                } catch (_) {
-                  localStorage.setItem(aKey, gVal);
-                }
+          const safeJson = (raw, fb) => { try { return raw ? JSON.parse(raw) : fb; } catch (_) { return fb; } };
+
+          // 1. Merge watch history (preserve both guest & account progress)
+          const gHistKey = _historyKey(prevScope);
+          const aHistKey = _historyKey(nextScope);
+          const gHist = safeJson(localStorage.getItem(gHistKey), []);
+          const aHist = safeJson(localStorage.getItem(aHistKey), []);
+          if (Array.isArray(gHist) && gHist.length) {
+            const hMap = new Map();
+            const hKeyFor = (it) => _boundProgressKey(it?.historyId || it?.key || (it?.tmdbId ? `${it.mediaType === 'tv' ? 'tv' : 'movie'}:${it.tmdbId}` : it?.videoId || it?.title || ''));
+            for (const it of (Array.isArray(aHist) ? aHist : [])) {
+              const k = hKeyFor(it);
+              if (k) hMap.set(k, it);
+            }
+            for (const it of gHist) {
+              if (!it || typeof it !== 'object') continue;
+              const k = hKeyFor(it);
+              if (!k) continue;
+              const prev = hMap.get(k);
+              const gTs = _normTs(it.updatedAt) || nowTs;
+              const pTs = _normTs(prev?.updatedAt);
+              const { mergedEp, epChanged } = _mergeEpMaps(prev?.epProgress, it.epProgress, pTs, gTs);
+              if (!prev || gTs > pTs) {
+                hMap.set(k, { ...prev, ...it, historyId: k, key: k, epProgress: mergedEp, cloudSynced: false, updatedAt: gTs });
               } else {
-                localStorage.setItem(aKey, gVal);
+                hMap.set(k, { ...prev, epProgress: mergedEp, ...(epChanged ? { cloudSynced: false } : {}) });
               }
             }
-            localStorage.removeItem(gKey);
+            const mergedHist = [...hMap.values()].sort((a, b) => _normTs(b.updatedAt) - _normTs(a.updatedAt)).slice(0, 50);
+            localStorage.setItem(aHistKey, JSON.stringify(mergedHist));
           }
+          localStorage.removeItem(gHistKey);
+
+          // 2. Merge favorites / watchlist
+          const gFavKey = _favKey(prevScope);
+          const aFavKey = _favKey(nextScope);
+          const gFavs = safeJson(localStorage.getItem(gFavKey), []);
+          const aFavs = safeJson(localStorage.getItem(aFavKey), []);
+          if (Array.isArray(gFavs) && gFavs.length) {
+            const fMap = new Map();
+            const fKeyFor = (f) => _boundProgressKey(f?.key || (f?.tmdbId ? `${f.mediaType === 'tv' ? 'tv' : 'movie'}:${f.tmdbId}` : f?.favId || f?.videoId || f?.title || ''));
+            for (const f of (Array.isArray(aFavs) ? aFavs : [])) {
+              const k = fKeyFor(f);
+              if (k) fMap.set(k, f);
+            }
+            for (const f of gFavs) {
+              if (!f || typeof f !== 'object') continue;
+              const k = fKeyFor(f);
+              if (k && !fMap.has(k)) {
+                fMap.set(k, { ...f, key: k, cloudSynced: false, addedAt: _normTs(f.addedAt) || nowTs });
+              }
+            }
+            const mergedFavs = [...fMap.values()].sort((a, b) => _normTs(b.addedAt) - _normTs(a.addedAt)).slice(0, 60);
+            localStorage.setItem(aFavKey, JSON.stringify(mergedFavs));
+          }
+          localStorage.removeItem(gFavKey);
+
+          // 3. Merge music history
+          const gMusKey = _musicKey(prevScope);
+          const aMusKey = _musicKey(nextScope);
+          const gMus = safeJson(localStorage.getItem(gMusKey), []);
+          const aMus = safeJson(localStorage.getItem(aMusKey), []);
+          if (Array.isArray(gMus) && gMus.length) {
+            const mMap = new Map();
+            const mKeyFor = (m) => {
+              const pair = `${String(m?.artist || '').toLowerCase()}|${String(m?.songTitle || '').toLowerCase()}`;
+              return pair !== '|' ? pair : String(m?.videoId || m?.id || m?.title || '').toLowerCase();
+            };
+            for (const m of (Array.isArray(aMus) ? aMus : [])) {
+              const k = mKeyFor(m);
+              if (k) mMap.set(k, m);
+            }
+            for (const m of gMus) {
+              if (!m || typeof m !== 'object') continue;
+              const k = mKeyFor(m);
+              if (!k) continue;
+              const prev = mMap.get(k);
+              if (!prev || _normTs(m.playedAt) > _normTs(prev.playedAt)) mMap.set(k, m);
+            }
+            const mergedMus = [...mMap.values()].sort((a, b) => _normTs(b.playedAt) - _normTs(a.playedAt)).slice(0, 20);
+            localStorage.setItem(aMusKey, JSON.stringify(mergedMus));
+          }
+          localStorage.removeItem(gMusKey);
+
+          // 4. Merge YouTube preferences
+          const gYtKey = _ytPrefsKey(prevScope);
+          const aYtKey = _ytPrefsKey(nextScope);
+          const gYt = safeJson(localStorage.getItem(gYtKey), null);
+          const aYt = safeJson(localStorage.getItem(aYtKey), {});
+          if (gYt && typeof gYt === 'object') {
+            const subMap = new Map();
+            for (const s of [...(aYt.subscriptions || []), ...(gYt.subscriptions || [])]) {
+              if (!s) continue;
+              const k = s.channelId || String(s.name || '').toLowerCase();
+              if (k && !subMap.has(k)) subMap.set(k, s);
+            }
+            const likeMap = new Map();
+            for (const l of [...(aYt.likedVideos || []), ...(gYt.likedVideos || [])]) {
+              if (l?.videoId && !likeMap.has(l.videoId)) likeMap.set(l.videoId, l);
+            }
+            const searchSeen = new Set();
+            const mergedSearch = [];
+            for (const q of [...(aYt.searchHistory || []), ...(gYt.searchHistory || [])]) {
+              const kl = String(q || '').trim().toLowerCase();
+              if (kl && !searchSeen.has(kl)) { searchSeen.add(kl); mergedSearch.push(q); }
+            }
+            const uniqStr = (arrA = [], arrB = []) => [...new Set([...(Array.isArray(arrA) ? arrA : []), ...(Array.isArray(arrB) ? arrB : [])].filter(Boolean))];
+            const mergedYt = {
+              ...gYt,
+              ...aYt,
+              subscriptions: [...subMap.values()].slice(0, 120),
+              likedVideos: [...likeMap.values()].slice(0, 120),
+              searchHistory: mergedSearch.slice(0, 40),
+              dismissedVideoIds: uniqStr(aYt.dismissedVideoIds, gYt.dismissedVideoIds).slice(0, 200),
+              blockedChannels: uniqStr(aYt.blockedChannels, gYt.blockedChannels).slice(0, 100),
+              topics: uniqStr(aYt.topics, gYt.topics).slice(0, 40),
+              updatedAt: nowTs,
+            };
+            localStorage.setItem(aYtKey, JSON.stringify(mergedYt));
+          }
+          localStorage.removeItem(gYtKey);
+
+          // 5. Merge friends, recent rooms, room snapshots & provider accounts
+          const gFrKey = _friendsKey(prevScope);
+          const aFrKey = _friendsKey(nextScope);
+          const gFr = safeJson(localStorage.getItem(gFrKey), []);
+          const aFr = safeJson(localStorage.getItem(aFrKey), []);
+          if (Array.isArray(gFr) && gFr.length) {
+            const frMap = new Map();
+            for (const f of [...(Array.isArray(aFr) ? aFr : []), ...gFr]) {
+              const k = f?.uid || f?.id;
+              if (k && !frMap.has(k)) frMap.set(k, f);
+            }
+            localStorage.setItem(aFrKey, JSON.stringify([...frMap.values()]));
+          }
+          localStorage.removeItem(gFrKey);
+
+          const gRecKey = `vortex_recent_rooms_v2:${prevScope}`;
+          const aRecKey = `vortex_recent_rooms_v2:${nextScope}`;
+          const gRec = safeJson(localStorage.getItem(gRecKey), []);
+          const aRec = safeJson(localStorage.getItem(aRecKey), []);
+          if (Array.isArray(gRec) && gRec.length) {
+            const mergedRec = [...new Set([...(Array.isArray(aRec) ? aRec : []), ...gRec].filter(Boolean))].slice(0, 20);
+            localStorage.setItem(aRecKey, JSON.stringify(mergedRec));
+          }
+          localStorage.removeItem(gRecKey);
+
+          const gSnapKey = `vortex_room_snapshots_v2:${prevScope}`;
+          const aSnapKey = `vortex_room_snapshots_v2:${nextScope}`;
+          const gSnap = safeJson(localStorage.getItem(gSnapKey), null);
+          const aSnap = safeJson(localStorage.getItem(aSnapKey), {});
+          if (gSnap && typeof gSnap === 'object') {
+            localStorage.setItem(aSnapKey, JSON.stringify({ ...gSnap, ...(aSnap && typeof aSnap === 'object' ? aSnap : {}) }));
+          }
+          localStorage.removeItem(gSnapKey);
+
+          const nextUid = String(state.self?.uid || state.self?.id || '').trim().toLowerCase();
+          if (nextUid) {
+            const gAccKey = 'vortex_accounts_v7:guest';
+            const aAccKey = `vortex_accounts_v7:${nextUid}`;
+            const gAcc = safeJson(localStorage.getItem(gAccKey), null);
+            const aAcc = safeJson(localStorage.getItem(aAccKey), {});
+            if (gAcc && typeof gAcc === 'object' && Object.keys(gAcc).length) {
+              localStorage.setItem(aAccKey, JSON.stringify({ ...gAcc, ...(aAcc && typeof aAcc === 'object' ? aAcc : {}) }));
+            }
+            localStorage.removeItem(gAccKey);
+          }
+          try { sessionStorage.removeItem('vortex_temp_guest_v1'); } catch (_) {}
         } catch (_) {}
+        if (guestUid && guestUid.startsWith('guest_') && isCloudAuthenticated() && typeof fetch === 'function') {
+          fetch('/api/rave/social/claim-guest', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+            body: JSON.stringify({ guestUid, guestToken }),
+          }).then(() => syncSocialState(true).catch(() => {})).catch(() => {});
+        }
       }
       _activeAccountScope = nextScope;
       _lastCloudSyncAt = 0;
@@ -380,6 +557,12 @@ export function getCloudUid() {
   return String(raw || '').trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, '').slice(0, 64);
 }
 
+function parseSeasonNum(val, fallback = 1) {
+  if (val === undefined || val === null || val === '' || typeof val === 'boolean') return fallback;
+  const n = Number(val);
+  return (Number.isFinite(n) && n >= 0) ? Math.floor(n) : fallback;
+}
+
 const _normEpMap = (epObj) => {
   if (!epObj || typeof epObj !== 'object') return {};
   const out = {};
@@ -391,6 +574,28 @@ const _normEpMap = (epObj) => {
     out[ek] = { currentTime: sec, position: sec, pos: sec, duration: dur, dur, percent: pct, pct, updatedAt: _normTs(ev.updatedAt) };
   }
   return out;
+};
+
+const _mergeEpMaps = (baseEpObj, incomingEpObj, baseItemTs = 0, incomingItemTs = 0) => {
+  const pEp = _normEpMap(baseEpObj);
+  const gEp = _normEpMap(incomingEpObj);
+  const mergedEp = { ...pEp };
+  let epChanged = false;
+  for (const [epKey, gVal] of Object.entries(gEp)) {
+    const pVal = pEp[epKey];
+    if (!pVal) {
+      mergedEp[epKey] = gVal;
+      epChanged = true;
+    } else {
+      const gEpTs = _normTs(gVal.updatedAt);
+      const pEpTs = _normTs(pVal.updatedAt);
+      if (gEpTs > pEpTs || (gEpTs === pEpTs && incomingItemTs > baseItemTs)) {
+        mergedEp[epKey] = gVal;
+        epChanged = true;
+      }
+    }
+  }
+  return { mergedEp, epChanged };
 };
 
 export async function syncCloudUserMedia(force = false) {
@@ -476,14 +681,13 @@ export async function syncCloudUserMedia(force = false) {
         if (!k) continue;
         const cTs = _normTs(c.updatedAt);
         const prev = byKey.get(k);
-        if (!prev || cTs >= _normTs(prev.updatedAt)) {
+        const pTs = _normTs(prev?.updatedAt);
+        if (!prev || cTs >= pTs) {
           const syncedPos = Math.max(0, Math.floor(Number(c.currentTime ?? c.position ?? prev?.currentTime ?? 0)));
-          const mergedEpProg = {
-            ..._normEpMap(prev?.epProgress),
-            ..._normEpMap(c.epProgress),
-          };
+          const { mergedEp: mergedEpProg } = _mergeEpMaps(prev?.epProgress, c.epProgress, pTs, cTs);
+          const localHasNewerEp = Boolean(prev && !prev.cloudSynced && _mergeEpMaps(c.epProgress, prev?.epProgress, cTs, pTs).epChanged);
           const syncedPct = Number(c.percent ?? prev?.percent ?? 0);
-          byKey.set(k, {
+          const nextEntry = {
             ...(prev || {}),
             historyId: k,
             key: k,
@@ -503,7 +707,7 @@ export async function syncCloudUserMedia(force = false) {
             tmdbId: c.tmdbId || prev?.tmdbId || '',
             imdbId: c.imdbId || prev?.imdbId || '',
             mediaType: mtype,
-            season: Number(c.season || prev?.season || 1),
+            season: parseSeasonNum(c.season, parseSeasonNum(prev?.season, 1)),
             episode: Number(c.episode || prev?.episode || 1),
             url: c.url || c.sourceUrl || prev?.url || '',
             officialUrl: c.sourceUrl || prev?.officialUrl || '',
@@ -516,7 +720,17 @@ export async function syncCloudUserMedia(force = false) {
             year: c.year || prev?.year || '',
             cloudSynced: true,
             updatedAt: cTs || now,
-          });
+          };
+          if (localHasNewerEp) {
+            toPush.push(nextEntry);
+          }
+          byKey.set(k, nextEntry);
+          historyChanged = true;
+        } else if (prev && !prev.cloudSynced) {
+          const { mergedEp: mergedEpProg } = _mergeEpMaps(c.epProgress, prev.epProgress, cTs, pTs);
+          const nextEntry = { ...prev, key: k, historyId: k, epProgress: mergedEpProg, cloudSynced: true };
+          toPush.push(nextEntry);
+          byKey.set(k, nextEntry);
           historyChanged = true;
         }
       }
@@ -540,7 +754,7 @@ export async function syncCloudUserMedia(force = false) {
           poster: item.poster || item.thumbnail || '',
           backdrop: item.backdrop || '',
           year: String(item.year || ''),
-          season: Number(item.season || 1),
+          season: parseSeasonNum(item.season, 1),
           episode: Number(item.episode || 1),
           position: Math.max(0, Math.floor(Number(item.currentTime ?? item.position ?? 0))),
           currentTime: Math.max(0, Math.floor(Number(item.currentTime ?? item.position ?? 0))),
@@ -827,10 +1041,12 @@ export function findSavedProgress(mediaOrItem, season = null, episode = null) {
   if (!hit) return null;
   const effSeason = season ?? mediaOrItem.season ?? null;
   const effEpisode = episode ?? mediaOrItem.episode ?? null;
-  if (mtype === 'tv' && effSeason != null && effEpisode != null && Number(effSeason) > 0 && Number(effEpisode) > 0) {
-    const sNum = Math.max(1, Number(effSeason) || 1);
+  const parsedEffS = (effSeason != null && effSeason !== '' && typeof effSeason !== 'boolean') ? Number(effSeason) : NaN;
+  if (mtype === 'tv' && Number.isFinite(parsedEffS) && parsedEffS >= 0 && effEpisode != null && Number(effEpisode) > 0) {
+    const sNum = Math.floor(parsedEffS);
     const eNum = Math.max(1, Number(effEpisode) || 1);
-    if (Number(hit.season || 1) === sNum && Number(hit.episode || 1) === eNum) {
+    const hitS = (hit.season !== undefined && hit.season !== null && hit.season !== '' && typeof hit.season !== 'boolean' && Number.isFinite(Number(hit.season))) ? Math.floor(Number(hit.season)) : 1;
+    if (hitS === sNum && Number(hit.episode || 1) === eNum) {
       if (hit.completed || Number(hit.percent || 0) >= 95) return null;
       return hit;
     }
@@ -863,9 +1079,11 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
   const id = _boundProgressKey(media.tmdbId ? `${mtype}:${media.tmdbId}` : String(media.key || media.videoId || media.url || media.title || ''));
   const existingList = getWatchHistory();
   const prev = existingList.find((item) => String(item.historyId || item.key || '') === id);
-  const sNum = Math.max(1, Number(media.season || 1));
+  const parsedMediaS = (media.season !== undefined && media.season !== null && media.season !== '' && typeof media.season !== 'boolean') ? Number(media.season) : NaN;
+  const sNum = (Number.isFinite(parsedMediaS) && parsedMediaS >= 0) ? Math.floor(parsedMediaS) : 1;
   const eNum = Math.max(1, Number(media.episode || 1));
-  const sameEp = Boolean(prev && (!isSeries || (Number(prev.season || 1) === sNum && Number(prev.episode || 1) === eNum)));
+  const prevS = (prev?.season !== undefined && prev?.season !== null && prev?.season !== '' && typeof prev?.season !== 'boolean' && Number.isFinite(Number(prev.season))) ? Math.floor(Number(prev.season)) : 1;
+  const sameEp = Boolean(prev && (!isSeries || (prevS === sNum && Number(prev.episode || 1) === eNum)));
   const prevEpObj = (!sameEp && isSeries && prev?.epProgress) ? prev.epProgress[`${sNum}:${eNum}`] : null;
   const prevTime = sameEp
     ? Math.max(0, Math.floor(Number(prev.currentTime ?? prev.position ?? prev.pos ?? 0)))
@@ -1074,7 +1292,29 @@ function _applySocialPayload(data) {
   const requests = Array.isArray(data.requests) ? data.requests : (prev.requests || []);
   const outgoingRequests = Array.isArray(data.outgoingRequests) ? data.outgoingRequests : (prev.outgoingRequests || []);
   const blocked = Array.isArray(data.blocked) ? data.blocked : (prev.blocked || []);
-  const privacy = (data.privacy && typeof data.privacy === 'object') ? { ...(prev.privacy || {}), ...data.privacy } : (prev.privacy || { presenceVisibility: 'friends', hideWatching: false, allowInvites: 'friends' });
+  const privacy = (data.privacy && typeof data.privacy === 'object')
+    ? { presenceVisibility: 'friends', hideWatching: false, hideLocation: false, hideFriends: false, allowInvites: 'friends', ...(prev.privacy || {}), ...data.privacy }
+    : (prev.privacy || { presenceVisibility: 'friends', hideWatching: false, hideLocation: false, hideFriends: false, allowInvites: 'friends' });
+  if (state.self && data.privacy && typeof data.privacy === 'object') {
+    let selfChanged = false;
+    for (const k of ['hideWatching', 'hideLocation', 'hideFriends']) {
+      if (data.privacy[k] !== undefined && Boolean(state.self[k]) !== Boolean(data.privacy[k])) {
+        state.self[k] = Boolean(data.privacy[k]);
+        selfChanged = true;
+      }
+    }
+    if (selfChanged && !state.self.isGuest) {
+      try {
+        const stored = JSON.parse(localStorage.getItem('vortex_profile_v2') || 'null');
+        if (stored && typeof stored === 'object') {
+          if (data.privacy.hideWatching !== undefined) stored.hideWatching = Boolean(data.privacy.hideWatching);
+          if (data.privacy.hideLocation !== undefined) stored.hideLocation = Boolean(data.privacy.hideLocation);
+          if (data.privacy.hideFriends !== undefined) stored.hideFriends = Boolean(data.privacy.hideFriends);
+          localStorage.setItem('vortex_profile_v2', JSON.stringify(stored));
+        }
+      } catch (_) {}
+    }
+  }
   const onlineCount = Number.isFinite(Number(data.onlineCount)) ? Number(data.onlineCount) : friends.filter((f) => f?.online).length;
   const totalUnread = Number.isFinite(Number(data.totalUnread)) ? Number(data.totalUnread) : (prev.totalUnread || 0);
   try {
@@ -1273,7 +1513,7 @@ export async function pushPresenceHeartbeat(override = {}) {
   const s = state.self;
   const m = state.mesh;
   const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-  const hideWatchFlag = Boolean(s.hideWatching ?? state.social?.privacy?.hideWatching);
+  const hideWatchFlag = Boolean(override.hideWatching ?? state.social?.privacy?.hideWatching ?? s.hideWatching);
   const visMode = state.social?.privacy?.presenceVisibility || 'friends';
   const shareWatch = Boolean(m?.id && !hideWatchFlag && visMode !== 'nobody' && (m?.privacy || 'public') !== 'private' && !m?.hasPassword);
   const defState = override.state || (shareWatch ? 'watching' : (hidden ? 'idle' : 'online'));

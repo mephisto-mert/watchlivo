@@ -1831,9 +1831,9 @@ export async function handleEdgeStreamProxy(request, url, env, ctx = null) {
 }
 
 function assTimeToVtt(t) {
-  const m = String(t || "").trim().match(/^(\d+):(\d{2}):(\d{2})\.(\d{2})$/);
+  const m = String(t || "").trim().match(/^(\d+):(\d{2}):(\d{2})[.,](\d{1,3})$/);
   if (!m) return "";
-  return `${m[1].padStart(2, "0")}:${m[2]}:${m[3]}.${m[4]}0`;
+  return `${m[1].padStart(2, "0")}:${m[2]}:${m[3]}.${m[4].padEnd(3, "0").slice(0, 3)}`;
 }
 
 const SUB_LANG_ALIASES = {
@@ -2079,41 +2079,382 @@ export function formatStreamSubTracks(rawList, primarySource = "") {
   });
 }
 
-function normalizeSubtitleToVtt(raw) {
-  let txt = String(raw || "").replace(/\uFEFF/g, "").trimStart();
-  if (!txt) return "WEBVTT\n\n";
-  if (/^(?:<!doctype|<html|<script|<svg|<\?xml)/i.test(txt)) return "";
-  if (txt.startsWith("WEBVTT")) {
-    // Reject stub/error documents with WEBVTT header or no timestamps
-    if (!/-->/.test(txt) && txt.length > 20) return "";
-    return txt;
+function decodeBasicHtmlEntities(s) {
+  return String(s || "").replace(/&(#x[0-9a-f]+|#\d+|nbsp|quot|apos|lt|gt|amp);/gi, (full, ent) => {
+    const low = ent.toLowerCase();
+    if (low === "nbsp") return " ";
+    if (low === "quot") return '"';
+    if (low === "apos") return "'";
+    if (low === "lt") return "<";
+    if (low === "gt") return ">";
+    if (low === "amp") return "&";
+    if (low.startsWith("#x")) {
+      const code = parseInt(low.slice(2), 16);
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : full;
+    }
+    if (low.startsWith("#")) {
+      const code = parseInt(low.slice(1), 10);
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : full;
+    }
+    return full;
+  });
+}
+
+const SUB_SPAM_UNAMBIGUOUS_RE = /(?:ai\.opensubtitles\.com|opensubtitles\.(?:org|com)|osdb\.link|\bopensubtitles\b|advertise your product or brand here|support us and become vip|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|subtitles downloaded from|synced and corrected by|yutukluklar\.xyz|turkcealtyazi\.org|(?:www\.)?altyazi\.org|\bsubscene(?:\.com)?\b|\byify(?:\s*subtitles)?\b|yifysubtitles|yts-subs|podnapisi\.net|addic7ed\.com|forumiptv(?:\.[a-z]{2,5})?|\b1xbet\b|\bmelbet\b|\bmostbet\b|\bbetwinner\b|\bmarsbahis\b|\bbets10\b|\bmobilbahis\b|\btipobet\b|\bsuperbetin\b|\bgrandpashabet\b|\bjojobet\b|\bholiganbet\b|\bmatadorbet\b|\bcasibom\b|\bpashagaming\b|dizipal\d*|dizibox|hdfilmcehennemi|fullhdfilmizlesene|dizilla|dizigom|sezonlukdizi|yabancidizi|jetfilmizle|filmmodu|para\s+yat[ıi]rma\s+bonusu|ho[şs]geldin\s+bonusu|deneme\s*bonusu|yat[ıi]r[ıi]m\s+bonusu|kay[ıi]p\s+bonusu|canl[ıi]\s+bahis|\bfreespin\b|g[üu]ncel\s+giri[şs]\s+adresi|(?:^|\s)(?:çeviri|senkron)\s*:|iyi seyirler dileriz)/i;
+
+const SUB_SPAM_CONTEXT_RE = /(?:(?:bahis|casino|poker|slot|betting|\bbet\b|iptv|telegram|t\.me\/|whatsapp)[\s\S]{0,120}?(?:https?:\/\/|www\.|@[a-z0-9_]{3,}|\.(?:com|net|org|xyz|bet|io|tv|cc|vip|club|pro|live)|bonus|freespin|g[üu]ncel\s*giri[şs]|kay[ıi]t\s*ol|hemen\s*kazan|[üu]ye\s*ol|%\d{2,3}|\btl\b)|(?:https?:\/\/|www\.|t\.me\/|bonus|freespin|g[üu]ncel\s*giri[şs]|%\d{2,3}|\d+\s*tl)[\s\S]{0,120}?(?:bahis|casino|poker|slot|betting|\bbet\b|iptv))/i;
+
+function isSpamSubtitleText(s) {
+  const txt = String(s || "");
+  if (!txt) return false;
+  if (SUB_SPAM_UNAMBIGUOUS_RE.test(txt) || SUB_SPAM_CONTEXT_RE.test(txt)) return true;
+  const trFold = txt.replace(/İ/g, "i").replace(/I/g, "ı").toLowerCase();
+  if (SUB_SPAM_UNAMBIGUOUS_RE.test(trFold) || SUB_SPAM_CONTEXT_RE.test(trFold)) return true;
+  const asciiFold = txt.replace(/İ/g, "i").replace(/I/g, "i").toLowerCase();
+  return SUB_SPAM_UNAMBIGUOUS_RE.test(asciiFold) || SUB_SPAM_CONTEXT_RE.test(asciiFold);
+}
+
+function cleanCuePayloadLines(rawLines) {
+  const joined = (Array.isArray(rawLines) ? rawLines : [String(rawLines || "")])
+    .join("\n")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n");
+  const cleanedLines = [];
+  for (const rawLn of joined.split("\n")) {
+    let ln = rawLn.replace(/\{\\[^}]*\}/g, "");
+    ln = decodeBasicHtmlEntities(ln);
+    ln = ln.replace(/<\/?(?:[a-zA-Z!][^>\n]*|\d{1,2}:\d{2}[^>\n]*)>/g, "");
+    ln = ln.replace(/[ \t]{2,}/g, " ").trim();
+    if (!ln || isSpamSubtitleText(ln)) continue;
+    cleanedLines.push(ln);
   }
+  if (!cleanedLines.length || isSpamSubtitleText(cleanedLines.join(" "))) return "";
+  return cleanedLines.join("\n");
+}
+
+function normalizeVttTimestampToken(tok) {
+  const m = String(tok || "").trim().match(/^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:[.,](\d{1,3}))?$/);
+  if (!m) return "";
+  const hh = (m[1] !== undefined ? m[1] : "00").padStart(2, "0");
+  const mm = m[2].padStart(2, "0");
+  const ss = m[3];
+  const ms = (m[4] || "0").padEnd(3, "0").slice(0, 3);
+  return `${hh}:${mm}:${ss}.${ms}`;
+}
+
+const VTT_TS_LINE_RE = /^((?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?)\s*-->\s*((?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?)(.*)$/;
+
+function normalizeVttTimestampLine(line) {
+  const m = String(line || "").trim().match(VTT_TS_LINE_RE);
+  if (!m) return "";
+  const start = normalizeVttTimestampToken(m[1]);
+  const end = normalizeVttTimestampToken(m[2]);
+  if (!start || !end) return "";
+  const settings = String(m[3] || "").replace(/[<>"]/g, "").trim();
+  return settings ? `${start} --> ${end} ${settings}` : `${start} --> ${end}`;
+}
+
+function secToVttTime(secNum) {
+  const totalMs = Math.max(0, Math.round((Number(secNum) || 0) * 1000));
+  const ms = totalMs % 1000;
+  const totalSec = Math.floor(totalMs / 1000);
+  const ss = totalSec % 60;
+  const totalMin = Math.floor(totalSec / 60);
+  const mm = totalMin % 60;
+  const hh = Math.floor(totalMin / 60);
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
+}
+
+function ttmlTimeToVtt(rawTime) {
+  const s = String(rawTime || "").trim();
+  if (!s) return "";
+  const hms = s.match(/^(\d{1,2}):(\d{2}):(\d{2})(?:[.,:](\d{1,3}))?$/);
+  if (hms) {
+    return `${hms[1].padStart(2, "0")}:${hms[2]}:${hms[3]}.${(hms[4] || "0").padEnd(3, "0").slice(0, 3)}`;
+  }
+  const msM = s.match(/^([\d.]+)ms$/i);
+  if (msM) return secToVttTime(Number(msM[1]) / 1000);
+  const sM = s.match(/^([\d.]+)s?$/i);
+  if (sM) return secToVttTime(Number(sM[1]));
+  return "";
+}
+
+export function normalizeSubtitleToVtt(raw) {
+  let txt = String(raw || "").replace(/\uFEFF/g, "").replace(/\x00/g, "").replace(/\r\n?/g, "\n").trimStart();
+  if (!txt) return "WEBVTT\n\n";
+
+  if (/<p\b(?=[^>]*\bbegin=["'][^"']+["'])(?=[^>]*\bend=["'][^"']+["'])[^>]*>/i.test(txt)) {
+    const cues = [];
+    const pRe = /<p\b([^>]*)>([\s\S]*?)<\/p>/gi;
+    let m;
+    while ((m = pRe.exec(txt)) !== null) {
+      const attrs = m[1] || "";
+      const bMatch = attrs.match(/\bbegin=["']([^"']+)["']/i);
+      const eMatch = attrs.match(/\bend=["']([^"']+)["']/i);
+      if (!bMatch || !eMatch) continue;
+      const start = ttmlTimeToVtt(bMatch[1]);
+      const end = ttmlTimeToVtt(eMatch[1]);
+      if (!start || !end) continue;
+      const body = cleanCuePayloadLines([m[2] || ""]);
+      if (body) cues.push(`${start} --> ${end}\n${body}`);
+    }
+    return cues.length ? ("WEBVTT\n\n" + cues.join("\n\n") + "\n") : "";
+  }
+
+  if (/<text\b[^>]*\bstart=["'][\d.]+["']/i.test(txt)) {
+    const cues = [];
+    const tRe = /<text\b([^>]*)>([\s\S]*?)<\/text>/gi;
+    let m;
+    while ((m = tRe.exec(txt)) !== null) {
+      const attrs = m[1] || "";
+      const stMatch = attrs.match(/\bstart=["']([\d.]+)["']/i);
+      if (!stMatch) continue;
+      const durMatch = attrs.match(/\bdur=["']([\d.]+)["']/i);
+      const startSec = Number(stMatch[1]);
+      const durSec = durMatch ? Math.max(0.2, Number(durMatch[1]) || 0) : 3.0;
+      if (!Number.isFinite(startSec)) continue;
+      const body = cleanCuePayloadLines([m[2] || ""]);
+      if (body) cues.push(`${secToVttTime(startSec)} --> ${secToVttTime(startSec + durSec)}\n${body}`);
+    }
+    return cues.length ? ("WEBVTT\n\n" + cues.join("\n\n") + "\n") : "";
+  }
+
+  if (/^(?:<!doctype|<html|<script|<svg|<\?xml)/i.test(txt)) return "";
+
   if (/^\[Script Info\]/im.test(txt) || /^Dialogue:/im.test(txt)) {
     const cues = [];
-    for (const line of txt.split(/\r?\n/)) {
+    const skipStyleRe = /(?:^|[\s_-])(?:sign|signs|drawing|rune|fx|karaoke|shape|logo)(?:$|[\s_-]|\d)/i;
+    for (const line of txt.split("\n")) {
       if (!line.startsWith("Dialogue:")) continue;
       const parts = line.slice(9).split(",");
       if (parts.length < 10) continue;
+      const styleName = String(parts[3] || "").trim();
+      if (styleName && skipStyleRe.test(styleName)) continue;
       const start = assTimeToVtt(parts[1]);
       const end = assTimeToVtt(parts[2]);
+      if (!start || !end) continue;
       const rawBody = parts.slice(9).join(",");
-      if (/\{\\[^}]*\\p[1-9]\b/i.test(rawBody)) continue;
-      const body = rawBody.replace(/\{\\[^}]*\}/g, "").replace(/\\N/gi, "\n").replace(/\\n/gi, "\n").replace(/\\h/gi, " ").trim();
-      if (start && end && body) cues.push(`${start} --> ${end}\n${body}`);
+      if (/\{[^}]*\\p[1-9]\d*\b/i.test(rawBody)) continue;
+      const bodyText = rawBody.replace(/\\N/gi, "\n").replace(/\\n/gi, "\n").replace(/\\h/gi, " ");
+      const body = cleanCuePayloadLines([bodyText]);
+      if (body) cues.push(`${start} --> ${end}\n${body}`);
     }
-    return cues.length ? ("WEBVTT\n\n" + cues.join("\n\n")) : "";
+    return cues.length ? ("WEBVTT\n\n" + cues.join("\n\n") + "\n") : "";
   }
-  const converted = txt.replace(/(\d{1,2}):(\d{2}):(\d{2}),(\d{1,3})/g, (_, h, m, s, ms) => {
-    return `${h.padStart(2, "0")}:${m}:${s}.${ms.padEnd(3, "0")}`;
-  });
-  // Reject non-subtitle error strings like "Invalid or unsafe link" or JSON error bodies
-  if (!/(?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{1,3}\s*-->\s*(?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{1,3}/.test(converted)) {
+
+  const isWebVtt = txt.startsWith("WEBVTT");
+  if (isWebVtt && !/-->/.test(txt)) {
+    return txt.length <= 20 ? "WEBVTT\n\n" : "";
+  }
+  if (!/(?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?\s*-->\s*(?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?/.test(txt)) {
     return "";
   }
-  return "WEBVTT\n\n" + converted;
+
+  const lines = txt.split("\n");
+  const headerLines = ["WEBVTT"];
+  let seenFirstCue = false;
+  let inSkipBlock = false;
+  let curTs = "";
+  let curPayload = [];
+  const cues = [];
+
+  const flushCue = () => {
+    if (!curTs) return;
+    const body = cleanCuePayloadLines(curPayload);
+    if (body) cues.push(`${curTs}\n${body}`);
+    curTs = "";
+    curPayload = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (VTT_TS_LINE_RE.test(trimmed)) {
+      if (curTs && curPayload.length > 0 && /^\d+$/.test(curPayload[curPayload.length - 1].trim())) {
+        curPayload.pop();
+      }
+      flushCue();
+      seenFirstCue = true;
+      inSkipBlock = false;
+      curTs = normalizeVttTimestampLine(trimmed);
+      curPayload = [];
+      continue;
+    }
+    if (!seenFirstCue) {
+      if (/^X-TIMESTAMP-MAP\s*=/i.test(trimmed)) {
+        headerLines.push(trimmed);
+      }
+      continue;
+    }
+    if (!trimmed) {
+      flushCue();
+      inSkipBlock = false;
+      continue;
+    }
+    if (!curTs) {
+      if (/^(?:NOTE|STYLE|REGION)(?:\s|$)/i.test(trimmed)) {
+        inSkipBlock = true;
+      } else if (inSkipBlock) {
+        continue;
+      }
+      continue;
+    }
+    curPayload.push(line);
+  }
+  flushCue();
+  return cues.length ? (headerLines.join("\n") + "\n\n" + cues.join("\n\n") + "\n") : "";
 }
 
-export async function handleEdgeSubtitle(url, env) {
+function countVttCues(vtt) {
+  const m = String(vtt || "").match(/-->/g);
+  return m ? m.length : 0;
+}
+
+async function fetchAndNormalizeSubtitle(subUrl, ref, timeoutMs = 10000) {
+  if (!isPublicHttpUrl(subUrl)) throw new Error("Blocked subtitle URL");
+  const subUa = /opensubtitles\.org/i.test(subUrl)
+    ? "TemporaryUserAgent"
+    : (/youtube\.com\/api\/timedtext/i.test(subUrl) ? "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X)" : UA_CHROME);
+  const hdrs = { "User-Agent": subUa, Accept: "text/vtt,text/plain,*/*" };
+  if (ref) hdrs.Referer = ref;
+  let { resp: r } = await fetchPublicWithRedirects(subUrl, hdrs, 4, timeoutMs);
+  if (!r.ok && ref) {
+    r.body?.cancel?.();
+    ({ resp: r } = await fetchPublicWithRedirects(subUrl, { "User-Agent": subUa, Accept: "*/*" }, 4, Math.min(timeoutMs, 8000)));
+  }
+  if (!r.ok) {
+    r.body?.cancel?.();
+    return { ok: false, status: r.status, vtt: "", cues: 0 };
+  }
+  let buf = await r.arrayBuffer();
+  const u8Head = new Uint8Array(buf);
+  if (u8Head.length >= 2 && u8Head[0] === 0x1f && u8Head[1] === 0x8b && typeof DecompressionStream !== "undefined") {
+    try {
+      buf = await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+    } catch {}
+  }
+  const raw = decodeSubtitleBytes(buf);
+  const vtt = normalizeSubtitleToVtt(raw);
+  const cues = countVttCues(vtt);
+  return { ok: Boolean(vtt && cues > 0), status: vtt && cues > 0 ? 200 : 502, vtt, cues };
+}
+
+async function translateVttCues(vtt, targetLang) {
+  const tlCode = String(targetLang || "").trim().toLowerCase().replace(/[^a-z-]/g, "").slice(0, 5);
+  if (!tlCode) return { vtt, translatedCount: 0, totalCues: countVttCues(vtt) };
+  const rawBlocks = String(vtt || "").split(/\n{2,}/);
+  const blocks = [];
+  const cueMeta = [];
+
+  for (let bIdx = 0; bIdx < rawBlocks.length; bIdx++) {
+    const blk = rawBlocks[bIdx];
+    const lines = blk.split("\n");
+    const tsIdx = lines.findIndex((l) => l.includes("-->"));
+    if (tsIdx >= 0 && tsIdx + 1 < lines.length) {
+      const hdrLines = lines.slice(0, tsIdx + 1);
+      const origText = lines.slice(tsIdx + 1).map((l) => l.replace(/<\/?(?:[a-zA-Z!][^>\n]*|\d{1,2}:\d{2}[^>\n]*)>/g, "").trim()).filter(Boolean).join(" ");
+      blocks.push({ isCue: true, hdrLines, origText, translated: "" });
+      if (origText) {
+        cueMeta.push({ blockIdx: bIdx, queryText: origText.replace(/\|\|\|/g, "|") });
+      }
+    } else {
+      blocks.push({ isCue: false, raw: blk });
+    }
+  }
+
+  if (!cueMeta.length) return { vtt, translatedCount: 0, totalCues: 0 };
+
+  const batches = [];
+  let curTexts = [];
+  let curIndices = [];
+  let curLen = 0;
+  let truncated = false;
+  for (const cm of cueMeta) {
+    if (curTexts.length > 0 && (curLen + cm.queryText.length > 1700 || curTexts.length >= 30)) {
+      batches.push({ texts: curTexts, indices: curIndices });
+      if (batches.length >= 40) {
+        truncated = true;
+        break;
+      }
+      curTexts = [];
+      curIndices = [];
+      curLen = 0;
+    }
+    if (batches.length >= 40) {
+      truncated = true;
+      break;
+    }
+    curTexts.push(cm.queryText);
+    curIndices.push(cm.blockIdx);
+    curLen += cm.queryText.length + 7;
+  }
+  if (curTexts.length > 0 && batches.length < 40) {
+    batches.push({ texts: curTexts, indices: curIndices });
+  } else if (curTexts.length > 0 && batches.length >= 40) {
+    truncated = true;
+  }
+
+  let translatedCount = 0;
+  let failedBatches = 0;
+  const runBatch = async (batch) => {
+    try {
+      const q = batch.texts.join("\n ||| \n");
+      const gtxUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(tlCode)}&dt=t&q=${encodeURIComponent(q)}`;
+      const resp = await fetch(gtxUrl, {
+        headers: { "User-Agent": UA_CHROME, Accept: "application/json,*/*" },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (!resp.ok) {
+        resp.body?.cancel?.();
+        failedBatches += 1;
+        return;
+      }
+      const data = await resp.json();
+      const segs = Array.isArray(data?.[0]) ? data[0] : null;
+      if (!segs) {
+        failedBatches += 1;
+        return;
+      }
+      const joined = segs.map((s) => (Array.isArray(s) && typeof s[0] === "string" ? s[0] : "")).join("");
+      const parts = joined.split(/\s*\|\|\|\s*/);
+      if (parts.length !== batch.indices.length) {
+        failedBatches += 1;
+        return;
+      }
+      for (let i = 0; i < batch.indices.length; i++) {
+        const bIdx = batch.indices[i];
+        const trTxt = String(parts[i] || "").trim();
+        if (trTxt) {
+          blocks[bIdx].translated = trTxt;
+          translatedCount += 1;
+        }
+      }
+    } catch {
+      failedBatches += 1;
+    }
+  };
+
+  for (let i = 0; i < batches.length; i += 4) {
+    const wave = batches.slice(i, i + 4);
+    await Promise.allSettled(wave.map((b) => runBatch(b)));
+  }
+
+  const outBlocks = blocks.map((b) => {
+    if (!b.isCue) return b.raw;
+    const textOut = b.translated || b.origText;
+    return textOut ? `${b.hdrLines.join("\n")}\n${textOut}` : b.hdrLines.join("\n");
+  });
+  return {
+    vtt: outBlocks.join("\n\n").trimEnd() + "\n",
+    translatedCount,
+    totalCues: cueMeta.length,
+    failedBatches,
+    hasPartialFailure: failedBatches > 0 || truncated,
+  };
+}
+
+export async function handleEdgeSubtitle(url, env, ctx = null) {
   const target = (url.searchParams.get("url") || "").trim();
   if (!target) {
     return new Response("WEBVTT\n\n", {
@@ -2127,6 +2468,14 @@ export async function handleEdgeSubtitle(url, env) {
       headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*", "X-Content-Type-Options": "nosniff" },
     });
   }
+  const fb = (url.searchParams.get("fb") || "").trim();
+  const lang = (url.searchParams.get("lang") || "").trim().toLowerCase();
+  const translateRaw = (url.searchParams.get("translate") || "").trim().toLowerCase();
+  const mtype = (url.searchParams.get("mtype") || "").trim().toLowerCase();
+  const reqTranslate = (translateRaw === "tr" || translateRaw === "tur")
+    ? "tr"
+    : ((translateRaw === "en" || translateRaw === "eng") ? "en" : "");
+
   let ref = "";
   const rawSubRef = (url.searchParams.get("ref") || "").trim();
   if (rawSubRef) {
@@ -2136,48 +2485,111 @@ export async function handleEdgeSubtitle(url, env) {
     } catch {}
   }
   if (!ref) ref = inferStreamReferer(target);
-  const subUa = /opensubtitles\.org/i.test(target) ? "TemporaryUserAgent" : UA_CHROME;
-  const hdrs = { "User-Agent": subUa, Accept: "text/vtt,text/plain,*/*" };
-  if (ref) hdrs.Referer = ref;
+
+  const edgeCache = getStreamEdgeCache();
+  const cacheOrigin = getOnZoneCacheOrigin(url);
+  const subCacheKey = edgeCache
+    ? new Request(
+        `${cacheOrigin}/__wl_edge_cache__/v239/sub?u=${encodeURIComponent(target)}&fb=${encodeURIComponent(fb)}&tr=${encodeURIComponent(reqTranslate)}&l=${encodeURIComponent(lang)}&mt=${encodeURIComponent(mtype)}&r=${encodeURIComponent(ref)}`,
+        { method: "GET" }
+      )
+    : null;
+  if (subCacheKey) {
+    try {
+      const cached = await edgeCache.match(subCacheKey);
+      if (cached) return cached;
+    } catch {}
+  }
+
+  let primary = null;
   try {
-    let { resp: r } = await fetchPublicWithRedirects(target, hdrs, 4, 10000);
-    if (!r.ok && ref) {
-      r.body?.cancel?.();
-      ({ resp: r } = await fetchPublicWithRedirects(target, { "User-Agent": subUa, Accept: "*/*" }, 4, 8000));
-    }
-    if (!r.ok) {
-      r.body?.cancel?.();
-      return new Response("Upstream subtitle error", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
-    }
-    let buf = await r.arrayBuffer();
-    const u8Head = new Uint8Array(buf);
-    if (u8Head.length >= 2 && u8Head[0] === 0x1f && u8Head[1] === 0x8b && typeof DecompressionStream !== "undefined") {
-      try {
-        buf = await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
-      } catch {}
-    }
-    const raw = decodeSubtitleBytes(buf);
-    const vtt = normalizeSubtitleToVtt(raw);
-    if (!vtt) {
-      return new Response("Invalid subtitle document", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
-    }
-    const detectedLang = detectSubtitleTextLang(vtt);
-    const respHdrs = {
-      "Content-Type": "text/vtt; charset=utf-8",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Expose-Headers": "X-Watchlivo-Sub-Lang",
-      "Cache-Control": "public, max-age=3600",
-      "X-Content-Type-Options": "nosniff",
-    };
-    if (detectedLang) respHdrs["X-Watchlivo-Sub-Lang"] = detectedLang;
-    return new Response(vtt, { status: 200, headers: respHdrs });
+    primary = await fetchAndNormalizeSubtitle(target, ref, 10000);
   } catch (err) {
     const blocked = String(err?.message || "").includes("Blocked");
-    return new Response(blocked ? "Blocked subtitle URL" : "Subtitle fetch timeout", {
-      status: blocked ? 403 : 502,
+    if (blocked) {
+      return new Response("Blocked subtitle URL", {
+        status: 403,
+        headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+    primary = { ok: false, status: 502, vtt: "", cues: 0 };
+  }
+
+  const minCues = mtype === "tv" ? 20 : 35;
+  let vtt = primary?.vtt || "";
+  let cueCount = primary?.cues || 0;
+  let usedFb = false;
+  let autoNeedTr = false;
+
+  if (cueCount < minCues && fb && fb !== target && isPublicHttpUrl(fb)) {
+    try {
+      const fbRes = await fetchAndNormalizeSubtitle(fb, inferStreamReferer(fb), 8000);
+      if (fbRes?.vtt && fbRes.cues > cueCount) {
+        vtt = fbRes.vtt;
+        cueCount = fbRes.cues;
+        usedFb = true;
+        if (lang === "tr" && !reqTranslate && /(?:english|sublanguageid-eng)/i.test(fb)) {
+          autoNeedTr = true;
+        }
+      }
+    } catch {}
+  }
+
+  if (!vtt || cueCount < 1) {
+    return new Response(primary?.status && primary.status !== 200 ? "Upstream subtitle error" : "Invalid subtitle document", {
+      status: 502,
       headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" },
     });
   }
+
+  if (lang === "tr" && !reqTranslate && !autoNeedTr && cueCount >= 2) {
+    const det = detectSubtitleTextLang(vtt);
+    if (det === "en") {
+      autoNeedTr = true;
+    } else {
+      const sample = vtt.slice(0, 6000);
+      if (!/[ğşıöüçĞŞİÖÜÇ]/.test(sample)) {
+        const enHits = (sample.match(/\b(?:the|you|what|that|have|with|this|from|they|would|there)\b/gi) || []).length;
+        if (enHits >= 4) autoNeedTr = true;
+      }
+    }
+  }
+
+  const wantTranslateLang = reqTranslate || (autoNeedTr ? "tr" : "");
+  let translatedOk = false;
+  let translationFallback = false;
+  if (wantTranslateLang && detectSubtitleTextLang(vtt) !== wantTranslateLang) {
+    const trRes = await translateVttCues(vtt, wantTranslateLang);
+    if (trRes.translatedCount > 0) {
+      vtt = trRes.vtt;
+      translatedOk = true;
+    }
+    if (trRes.hasPartialFailure || trRes.translatedCount === 0) {
+      translationFallback = true;
+    }
+  }
+
+  const detectedLang = translatedOk ? wantTranslateLang : detectSubtitleTextLang(vtt);
+  const respHdrs = {
+    "Content-Type": "text/vtt; charset=utf-8",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Expose-Headers": "X-Watchlivo-Sub-Lang, X-Watchlivo-Sub-Translated, X-Watchlivo-Sub-Fallback",
+    "Cache-Control": translationFallback ? "no-store" : "public, max-age=3600",
+    "X-Content-Type-Options": "nosniff",
+  };
+  if (detectedLang) respHdrs["X-Watchlivo-Sub-Lang"] = detectedLang;
+  if (translatedOk) respHdrs["X-Watchlivo-Sub-Translated"] = "1";
+  if (usedFb) respHdrs["X-Watchlivo-Sub-Fallback"] = "1";
+
+  const resp = new Response(vtt, { status: 200, headers: respHdrs });
+  if (subCacheKey && !translationFallback) {
+    try {
+      const putP = edgeCache.put(subCacheKey, resp.clone()).catch(() => {});
+      if (typeof ctx?.waitUntil === "function") ctx.waitUntil(putP);
+      else await putP;
+    } catch {}
+  }
+  return resp;
 }
 
 const ALLOWED_POSTER_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/avif"]);

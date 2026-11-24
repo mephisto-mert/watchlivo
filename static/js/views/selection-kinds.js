@@ -1,24 +1,30 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261122_v238';
-import { api, qs, isEdgeUnavailable, humanApiError } from '../api.js?v=20261122_v238';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261122_v238';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261122_v238';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261122_v238';
-import { profileSetup } from '../profile.js?v=20261122_v238';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261122_v238';
+import { h, fill, icons, toast, popup, openThemeModal, proxyPosterUrl, healPosterError } from '../ui.js?v=20261124_v239';
+import { api, qs, isEdgeUnavailable, humanApiError } from '../api.js?v=20261124_v239';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261124_v239';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261124_v239';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261124_v239';
+import { profileSetup } from '../profile.js?v=20261124_v239';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261124_v239';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261122_v238';
+} from '../store.js?v=20261124_v239';
 
 const _resolveMemCache = new Map();
+
+function parseNonNegSeason(val, fallback = null) {
+  if (val === undefined || val === null || val === '' || typeof val === 'boolean') return fallback;
+  const n = Number(val);
+  return (Number.isFinite(n) && n >= 0) ? Math.floor(n) : fallback;
+}
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
   const acct = getAccount(provId);
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
-  const s = Math.max(1, Number(season) || 1);
+  const s = parseNonNegSeason(season, 1);
   const e = Math.max(1, Number(episode) || 1);
   const extractNumId = (v) => String(v || '').trim().match(/^(?:tmdb-(?:tv|movie)-)?(\d+)$/i)?.[1] || '';
   const rawTid = extractNumId(it.tmdbId) || extractNumId(it.id);
@@ -86,7 +92,8 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
         res.year = res.year || it.year || '';
         res.mediaType = res.mediaType || mediaType;
         if (mediaType === 'tv') {
-          res.season = res.season || s;
+          const parsedResS = (res.season !== undefined && res.season !== null && res.season !== '' && typeof res.season !== 'boolean') ? Number(res.season) : NaN;
+          res.season = (Number.isFinite(parsedResS) && parsedResS >= 0) ? Math.floor(parsedResS) : s;
           res.episode = res.episode || e;
         }
         res.catalogProvider = prov?.id || it.catalogProvider || it.provider || 'cinema';
@@ -193,7 +200,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
       ? `${prefs.googleChannelTitle || state.self.name || 'YouTube Hesabım'} (${prefs.googleEmail})`
       : signedIn
         ? `${state.self.name || 'Hesabım'} (@${state.self.handle || 'uye'}) — YouTube Hesabı Henüz Bağlı Değil`
-        : 'YouTube / Google ile Giriş Yap (Şifre Doğrulamalı)';
+        : 'YouTube / Google Hesabını Bağla';
     const subCount = prefs.subscriptions.length;
     const likeCount = prefs.likedVideos.length;
     fill(authHolder, 
@@ -220,13 +227,13 @@ export function renderSearchKind(p, body, presetQuery, pick) {
             h('div', { style: { fontSize: '.76rem', color: '#94a3b8' } },
               ytConnected
                 ? `${subCount} takip edilen kanal · ${likeCount} beğenilen video · İzleme ve arama geçmişine göre canlı öneriler`
-                : 'YouTube akışını kişiselleştirmek için Google e-posta adresin ve şifrenle giriş yaparak hesabını eşitleyebilirsin.'))),
+                : 'YouTube akışını kişiselleştirmek için Google hesabınla tek tıkla OAuth bağlantısı kurarak kanallarını ve beğenilerini eşitleyebilirsin.'))),
         h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
           h('button', {
             type: 'button',
             class: 'btn sm primary',
             onclick: () => openYtPersonalizeModal(() => { refreshAuthBar(); loadTab(activeTab, true); }),
-          }, ytConnected ? '🔗 Kanal & Google Eşitle' : '🔑 YouTube / Google Şifreli Giriş'),
+          }, ytConnected ? '🔗 Kanal & Google Eşitle' : '🔴 Google ile Bağlan & Eşitle'),
           !signedIn ? h('button', {
             type: 'button',
             class: 'btn sm ghost',
@@ -684,10 +691,12 @@ function itemMatchesCat(it, catId) {
   if (catId === 'series') return isTv;
   if (catId === 'movies') return !isTv;
   const cats = Array.isArray(it.categories) ? it.categories : [];
+  const gids = Array.isArray(it.genreIds) ? it.genreIds.map(Number) : [];
   if (catId === 'anime') {
     return (
       cats.includes('anime') ||
-      it.origLang === 'ja' ||
+      String(it.id || '').startsWith('ac-') ||
+      (it.origLang === 'ja' && gids.includes(16)) ||
       String(it.sourceBadge || '').includes('Animetrix') ||
       /Naruto|One Piece|Bleach|Attack on Titan|Shingeki|Jujutsu|Kimetsu|İblis Keser|Solo Leveling|Death Note|Dragon Ball|Fullmetal|Hunter|Tokyo Ghoul|Demon Slayer|Doraemon|One Punch|Haikyuu|Chainsaw|Spy x Family|Boku no Hero|Fairy Tail|Gintama|Black Clover|Steins|Boruto|Frieren|Vinland|Code Geass|Evangelion|Ghibli|Spirited Away|Ruhların Kaçışı|Yürüyen Şato|Prenses Mononoke|Senin Adın|Your Name|Suzume/i.test(`${it.title || ''} ${it.originalTitle || ''}`)
     );
@@ -712,11 +721,18 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   delete p._initialCat;
   let currentItems = [];
   let allCatalogItems = [];
+  let queryAllItems = [];
   let currentQuery = '';
   let currentPage = 1;
   let hasMorePages = true;
   let loadingMore = false;
   let catalogTotals = { totalAvailable: 0, totalTv: 0, totalMovies: 0 };
+  let baseAllTotals = { totalAvailable: 0, totalTv: 0, totalMovies: 0 };
+  let queryAllTotals = { totalAvailable: 0, totalTv: 0, totalMovies: 0 };
+  let serverCategoryCounts = null;
+  let queryCategoryCounts = null;
+  let warmAllStarted = false;
+  let warmQueryAllKey = '';
   let ioObserver = null;
 
   const mergeUniqueItems = (existing, incoming, tagCat = '') => {
@@ -848,16 +864,18 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     },
       h('div', { class: 'poster-thumb-wrap' },
         h('img', {
-          src: it.poster || it.thumbnail || (it.title && !isYt ? `/api/rave/poster?${qs({ tid: it.tmdbId || it.id || '', t: it.title || '', ot: it.originalTitle || '', y: it.year || '', mt: isTv ? 'tv' : 'movie' })}` : '/static/watchlivo-poster.svg'),
+          src: isYt
+            ? (it.poster || it.thumbnail || '/static/watchlivo-poster.svg')
+            : proxyPosterUrl(it.poster || it.thumbnail || '', { ...it, mediaType: isTv ? 'tv' : 'movie' }),
           alt: it.title || '',
           loading: 'lazy',
           onerror: (e) => {
             const el = e.currentTarget || e.target;
-            if (!el.dataset.healed && !isYt && (it.title || it.tmdbId)) {
-              el.dataset.healed = '1';
-              el.src = `/api/rave/poster?${qs({ tid: it.tmdbId || it.id || '', t: it.title || '', ot: it.originalTitle || '', y: it.year || '', mt: isTv ? 'tv' : 'movie' })}`;
-            } else {
+            if (isYt) {
+              el.onerror = null;
               el.src = '/static/watchlivo-poster.svg';
+            } else {
+              healPosterError(el, { ...it, mediaType: isTv ? 'tv' : 'movie' });
             }
           },
         }),
@@ -874,22 +892,64 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     return card;
   };
 
+  const getCategoryBadgeText = (catId, favLen) => {
+    const badgePool = currentQuery
+      ? (queryAllItems.length ? queryAllItems : currentItems)
+      : (allCatalogItems.length ? allCatalogItems : currentItems);
+    const matchCount = (cid) => badgePool.filter((it) => itemMatchesCat(it, cid)).length;
+    const totals = currentQuery
+      ? (queryAllTotals.totalAvailable ? queryAllTotals : catalogTotals)
+      : (baseAllTotals.totalAvailable ? baseAllTotals : catalogTotals);
+    if (catId === 'favs') return String(favLen);
+    if (catId === 'all') return fmtCount(Math.max(totals.totalAvailable || 0, badgePool.length));
+    if (catId === 'series') return fmtCount(Math.max(totals.totalTv || 0, matchCount('series')));
+    if (catId === 'movies') return fmtCount(Math.max(totals.totalMovies || 0, matchCount('movies')));
+    const catCountsObj = currentQuery ? queryCategoryCounts : serverCategoryCounts;
+    if (catCountsObj && Number.isFinite(Number(catCountsObj[catId]))) {
+      const sv = Number(catCountsObj[catId]);
+      return sv > 0 ? fmtCount(sv) : '0';
+    }
+    const cnt = matchCount(catId);
+    return cnt > 0 ? `${cnt}+` : '0';
+  };
+
+  const updateCategoryBadges = () => {
+    const favLen = getFavorites().length;
+    catBar.querySelectorAll('.cat-tab-pill[data-cat]').forEach((btn) => {
+      const cntEl = btn.querySelector('.cat-cnt');
+      if (cntEl) cntEl.textContent = getCategoryBadgeText(btn.dataset.cat, favLen);
+    });
+  };
+
   const loadMorePage = async (btnEl) => {
-    if (loadingMore || !hasMorePages || currentQuery) return;
+    if (loadingMore || !hasMorePages) return;
+    const reqSeq = seq;
+    const reqCatSeq = catSeq;
+    const reqCat = activeCat;
+    const reqQ = currentQuery;
     loadingMore = true;
     if (btnEl) {
       btnEl.disabled = true;
-      btnEl.textContent = '⏳ Yeni Dizi & Filmler Yükleniyor...';
+      btnEl.classList.add('is-loading');
+      btnEl.textContent = '⏳ Yükleniyor...';
     }
     try {
       const nextPg = currentPage + 1;
-      const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, category: activeCat === 'favs' ? 'all' : activeCat, page: nextPg })}`, { timeout: 12000 }).catch(() => ({ items: [] }));
+      const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, category: reqCat === 'favs' ? 'all' : reqCat, q: reqQ, page: nextPg })}`, { timeout: 12000 }).catch(() => ({ items: [] }));
+      if (reqSeq !== seq || reqCatSeq !== catSeq || reqCat !== activeCat || reqQ !== currentQuery) return;
       const more = catData.items || [];
       if (more.length) {
         currentPage = nextPg;
         hasMorePages = catData.hasMore !== false;
         const prevLen = currentItems.length;
         currentItems = mergeUniqueItems(currentItems, more, activeCat);
+        if (activeCat === 'all' && !reqQ) {
+          allCatalogItems = mergeUniqueItems(allCatalogItems, more, 'all');
+          updateCategoryBadges();
+        } else if (activeCat === 'all' && reqQ) {
+          queryAllItems = mergeUniqueItems(queryAllItems, more, 'all');
+          updateCategoryBadges();
+        }
         const added = currentItems.slice(prevLen);
         if (!added.length && !hasMorePages) {
           hasMorePages = false;
@@ -898,6 +958,11 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
           const toAppend = activeCat === 'all' ? added : added.filter((it) => itemMatchesCat(it, activeCat));
           if (gridEl && toAppend.length) {
             gridEl.append(...toAppend.map(makePoster));
+            const headTitle = gridEl.closest('.cat-section')?.querySelector('.cat-sec-head h3');
+            if (headTitle && activeCat !== 'all') {
+              const catMeta = CATALOG_CATEGORIES.find((c) => c.id === activeCat) || CATALOG_CATEGORIES[0];
+              headTitle.textContent = `${catMeta.label} (${gridEl.children.length}+ Yapım Listeleniyor)`;
+            }
           } else if (!gridEl) {
             renderCategoryView();
           }
@@ -905,10 +970,15 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
       } else {
         hasMorePages = false;
       }
+      if (!hasMorePages && ioObserver) {
+        ioObserver.disconnect();
+        ioObserver = null;
+      }
     } finally {
       loadingMore = false;
       if (btnEl && btnEl.isConnected) {
         btnEl.disabled = false;
+        btnEl.classList.remove('is-loading');
         btnEl.textContent = hasMorePages ? `➕ Daha Fazla Dizi & Film Yükle (Sayfa ${currentPage + 1})` : '✓ Tüm Popüler Katalog Yüklendi';
       }
     }
@@ -922,7 +992,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
         if (ioObserver) { ioObserver.disconnect(); ioObserver = null; }
         return;
       }
-      if (entries.some((e) => e.isIntersecting) && !loadingMore && hasMorePages && !currentQuery) {
+      if (entries.some((e) => e.isIntersecting) && !loadingMore && hasMorePages) {
         loadMorePage(btnEl);
       }
     }, { rootMargin: '320px' });
@@ -931,21 +1001,40 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
 
   const selectCategory = async (catId) => {
     const myCatReq = ++catSeq;
+    const reqSeq = seq;
+    const reqQ = currentQuery;
     if (activeCat === 'all' && !currentQuery && currentItems.length) {
       allCatalogItems = [...currentItems];
+    } else if (activeCat === 'all' && currentQuery && currentItems.length && !queryAllItems.length) {
+      queryAllItems = [...currentItems];
     }
     activeCat = catId;
     currentPage = 1;
     hasMorePages = true;
     if (catId === 'all' && !currentQuery && allCatalogItems.length) {
       currentItems = [...allCatalogItems];
+    } else if (catId === 'all' && currentQuery && queryAllItems.length) {
+      currentItems = [...queryAllItems];
     }
     renderCategoryView();
     if (currentQuery && catId !== 'favs') {
       const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, q: currentQuery, category: catId, page: 1 })}`, { timeout: 10000 }).catch(() => null);
-      if (myCatReq !== catSeq || activeCat !== catId) return;
+      if (myCatReq !== catSeq || activeCat !== catId || reqSeq !== seq || reqQ !== currentQuery) return;
       if (catData && Array.isArray(catData.items)) {
-        currentItems = catData.items;
+        currentItems = mergeUniqueItems([], catData.items, catId);
+        if (catId === 'all') {
+          queryAllItems = [...currentItems];
+          if (catData.totalAvailable !== undefined) {
+            queryAllTotals = {
+              totalAvailable: Number(catData.totalAvailable || 0),
+              totalTv: Number(catData.totalTv || 0),
+              totalMovies: Number(catData.totalMovies || 0),
+            };
+          }
+          if (catData.categoryCounts && typeof catData.categoryCounts === 'object') {
+            queryCategoryCounts = catData.categoryCounts;
+          }
+        }
         hasMorePages = catData.hasMore !== false;
         renderCategoryView();
       }
@@ -953,17 +1042,16 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     }
     if (catId !== 'all' && catId !== 'favs' && !currentQuery) {
       const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, category: catId, page: 1 })}`, { timeout: 10000 }).catch(() => null);
-      if (myCatReq !== catSeq || activeCat !== catId) return;
-      if (catData?.items?.length) {
-        currentItems = [];
-        currentItems = mergeUniqueItems(currentItems, catData.items, catId);
+      if (myCatReq !== catSeq || activeCat !== catId || reqSeq !== seq || reqQ !== currentQuery) return;
+      if (Array.isArray(catData?.items)) {
+        currentItems = mergeUniqueItems([], catData.items, catId);
         hasMorePages = catData.hasMore !== false;
         renderCategoryView();
       }
     } else if (catId === 'all' && !currentQuery && !allCatalogItems.length) {
       const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, category: 'all', page: 1 })}`, { timeout: 10000 }).catch(() => null);
-      if (myCatReq !== catSeq || activeCat !== 'all') return;
-      if (catData?.items?.length) {
+      if (myCatReq !== catSeq || activeCat !== catId || reqSeq !== seq || reqQ !== currentQuery) return;
+      if (Array.isArray(catData?.items)) {
         currentItems = mergeUniqueItems([], catData.items, 'all');
         allCatalogItems = [...currentItems];
         hasMorePages = catData.hasMore !== false;
@@ -975,16 +1063,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   const renderCategoryView = () => {
     const favList = getFavorites();
     catBar.replaceChildren(...CATALOG_CATEGORIES.map((c) => {
-      let badgeTxt = '';
-      const matchCount = (catId) => currentItems.filter((it) => itemMatchesCat(it, catId)).length;
-      if (c.id === 'favs') badgeTxt = String(favList.length);
-      else if (c.id === 'all') badgeTxt = fmtCount(Math.max(catalogTotals.totalAvailable || 0, currentItems.length));
-      else if (c.id === 'series') badgeTxt = fmtCount(Math.max(catalogTotals.totalTv || 0, matchCount('series')));
-      else if (c.id === 'movies') badgeTxt = fmtCount(Math.max(catalogTotals.totalMovies || 0, matchCount('movies')));
-      else {
-        const cnt = matchCount(c.id);
-        badgeTxt = cnt > 0 ? `${cnt}+` : '0';
-      }
+      const badgeTxt = getCategoryBadgeText(c.id, favList.length);
       return h('button', {
         type: 'button',
         class: `cat-tab-pill ${activeCat === c.id ? 'active' : ''}`,
@@ -1013,7 +1092,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     }
 
     const makeLoadMoreFooter = () => {
-      if (currentQuery || !hasMorePages) return null;
+      if (!hasMorePages) return null;
       const moreBtn = h('button', {
         type: 'button',
         class: 'btn primary cat-load-more-btn',
@@ -1093,9 +1172,22 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
 
   const run = async (q) => {
     const mine = ++seq;
+    const reqCatSeq = catSeq;
+    const reqCat = activeCat;
     detailWrap.classList.add('hidden');
     mainWrap.classList.remove('hidden');
     const raw = (q || '').trim();
+    if (raw !== currentQuery) {
+      queryAllItems = [];
+      queryAllTotals = { totalAvailable: 0, totalTv: 0, totalMovies: 0 };
+      queryCategoryCounts = null;
+      warmQueryAllKey = '';
+      if (raw) {
+        catalogTotals = { totalAvailable: 0, totalTv: 0, totalMovies: 0 };
+      } else if (baseAllTotals.totalAvailable) {
+        catalogTotals = { ...baseAllTotals };
+      }
+    }
     currentQuery = raw;
     currentPage = 1;
     hasMorePages = true;
@@ -1111,17 +1203,87 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     contentArea.replaceChildren(spinner());
     const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, q: raw, page: 1, category: activeCat === 'favs' ? 'all' : activeCat })}`, { timeout: 14000 }).catch(() => ({ items: [] }));
     const liveVal = input.value.trim();
-    if (mine !== seq || (raw ? liveVal !== raw : liveVal.length >= 2)) return;
+    if (mine !== seq || reqCatSeq !== catSeq || reqCat !== activeCat || (raw ? liveVal !== raw : liveVal.length >= 2)) return;
     currentItems = catData.items || [];
-    if (activeCat === 'all' && !raw) {
-      allCatalogItems = [...currentItems];
-    }
-    if (catData.totalAvailable) {
-      catalogTotals = {
-        totalAvailable: catData.totalAvailable,
-        totalTv: catData.totalTv || 0,
-        totalMovies: catData.totalMovies || 0,
-      };
+    if (raw) {
+      if (catData.totalAvailable !== undefined) {
+        catalogTotals = {
+          totalAvailable: Number(catData.totalAvailable || 0),
+          totalTv: Number(catData.totalTv || 0),
+          totalMovies: Number(catData.totalMovies || 0),
+        };
+      }
+      if (activeCat === 'all') {
+        queryAllItems = mergeUniqueItems([], currentItems, 'all');
+        if (catData.totalAvailable !== undefined) {
+          queryAllTotals = { ...catalogTotals };
+        }
+        if (catData.categoryCounts && typeof catData.categoryCounts === 'object') {
+          queryCategoryCounts = catData.categoryCounts;
+        }
+      } else if (!queryAllItems.length && warmQueryAllKey !== raw) {
+        warmQueryAllKey = raw;
+        api(`/api/rave/catalog?${qs({ provider: p.id, q: raw, category: 'all', page: 1 })}`, { timeout: 12000 })
+          .then((allData) => {
+            if (mine !== seq || !body.isConnected || currentQuery !== raw || queryAllItems.length || !Array.isArray(allData?.items)) return;
+            queryAllItems = mergeUniqueItems([], allData.items, 'all');
+            if (allData.totalAvailable !== undefined) {
+              queryAllTotals = {
+                totalAvailable: Number(allData.totalAvailable || 0),
+                totalTv: Number(allData.totalTv || 0),
+                totalMovies: Number(allData.totalMovies || 0),
+              };
+            }
+            if (allData.categoryCounts && typeof allData.categoryCounts === 'object') {
+              queryCategoryCounts = allData.categoryCounts;
+            }
+            updateCategoryBadges();
+          })
+          .catch(() => { if (warmQueryAllKey === raw) warmQueryAllKey = ''; });
+      }
+    } else {
+      if (catData.categoryCounts && typeof catData.categoryCounts === 'object') {
+        serverCategoryCounts = catData.categoryCounts;
+      }
+      if (catData.totalAvailable !== undefined) {
+        catalogTotals = {
+          totalAvailable: Number(catData.totalAvailable || 0),
+          totalTv: Number(catData.totalTv || 0),
+          totalMovies: Number(catData.totalMovies || 0),
+        };
+      }
+      if (activeCat === 'all') {
+        allCatalogItems = mergeUniqueItems([], currentItems, 'all');
+        if (catData.totalAvailable !== undefined) {
+          baseAllTotals = { ...catalogTotals };
+        }
+      } else if (!allCatalogItems.length && !warmAllStarted) {
+        warmAllStarted = true;
+        api(`/api/rave/catalog?${qs({ provider: p.id, category: 'all', page: 1 })}`, { timeout: 12000 })
+          .then((allData) => {
+            if (mine !== seq || !body.isConnected || currentQuery || allCatalogItems.length) {
+              if (!allCatalogItems.length) warmAllStarted = false;
+              return;
+            }
+            if (!allData?.items?.length) {
+              warmAllStarted = false;
+              return;
+            }
+            allCatalogItems = mergeUniqueItems([], allData.items, 'all');
+            if (allData.totalAvailable) {
+              baseAllTotals = {
+                totalAvailable: allData.totalAvailable,
+                totalTv: allData.totalTv || 0,
+                totalMovies: allData.totalMovies || 0,
+              };
+            }
+            if (allData.categoryCounts && typeof allData.categoryCounts === 'object') {
+              serverCategoryCounts = allData.categoryCounts;
+            }
+            updateCategoryBadges();
+          })
+          .catch(() => { warmAllStarted = false; });
+      }
     }
     hasMorePages = catData.hasMore !== false;
     renderCategoryView();
@@ -1154,6 +1316,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
       run(input.value);
     }
   });
+  const isAdminUser = Boolean(state.self && !state.self.isGuest && (state.self.isAdmin === true || state.self.role === 'admin'));
   mainWrap.append(
     h('div', { class: 'sel-search' }, h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }), input,
       createVoiceSearchButton({ h, icons, inputEl: input, toast, onResult: (q) => { clearTimeout(debTimer); run(q); } }),
@@ -1162,12 +1325,12 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
         type: 'button',
         class: 'btn sm',
         id: 'btn-catalog-vizyon',
-        title: 'Vizyondaki Yeni Filmleri Gör veya Yeni Film/Dizi Ekle',
+        title: isAdminUser ? 'Vizyondaki Yeni Filmleri Gör veya Yeni Film/Dizi Ekle' : 'Vizyondaki Yeni Filmleri ve Yeni Bölümleri Gör',
         onclick: () => openVizyonModal(pick, (newItem) => {
           currentItems = [newItem, ...currentItems];
           renderCategoryView();
         }),
-      }, '🍿 Vizyon & Yeni Ekle'),
+      }, isAdminUser ? '🍿 Vizyon & Yeni Ekle' : '🍿 Vizyon & Yeni Bölümler'),
       clearBtn),
     catBar,
     contentArea);
@@ -1176,6 +1339,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
 }
 
 export function openVizyonModal(pick, onAdded) {
+  const isAdminUser = Boolean(state.self && !state.self.isGuest && (state.self.isAdmin === true || state.self.role === 'admin'));
   const wrap = h('div', { class: 'wl-vizyon-modal', style: { display: 'flex', flexDirection: 'column', gap: '14px', minHeight: '360px' } });
   const titleIn = h('input', { class: 'input', placeholder: 'Film veya Dizi Adı (örn: Dune: Part Three, Eşref Rüya...)', 'aria-label': 'Film veya Dizi Adı' });
   const typeSel = h('select', { class: 'input', style: { maxWidth: '140px' }, 'aria-label': 'Tür Seçimi' },
@@ -1196,9 +1360,10 @@ export function openVizyonModal(pick, onAdded) {
 
   const startItem = async (it, directEpisode = false) => {
     if (!pick) return;
-    if (it.mediaType === 'tv' && directEpisode && it.season && it.episode) {
-      toast(`🆕 "${it.title}" ${it.season}. Sezon ${it.episode}. Bölüm odada hazırlanıyor...`);
-      const resolved = await resolveCatalogItem(it, { id: it.provider || 'cinema', name: 'Sinema+ Yeni Bölüm' }, Number(it.season) || 1, Number(it.episode) || 1);
+    const itemSeason = parseNonNegSeason(it.season, null);
+    if (it.mediaType === 'tv' && directEpisode && itemSeason !== null && it.episode) {
+      toast(`🆕 "${it.title}" ${itemSeason}. Sezon ${it.episode}. Bölüm odada hazırlanıyor...`);
+      const resolved = await resolveCatalogItem(it, { id: it.provider || 'cinema', name: 'Sinema+ Yeni Bölüm' }, itemSeason, Number(it.episode) || 1);
       if (resolved) {
         closeRef?.close?.();
         await pick(resolved);
@@ -1250,7 +1415,8 @@ export function openVizyonModal(pick, onAdded) {
     }
     gridWrap.replaceChildren(...list.slice(0, 36).map((it) => {
       const isTv = it.mediaType === 'tv';
-      const epTag = (isEpMode && it.season && it.episode) ? `S${it.season}:B${it.episode}` : '';
+      const itSeason = parseNonNegSeason(it.season, null);
+      const epTag = (isEpMode && itSeason !== null && it.episode) ? `S${itSeason}:B${it.episode}` : '';
       const subLine = isEpMode && it.episodeTitle
         ? `${epTag} · ${it.episodeTitle}`
         : `${it.year || '2026'} · ${isTv ? 'Dizi' : 'Film'}`;
@@ -1263,9 +1429,12 @@ export function openVizyonModal(pick, onAdded) {
         onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startItem(it, isEpMode); } },
       },
         h('div', { class: 'poster-img-wrap' },
-          it.poster
-            ? h('img', { src: it.poster, alt: it.title, loading: 'lazy', onerror: (e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/static/watchlivo-poster.svg'; } })
-            : h('div', { class: 'poster-fallback' }, isTv ? '📺' : '🎬'),
+          h('img', {
+            src: proxyPosterUrl(it.poster || it.backdrop || '', { ...it, mediaType: isTv ? 'tv' : 'movie' }),
+            alt: it.title,
+            loading: 'lazy',
+            onerror: (e) => healPosterError(e.currentTarget || e.target, { ...it, mediaType: isTv ? 'tv' : 'movie' }),
+          }),
           h('span', { class: 'poster-badge' }, epTag ? `🆕 ${epTag}` : (it.customRelease ? '✨ Yeni Eklendi' : (it.sourceBadge || '🍿 Vizyonda'))),
           it.rating ? h('span', { class: 'poster-rating' }, `★ ${it.rating}`) : null,
         ),
@@ -1367,7 +1536,7 @@ export function openVizyonModal(pick, onAdded) {
   );
 
   const topActions = h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' } },
-    h('div', { style: { fontSize: '0.84rem', opacity: '0.85' } }, 'Sinema salonlarındaki yeni filmler ve yeni bölüm diziler otomatik taranır veya 1 tıkla eklenir.'),
+    h('div', { style: { fontSize: '0.84rem', opacity: '0.85' } }, isAdminUser ? 'Sinema salonlarındaki yeni filmler ve yeni bölüm diziler otomatik taranır veya 1 tıkla eklenir.' : 'Sinema salonlarındaki yeni filmler ve yeni bölüm diziler otomatik taranır.'),
     h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
       h('button', {
         type: 'button',
@@ -1375,12 +1544,12 @@ export function openVizyonModal(pick, onAdded) {
         id: 'btn-scan-vizyon-now',
         onclick: () => loadVizyon(true),
       }, '🔄 Vizyonu Şimdi Tara'),
-      h('button', {
+      isAdminUser ? h('button', {
         type: 'button',
         class: 'btn sm primary',
         id: 'btn-toggle-vizyon-form',
         onclick: () => addForm.classList.toggle('hidden'),
-      }, '➕ Yeni Film / Dizi Ekle'),
+      }, '➕ Yeni Film / Dizi Ekle') : null,
     ),
   );
 
@@ -1403,7 +1572,7 @@ export function openVizyonModal(pick, onAdded) {
     }, flabel)),
   );
 
-  wrap.append(topActions, filterTabs, addForm, gridWrap);
+  wrap.append(topActions, filterTabs, isAdminUser ? addForm : null, gridWrap);
   closeRef = popup({
     title: '🍿 Vizyondakiler & Yeni Eklenen Film / Diziler (2026)',
     content: wrap,
@@ -1461,7 +1630,6 @@ export function renderMusicKind(p, body, presetQuery, pick) {
   let currentQuery = presetQuery || '';
   let seq = 0;
 
-  const aiCfg = getAiApiConfig();
   const banner = h('div', { class: 'rave-account-bar free-portal-bar music-portal-bar', style: { '--prov-accent': p.accent || '#ff0033' } },
     h('div', { class: 'rab-status' },
       h('span', { class: 'rab-dot ok' }),
@@ -1469,9 +1637,7 @@ export function renderMusicKind(p, body, presetQuery, pick) {
         h('b', {}, `${p.name} · Klip, Şarkı Sözleri & Ortak DJ Partisi`),
         h('span', { class: 'dim' }, 'Güncel hitler, eski klasikler, son çalınanlar ve YouTube Music benzer şarkı radyosu hazır.'))),
     h('div', { class: 'rab-actions', style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
-      h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#6366f1', background: 'rgba(99, 102, 241,0.14)', border: '1px solid rgba(99, 102, 241,0.3)', padding: '4px 10px', borderRadius: '999px' } }, `● AI Radyo (${aiCfg.openaiModel})`),
-      h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#fb7185', background: 'rgba(244,63,94,0.14)', border: '1px solid rgba(244,63,94,0.3)', padding: '4px 10px', borderRadius: '999px' } }, `● ${aiCfg.sunoModel || 'suno-v4.5'}`),
-      h('button', { type: 'button', class: 'btn', style: { padding: '5px 11px', fontSize: '.76rem' }, onclick: () => openAiConfigModal() }, '🔑 API & Model Ayarları')));
+      h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#27dcc8', background: 'rgba(39,220,200,0.14)', border: '1px solid rgba(39,220,200,0.3)', padding: '4px 10px', borderRadius: '999px' } }, '🎵 Hi-Fi Klip & Plak Modu')));
 
   const input = h('input', { placeholder: p.placeholder || 'Şarkı, sanatçı, klip ara veya bağlantı yapıştır...', value: currentQuery, 'aria-label': `${p.name} ara` });
   const catBar = h('div', { class: 'cat-filter-bar', id: 'music-cat-bar' });
