@@ -1,13 +1,13 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261124_v239';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession, preloadFirebaseAuth, provisionGuestWithRecovery } from './profile.js?v=20261124_v239';
-import { renderHome, destroyHome } from './views/home.js?v=20261124_v239';
-import { openLegalModal, openContactModal, openStatsModal } from './views/site-footer.js?v=20261124_v239';
-import { api, humanApiError } from './api.js?v=20261124_v239';
-import { h, popup, toast, initPwaInstallPrompt } from './ui.js?v=20261124_v239';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261124_v240';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession, preloadFirebaseAuth, provisionGuestWithRecovery } from './profile.js?v=20261124_v240';
+import { renderHome, destroyHome } from './views/home.js?v=20261124_v240';
+import { openLegalModal, openContactModal, openStatsModal } from './views/site-footer.js?v=20261124_v240';
+import { api, humanApiError } from './api.js?v=20261124_v240';
+import { h, popup, toast, initPwaInstallPrompt } from './ui.js?v=20261124_v240';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261124_v239'; } catch (_) { return '20261124_v239'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261124_v240'; } catch (_) { return '20261124_v240'; }
 })();
 
 let _meshMod = null;
@@ -16,7 +16,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261124_v239')
+    _meshModPromise = import('./views/mesh.js?v=20261124_v240')
       .then((mod) => {
         _meshMod = mod;
         return mod;

@@ -964,7 +964,7 @@ test('v239 M1 platform/catalog/search/episodes/seasons/subtitles: version routes
   assert.ok(plistXml.includes('<string>online.watchlivo.app</string>'));
 
   const healthJson = await (await handleAutonomousEdge(new Request('https://watchlivo.online/api/health'), new URL('https://watchlivo.online/api/health'), '/api/health', env)).json();
-  assert.equal(healthJson.version, '20261124_v239');
+  assert.equal(healthJson.version, '20261124_v240');
 
   // 2. Mocked fetch for TMDB / YouTube / AnimeciX
   const seenDiscoverUrls = [];

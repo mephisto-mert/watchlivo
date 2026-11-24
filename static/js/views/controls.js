@@ -1,16 +1,16 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261124_v239';
-import { api, qs as buildQs } from '../api.js?v=20261124_v239';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261124_v239';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261124_v239';
-import { getProvider } from '../providers.js?v=20261124_v239';
-import { expectedPosition } from '../sync.js?v=20261124_v239';
-import { thumbFor } from './lobby.js?v=20261124_v239';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261124_v239';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261124_v239';
-import { getSubPrefs, setSubPrefs, normalizeClientSubLang } from '../players/subtitles.js?v=20261124_v239';
-import { avatar } from '../profile.js?v=20261124_v239';
-import { unlockSfxAudio } from './chat.js?v=20261124_v239';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261124_v240';
+import { api, qs as buildQs } from '../api.js?v=20261124_v240';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261124_v240';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261124_v240';
+import { getProvider } from '../providers.js?v=20261124_v240';
+import { expectedPosition } from '../sync.js?v=20261124_v240';
+import { thumbFor } from './lobby.js?v=20261124_v240';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261124_v240';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261124_v240';
+import { getSubPrefs, setSubPrefs, normalizeClientSubLang } from '../players/subtitles.js?v=20261124_v240';
+import { avatar } from '../profile.js?v=20261124_v240';
+import { unlockSfxAudio } from './chat.js?v=20261124_v240';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -2078,7 +2078,7 @@ export function buildControls(frame, ctx) {
             onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleFpsScale?.(sc); renderMenuView('subtitle'); },
           }, lbl))));
       const dualSubOn = Boolean(host.adapter?.subs?.dualSubEnabled);
-      const canDualSub = new Set(subtitleTracks.map((t) => String(t?.lang || '').toLowerCase()).filter(Boolean)).size >= 2;
+      const canDualSub = new Set(subTracks.map((t) => normalizeClientSubLang(t?.lang, t?.label)).filter(Boolean)).size >= 2;
       const dualSubBtn = canDualSub ? h('button', {
         class: `ctl-pref-pill ${dualSubOn ? 'on' : ''}`,
         style: { width: '100%', marginBottom: '6px' },
@@ -3046,7 +3046,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261124_v239',
+            v: '20261124_v240',
           });
           api(`/api/rave/seasons?${q.toString()}`, { timeout: 8000 })
             .then((inf) => {

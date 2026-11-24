@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast, proxyPosterUrl, healPosterError } from '../ui.js?v=20261124_v239';
-import { avatar, openDmModal } from '../profile.js?v=20261124_v239';
-import { getProvider } from '../providers.js?v=20261124_v239';
-import { api, qs } from '../api.js?v=20261124_v239';
+import { h, icons, popup, toast, proxyPosterUrl, healPosterError } from '../ui.js?v=20261124_v240';
+import { avatar, openDmModal } from '../profile.js?v=20261124_v240';
+import { getProvider } from '../providers.js?v=20261124_v240';
+import { api, qs } from '../api.js?v=20261124_v240';
 import {
   state, set, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261124_v239';
-import { expectedPosition } from '../sync.js?v=20261124_v239';
+} from '../store.js?v=20261124_v240';
+import { expectedPosition } from '../sync.js?v=20261124_v240';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },

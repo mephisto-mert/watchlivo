@@ -610,7 +610,7 @@ async function getBootstrap(env) {
     } catch {}
   }
   _curatedMap = new Map(DEFAULT_CURATED_LIVE_ROOMS.map((rm) => [rm.id, rm]));
-  return { version: "20261124_v239", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
+  return { version: "20261124_v240", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
 }
 
 function makeNonce() {
@@ -3005,7 +3005,7 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
 
   // 4. Health & Diagnostics
   if (safePath === "/health" || safePath === "/api/health" || safePath === "/api/rave/server-health") {
-    const resp = edgeJson({ ok: true, version: "20261124_v239", mode: "cf-autonomous-edge", sharedStore: true, vercel: false, activeRooms: boot.curatedRooms.length });
+    const resp = edgeJson({ ok: true, version: "20261124_v240", mode: "cf-autonomous-edge", sharedStore: true, vercel: false, activeRooms: boot.curatedRooms.length });
     return request.method === "HEAD" ? new Response(null, { status: 200, headers: resp.headers }) : resp;
   }
 

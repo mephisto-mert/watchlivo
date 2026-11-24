@@ -7815,7 +7815,16 @@ body:has(#popup-root:not(:empty)) .wl-cookie-banner,
   .top-nav-capsule .navbar-right {
     flex: 0 1 auto !important;
     min-width: 0 !important;
-    gap: 4px !important;
+    gap: 3px !important;
+  }
+  .top-nav-capsule .navbar-center:has(.logo) {
+    order: -1 !important;
+    flex: 0 0 auto !important;
+    margin-right: 4px !important;
+  }
+  .top-nav-capsule .navbar-center:has(.logo) .logo {
+    width: 24px !important;
+    height: 24px !important;
   }
   .top-nav-capsule #nav-download-btn,
   .top-nav-capsule #nav-btn-apk {
@@ -7823,15 +7832,15 @@ body:has(#popup-root:not(:empty)) .wl-cookie-banner,
   }
   .top-nav-capsule .nav-icon,
   .top-nav-capsule .user-profile-badge {
-    width: 36px !important;
-    height: 36px !important;
-    min-width: 36px !important;
-    min-height: 36px !important;
+    width: 33px !important;
+    height: 33px !important;
+    min-width: 33px !important;
+    min-height: 33px !important;
   }
   .top-nav-capsule #btn-create-room,
   .top-nav-capsule .btn-create-room {
-    height: 36px !important;
-    min-height: 36px !important;
+    height: 34px !important;
+    min-height: 34px !important;
     padding: 0 9px !important;
     font-size: 0.72rem !important;
     gap: 4px !important;

@@ -1108,7 +1108,7 @@ body.vortex-fs .video-frame .ctl-fs-reactions { display: inline-flex; }
   background: #ef4444; color: #fff; letter-spacing: .02em;
 }
 .discord-call-controls {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(56px, 1fr)); gap: 5px;
+  display: flex; flex-wrap: wrap; gap: 5px;
 }
 .discord-call-bar:not(.in-call) .discord-call-controls {
   display: none;
@@ -1144,10 +1144,11 @@ body.vortex-fs .video-frame .ctl-fs-reactions { display: inline-flex; }
 }
 .chat-q-close:hover { background: rgba(255, 59, 92, .28); color: #fff; }
 .discord-ctl-pill {
-  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
-  padding: 5px 4px; border-radius: 8px; font-size: .69em; font-weight: 800;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  flex: 1 1 auto; min-width: max-content;
+  padding: 5px 8px; border-radius: 8px; font-size: .69em; font-weight: 800;
   background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .12);
-  color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: #cbd5e1; white-space: nowrap;
   transition: background .15s ease, border-color .15s ease, color .15s ease;
 }
 .discord-ctl-pill:hover { background: rgba(255, 255, 255, .12); color: #fff; }
@@ -2651,8 +2652,8 @@ body.mesh-minimized #mesh-root .mini-player-bar {
 }
 
 .discord-call-bar.in-call .discord-call-controls {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(56px, 1fr)) !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
   gap: 5px !important;
   padding-top: 4px !important;
   border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
